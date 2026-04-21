@@ -303,6 +303,20 @@ This is the architectural payoff of wiring `zio-blocks-schema` in: a single `Sch
 
 Tests round-trip `Address`, nested `Person`, three-case `Shape` (`Circle | Rectangle | Triangle`), `Team` with `List[String]`, and assert exact wire size for the variant case (1-byte tag + two 8-byte doubles = 17 bytes for `Rectangle`).
 
+### Perf vs hand-rolled
+
+JMH benchmark on a realistic complex type (`Order` with `Customer`, `List[OrderLine]`, three-case `Payment` variant, plus several primitive fields). Encode + decode 10 K records each way:
+
+```
+Benchmark                              (n)  Mode  Cnt   Score    Error  Units
+ScodecDeriverBench.handRolledEncode  10000  avgt    5  20.962 ±  1.048  ms/op
+ScodecDeriverBench.derivedEncode     10000  avgt    5  24.793 ±  1.205  ms/op   +18%
+ScodecDeriverBench.handRolledDecode  10000  avgt    5  28.828 ± 10.173  ms/op
+ScodecDeriverBench.derivedDecode     10000  avgt    5  30.933 ±  0.454  ms/op   +7%
+```
+
+The deriver carries one `Registers` allocation per record and looks up field positions via the `Reflect.Record`'s pre-computed register layout, but otherwise it's allocation-tight. **For complex application types the overhead is in the noise (5-20%).** Where it would actually matter — tight loops over millions of small fixed-width records — the right tool is the chunked fast path (`PureDecoder.manyChunked + StreamDecoder.fromPureChunked`), which beats hand-rolled `scodec.codecs.vector` by ~57× on `uint8`.
+
 ### Why this matters for the PDF port
 
 The legacy `fs2-pdf` data model (`Prim` / `Obj` / `IndirectObj` / `Xref` / `Trailer` / `Pages` / `Element` / `Decoded` / ...) is dozens of mutually-recursive case classes and sealed traits. Hand-rolling the `Codec[…]` for each was the original project's main maintenance burden. With `ScodecDeriver`, each ADT just needs `given Schema[Foo] = Schema.derived[Foo]` and the codec falls out for free — and the same `Schema[Foo]` simultaneously gives you JSON, Avro, etc. via the other derivers in `zio-blocks-schema`.
@@ -346,7 +360,55 @@ emitters, not foundational architecture. The new layout uses ZIO's
 `fs2.Pull`, `cats.data.NonEmptyList`, `cats.data.Validated`, and
 `shapeless.HList` are completely gone from the production code.
 
-Replacements summary:
+## Memory-bounded encoding for large attachments
+
+`Part.Obj` carries a fully-materialised `IndirectObj`, which is fine for small/medium objects but blows the heap for large content streams (PDF attachments, embedded images, fonts, font subsets). The encoder also accepts a streaming variant:
+
+```scala
+sealed trait Part[+A]
+object Part {
+  // small / medium objects - materialised upfront
+  final case class Obj(obj: IndirectObj) extends Part[Nothing]
+
+  // memory-bounded: payload is a ZStream[Any, Throwable, Byte]
+  final case class StreamObj(
+    index:   Obj.Index,
+    data:    Prim,
+    length:  Long,                          // exact byte count, patched into /Length
+    payload: ZStream[Any, Throwable, Byte]  // never materialised in full
+  ) extends Part[Nothing]
+
+  final case class Meta[A](meta: A)               extends Part[A]
+  final case class Version(version: Version)      extends Part[Nothing]
+}
+```
+
+When the encoder hits a `Part.StreamObj`:
+1. Encode the `<num> <gen> obj` header + dict (with `/Length` patched in) + literal `stream\n` — one downstream `ZChannel.write`.
+2. Forward the payload `ZStream` chunk-by-chunk by piping its underlying channel into the encoder's downstream — **at most one upstream chunk lives in memory at a time.**
+3. Write the literal `\nendstream\nendobj\n` trailer — one final `ZChannel.write`.
+
+The xref entry's byte size is computed as `header.size + length + trailer.size` so the cross-reference table is correct without ever knowing what came through the stream.
+
+```scala
+val attachment: ZStream[Any, Throwable, Byte] =
+  ZStream.fromInputStream(...)       // a 100 MB file - never read into a single buffer
+
+val streamingPart: Part[Trailer] = Part.StreamObj(
+  index   = Obj.Index(42, 0),
+  data    = Prim.dict("Type" -> Prim.Name("EmbeddedFile")),
+  length  = 104857600L,
+  payload = attachment
+)
+
+partStream.via(WritePdf.parts).runFold(0L)(_ + _.size)  // counts bytes; ~64 KiB peak
+```
+
+`StreamObjSpec` proves this end-to-end: it encodes a 1 MiB content stream and a 10 MiB content stream by piping a synthetic `ZStream[Byte]` through `WritePdf.parts` directly into a `runFold(0L)(_ + _.size)` byte counter — the total file bytes are never materialised. A separate test then encodes 1 MiB the same way, materialises the bytes, decodes them back, and verifies all 1 048 576 bytes of the deterministic `i & 0xff` pattern come through byte-perfect.
+
+**Decoder-side caveat**: the decoder still materialises an *individual content stream's* payload as a `BitVector` (because `IndirectObj.streamPayload` needs to resolve `/Length` and confirm the trailing `endstream` keyword on the underlying bytes). For pure decoding workflows on a multi-GB file this means peak memory is bounded by *the largest single object*, not by the total file size. Streaming the payload of an individual object back out of the decoder would require splitting `IndirectObj.streamPayload` into a header decoder + a payload `ZPipeline`; that's a follow-up.
+
+## Replacements summary
 
 | legacy | new |
 |---|---|
