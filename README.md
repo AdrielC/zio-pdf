@@ -261,6 +261,52 @@ For 16 K element fill-then-drain on a single thread, `SpscRingBuffer` is ~7× fa
 
 **About `zio-blocks-streams`**: the project ships (`0.0.20`) but the API is still pull-based, alpha-grade, and not a drop-in replacement for `ZStream` for our purposes. The dep is wired into `build.sbt` so it's available; it'll be the natural target for a deeper refactor once it stabilises.
 
+## `ScodecDeriver` — derive `scodec.Codec[A]` from `Schema[A]`
+
+`zio-blocks-schema` ships with a `Deriver[TC]` framework: implement seven methods (`derivePrimitive`, `deriveRecord`, `deriveVariant`, `deriveSequence`, `deriveMap`, `deriveDynamic`, `deriveWrapper`) and you get type-class derivation for free. We have one for `scodec.Codec`:
+
+```scala
+import zio.blocks.schema.Schema
+import zio.scodec.schema.ScodecDeriver
+import scodec.Codec
+
+case class Address(street: String, zip: Int)
+object Address {
+  given Schema[Address] = Schema.derived[Address]
+}
+
+case class Person(name: String, age: Int, address: Address)
+object Person {
+  given Schema[Person] = Schema.derived[Person]
+}
+
+val codec: Codec[Person] = summon[Schema[Person]].derive(ScodecDeriver)
+
+val bits = codec.encode(Person("Alice", 30, Address("1 Wonderland Way", 12345))).require
+val back = codec.decode(bits).require.value
+// back == Person("Alice", 30, Address("1 Wonderland Way", 12345))
+```
+
+This is the architectural payoff of wiring `zio-blocks-schema` in: a single `Schema.derived[Foo]` declaration produces the binary codec, JSON codec (`JsonCodecDeriver`), and any other format-specific deriver from the same schema — no more hand-rolling 200 `Codec[Foo]` instances.
+
+### Coverage of the seven `Deriver` methods
+
+| Pattern | Implementation |
+|---|---|
+| **Primitive** | dispatch on `PrimitiveType`; uses `int32` / `int64` / `bool(8)` / `float` / `double` / `utf8_32` / etc. from `scodec.codecs` |
+| **Record** | encode each field in declaration order; decode each, accumulate into `Registers`, run `binding.constructor.construct` |
+| **Variant** | `uint8` discriminator tag + matching case codec via `binding.discriminator` and `binding.matchers` |
+| **Wrapper** | `xmap(binding.wrap, binding.unwrap)` |
+| **Sequence** | length-prefixed (`int32`) list of element codecs; `binding.constructor.newBuilder + add + result` |
+| **Map** | length-prefixed list of `(K, V)` pairs |
+| **Dynamic** | not implemented in this prototype (returns a clear failure) |
+
+Tests round-trip `Address`, nested `Person`, three-case `Shape` (`Circle | Rectangle | Triangle`), `Team` with `List[String]`, and assert exact wire size for the variant case (1-byte tag + two 8-byte doubles = 17 bytes for `Rectangle`).
+
+### Why this matters for the PDF port
+
+The legacy `fs2-pdf` data model (`Prim` / `Obj` / `IndirectObj` / `Xref` / `Trailer` / `Pages` / `Element` / `Decoded` / ...) is dozens of mutually-recursive case classes and sealed traits. Hand-rolling the `Codec[…]` for each was the original project's main maintenance burden. With `ScodecDeriver`, each ADT just needs `given Schema[Foo] = Schema.derived[Foo]` and the codec falls out for free — and the same `Schema[Foo]` simultaneously gives you JSON, Avro, etc. via the other derivers in `zio-blocks-schema`.
+
 ## What's ported from the original fs2-pdf
 
 The original `fs2-pdf` source tree (~4 700 lines, 56 files) is in
