@@ -1,7 +1,7 @@
 /*
- * FastCDC driven by Kyo [[kyo.Emit]]: one [[Emit.valueWith]] per completed
- * CDC chunk (each emission is a single `zio.Chunk[Byte]`, not a batch).
- * Downstream [[kyo.Stream]] composes via `Emit[Chunk[V]]` with Kyo's chunk type.
+ * FastCDC via Kyo [[kyo.Emit]]: one emission per finished CDC segment as a
+ * raw `Array[Byte]` (no `zio.Chunk` in the hot path). Convert to ZIO chunks
+ * only at integration boundaries ([[runCollect]], ZIO interop).
  */
 
 package zio.pdf.cdc
@@ -11,47 +11,54 @@ import zio.Chunk as ZChunk
 
 object FastCdcKyo {
 
-  /** Feed `bytes` in `rechunk`-sized slices, same framing as `ZStream.rechunk`. */
-  def emitChunked(
-    bytes: ZChunk[Byte],
+  /** Same as [[emitChunked]] but reads from a byte array (no `zio.Chunk` copy). */
+  def emitChunkedFromArray(
+    arr: Array[Byte],
     rechunk: Int,
     cfg: FastCdc.Config = FastCdc.defaultConfig
-  )(using Frame, Tag[Emit[ZChunk[Byte]]]): Unit < Emit[ZChunk[Byte]] = {
-    val arr       = bytes.toArray
+  )(using Frame, Tag[Emit[Array[Byte]]]): Unit < Emit[Array[Byte]] = {
     val chunkSize = rechunk max 1
 
     def flushEmitted(
-      toEmit: ZChunk[ZChunk[Byte]],
+      segs: Array[Array[Byte]],
       i: Int,
-      cont: => Unit < Emit[ZChunk[Byte]]
-    ): Unit < Emit[ZChunk[Byte]] =
-      if (i >= toEmit.length) cont
-      else Emit.valueWith(toEmit(i))(flushEmitted(toEmit, i + 1, cont))
+      cont: => Unit < Emit[Array[Byte]]
+    ): Unit < Emit[Array[Byte]] =
+      if (i >= segs.length) cont
+      else Emit.valueWith(segs(i))(flushEmitted(segs, i + 1, cont))
 
-    def go(carry: Array[Byte], off: Int): Unit < Emit[ZChunk[Byte]] =
+    def go(carry: Array[Byte], off: Int): Unit < Emit[Array[Byte]] =
       if (off < arr.length) {
         val end             = math.min(off + chunkSize, arr.length)
         val slice           = java.util.Arrays.copyOfRange(arr, off, end)
         val merged          = FastCdc.mergeArrays(carry, slice)
-        val (emitted, rest) = FastCdc.drainBuffer(merged, flushTail = false, cfg)
+        val (emitted, rest) = FastCdc.drainToArrays(merged, flushTail = false, cfg)
         flushEmitted(emitted, 0, go(rest, end))
       } else {
-        val (emitted, _) = FastCdc.drainBuffer(carry, flushTail = true, cfg)
+        val (emitted, _) = FastCdc.drainToArrays(carry, flushTail = true, cfg)
         flushEmitted(emitted, 0, ())
       }
 
     go(new Array[Byte](0), 0)
   }
 
-  /** Collect all CDC chunks (for tests / small inputs). */
+  /** Feed `bytes` in `rechunk`-sized slices (same framing as `ZStream.rechunk`). */
+  def emitChunked(
+    bytes: ZChunk[Byte],
+    rechunk: Int,
+    cfg: FastCdc.Config = FastCdc.defaultConfig
+  )(using Frame, Tag[Emit[Array[Byte]]]): Unit < Emit[Array[Byte]] =
+    emitChunkedFromArray(bytes.toArray, rechunk, cfg)
+
+  /** Collect as `zio.Chunk` (converts arrays once at the end). */
   def runCollect(
     bytes: ZChunk[Byte],
     rechunk: Int,
     cfg: FastCdc.Config = FastCdc.defaultConfig
-  )(using Frame, Tag[Emit[ZChunk[Byte]]]): ZChunk[ZChunk[Byte]] < Any =
+  )(using Frame, Tag[Emit[Array[Byte]]]): ZChunk[ZChunk[Byte]] < Any =
     Emit.run(emitChunked(bytes, rechunk, cfg)).map { case (kyoChunks, _) =>
       val b = ZChunk.newBuilder[ZChunk[Byte]]
-      kyoChunks.foreach(c => b += c)
+      kyoChunks.foreach(arr => b += ZChunk.fromArray(arr))
       b.result()
     }
 }

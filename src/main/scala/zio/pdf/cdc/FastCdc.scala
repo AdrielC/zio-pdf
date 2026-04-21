@@ -82,13 +82,16 @@ object FastCdc {
     merged
   }
 
-  /** Same cut semantics as [[pipeline]]'s channel: drain complete CDC chunks from `buffer`. */
-  private[cdc] def drainBuffer(
+  /**
+   * Drain complete CDC segments as raw arrays (no `zio.Chunk` allocation).
+   * Same cut semantics as [[pipeline]].
+   */
+  private[cdc] def drainToArrays(
     buffer: Array[Byte],
     flushTail: Boolean,
     cfg: Config
-  ): (Chunk[Chunk[Byte]], Array[Byte]) = {
-    val out = Chunk.newBuilder[Chunk[Byte]]
+  ): (Array[Array[Byte]], Array[Byte]) = {
+    val out = scala.collection.mutable.ArrayBuffer.empty[Array[Byte]]
     var buf = buffer
     while (buf.length >= cfg.maxSize || (flushTail && buf.nonEmpty)) {
       val window =
@@ -97,10 +100,20 @@ object FastCdc {
       val cut   = cutOffset(window, cfg)
       val chunk = java.util.Arrays.copyOfRange(buf, 0, cut)
       val rest  = java.util.Arrays.copyOfRange(buf, cut, buf.length)
-      out += Chunk.fromArray(chunk)
+      out += chunk
       buf = rest
     }
-    (out.result(), buf)
+    (out.toArray, buf)
+  }
+
+  private def segmentsToChunk(segs: Array[Array[Byte]]): Chunk[Chunk[Byte]] = {
+    val b = Chunk.newBuilder[Chunk[Byte]]
+    var i = 0
+    while (i < segs.length) {
+      b += Chunk.fromArray(segs(i))
+      i += 1
+    }
+    b.result()
   }
 
   /**
@@ -177,16 +190,16 @@ object FastCdc {
           else {
             val incoming     = chunk.toArray
             val merged       = mergeArrays(buffer, incoming)
-            val (emit, rest) = drainBuffer(merged, flushTail = false, cfg)
-            if (emit.isEmpty) loop(rest)
-            else ZChannel.write(emit) *> loop(rest)
+            val (segs, rest) = drainToArrays(merged, flushTail = false, cfg)
+            if (segs.isEmpty) loop(rest)
+            else ZChannel.write(segmentsToChunk(segs)) *> loop(rest)
           }
         },
         (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
         (_: Any) => {
-          val (emit, _) = drainBuffer(buffer, flushTail = true, cfg)
-          if (emit.isEmpty) ZChannel.unit
-          else ZChannel.write(emit) *> ZChannel.unit
+          val (segs, _) = drainToArrays(buffer, flushTail = true, cfg)
+          if (segs.isEmpty) ZChannel.unit
+          else ZChannel.write(segmentsToChunk(segs)) *> ZChannel.unit
         }
       )
 
