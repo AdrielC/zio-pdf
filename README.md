@@ -249,6 +249,45 @@ val sd: StreamDecoder[Int] = uint8Batch.toStreamChunked
 
 The `inline` on `manyChunked` matters: the JIT inlines the per-batch body straight into the `runAll` loop, with no method-call boundary.
 
+### Head-to-head vs fs2 (the library we ported away from)
+
+A separate sbt subproject `bench-fs2/` wires in `fs2 3.13.0` + `fs2-scodec 3.13.0` (the folded-in successor to the now-archived `scodec-stream`) + `cats-effect 3.7.0`. The transitive cloud lives only in that module and never touches the main project.
+
+```bash
+sbt 'benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*HeadToHeadBench.*'
+sbt 'benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*PdfDecode.*'
+```
+
+Same `scodec.Decoder`, same in-memory bytes, same chunk size — only the streaming library differs.
+
+**4 MiB of `uint8` (synthetic, all elements through the streaming layer):**
+
+```
+Benchmark                                          (chunkSize)      (n)  Mode  Cnt     Score     Error  Units
+HeadToHeadBench.baseline_scodec_vector                   65536  4194304  avgt    5   223.343 ±  39.800  ms/op   reference
+HeadToHeadBench.baseline_zio_PureDecoder_runAll          65536  4194304  avgt    5   430.181 ±  32.729  ms/op
+HeadToHeadBench.fs2_StreamDecoder_many                   65536  4194304  avgt    5  2659.758 ± 427.614  ms/op   fs2 streaming
+HeadToHeadBench.zio_StreamDecoder_many                   65536  4194304  avgt    5  1031.921 ±  87.637  ms/op   ZIO ZChannel streaming    (~2.6x faster than fs2)
+HeadToHeadBench.zio_StreamDecoder_fromPureChunked        65536  4194304  avgt    5     4.232 ±   0.608  ms/op   ZIO chunked fast path     (~628x faster than fs2)
+```
+
+**Real PDF top-level decode (the legacy `xref-stream.pdf` fixture):**
+
+```
+Benchmark                                                    (chunkSize)  Mode  Cnt    Score     Error  Units
+PdfDecodeHeadToHeadBench.fs2_decode_pdf_topLevel                    8192  avgt    5  366.326 ± 138.016  us/op   fs2 + scodec.choice
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel                    8192  avgt    5  457.112 ± 120.087  us/op   ZIO + scodec.choice
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_byteStream         8192  avgt    5  439.639 ±  68.776  us/op   ZIO + byte-stream pipe
+```
+
+Honest reading:
+
+- **For high-throughput byte-aligned decoding** (one element type, many elements): ZIO's chunked fast path beats fs2 by **~628×**. This is the architectural win — `PureDecoder.manyChunked + StreamDecoder.fromPureChunked` lets the entire batch decoder live inside one inlined while-loop per upstream chunk; fs2 has no equivalent because `scodec-stream`'s `Decode` step is per-element.
+- **For the plain ZChannel path vs fs2's Pull path** on the same per-element decoder: ZIO is **~2.6× faster** on a tight `uint8` loop. Same algorithm both sides (we ported it from fs2's source), but `ZChannel` has lower per-step overhead than `Pull` for this shape.
+- **For real PDF parsing where the scodec `choice`-decoder body dominates** (~360 µs of decoding work per PDF): the two libraries are within ~25% of each other and **fs2 actually edges us by ~25%**. The streaming library overhead is in the noise once the per-element decoder body itself is expensive — what wins or loses at that point is JIT inlining of the choice arms, not channel vs pull.
+
+So if your workload is "stream a giant binary log of fixed-width records" the chunked fast path is a transformative win. If your workload is "parse a few KiB of nested PDF structure", any modern Scala streaming library is fine and the difference is in the noise.
+
 ### `SpscRingBuffer` (`zio-blocks-ringbuffer`) vs `ArrayBlockingQueue`
 
 ```
