@@ -1,28 +1,213 @@
 /*
- * Public façade. The two interesting entry points:
+ * The unified scan abstraction.
  *
- *   - `Scan.runDirect(scan, inputs)` -- pure, no Kyo dependency. Drives
- *     a compiled stepper directly. Useful in tests and for environments
- *     that don't want the Kyo runtime.
+ * ------------------------------------------------------------------
+ * Shape
+ * ------------------------------------------------------------------
  *
- *   - `Scan.runKyo(scan, inputs)`    -- lowers a `FreeScan[I, O]` into
- *     a `Unit < (Poll[I] & Emit[O] & Abort[ScanSignal])` and runs it
- *     against the supplied inputs. Returns
- *     `(ScanDone[O, Any], Chunk[O]) < Any` -- a pure value once the
- *     Kyo computation is evaluated.
+ *   trait Scan[-I, +R, +O, +E] {
+ *     type S
+ *     def init: S < R
+ *     def step[EE](in: I < EE)
+ *       : Unit < (Var[S] & Emit[O] & Abort[E] & R & EE)
+ *     def end:       Unit < (Var[S] & Emit[O] & Abort[E] & R)
+ *   }
  *
- * Either way the underlying execution model is the same: spine flatten,
- * fuse pure stages, run the surviving stepper. The Kyo path adds the
- * standard Poll/Emit/Abort effect row so the scan can be composed with
- * other Kyo effects (e.g. `Sync` for actually performing IO inside a
- * primitive interpretation).
+ * Every capability a scan needs is tracked in the signature:
+ *
+ *   - `R`       -- ambient effects required to initialise / run the scan.
+ *                  Pure `arr f` has `R = Any`. A chunker with an off-
+ *                  heap buffer has `R = Scope`. A sniff-and-decompress
+ *                  step has `R = Sync & Scope & Abort[SniffError]`.
+ *   - `Var[S]`  -- per-scan mutable state, hidden behind `type S`.
+ *   - `Emit[O]` -- outputs. A step may call `Emit.value` zero, one, or
+ *                  many times per input. Cardinality is the scan's own
+ *                  business; it is *also* reflected statically by the
+ *                  `ScanPrim[I, StepOut[O]]` tag so the fusion pass can
+ *                  see through `One`-emitting stages.
+ *   - `Abort[E]`-- typed completion / failure. Early stop (`take(n)`)
+ *                  and `Success(leftover)` ride on this channel via
+ *                  `ScanSignal`.
+ *   - `EE`      -- the *caller's* effect row. Because the input is an
+ *                  effectful value `I < EE`, a pure `Int`-consuming scan
+ *                  widens automatically to accept `Int < (Sync & Abort[X])`;
+ *                  Kyo variance does the work.
+ *
+ * This is the unified shape the rest of the pipeline machinery targets.
+ * Core effects are `Var`, `Emit`, `Poll`, `Abort` -- exactly the four
+ * capabilities a chunk-native streaming pipe needs.
  */
 
 package zio.pdf.scan
 
 import kyo.*
 
+// =====================================================================
+// The trait
+// =====================================================================
+
+/** The unified scan shape. One per-stage object; state is internal.
+  *
+  * Variance notes (Kyo `<[+A, -S]` is contravariant in its effect row,
+  * so capability-like parameters must also be contravariant):
+  *
+  *   - `-I` : a scan accepting a wider input type can serve a caller
+  *            with a narrower one.
+  *   - `-R` : a scan needing *fewer* ambient effects is a subtype of
+  *            one needing more. `Scan[I, Any, O, E] <: Scan[I, Sync, O, E]`.
+  *   - `+O` : a scan emitting a narrower output is a subtype of one
+  *            emitting a wider one.
+  *   - `+E` : a scan failing with a narrower error is a subtype of one
+  *            failing with a wider one.
+  */
+trait Scan[-I, -R, +O, +E] extends Serializable { self =>
+
+  /** Per-scan mutable state, hidden. Runners materialise it via `init`
+    * and carry it in a `Var[S]` for the scan's lifetime. */
+  type S
+
+  /** Tag used to handle `Var[S]` at the runner boundary. Implementations
+    * return the tag built with their concrete `S`; callers never see `S`. */
+  def stateTag: Tag[Var[S]]
+
+  /** Build the initial state. Allowed to request ambient effects `R`. */
+  def init(using Frame): S < R
+
+  /** Feed one input. Input is a Kyo-pending value so upstream effects
+    * ride through without the scan having to know about them. The scan
+    * may `Emit.value` zero, one, or many times. */
+  def step[EE](in: I < EE)(using Frame)
+      : Unit < (Var[S] & Emit[O] & Abort[E] & R & EE)
+
+  /** End-of-stream flush. Same capability row as `step` minus `EE`. */
+  def end(using Frame): Unit < (Var[S] & Emit[O] & Abort[E] & R)
+}
+
 object Scan {
+
+  // ------------------------------------------------------------------
+  // Effect-row alias used throughout the runtime.
+  // ------------------------------------------------------------------
+
+  /** The capability row of a fully-assembled scan before the caller
+    * threads their own effects `EE` into `step`. */
+  type Caps[S, O, E, R] = Var[S] & Emit[O] & Abort[E] & R
+
+  // ------------------------------------------------------------------
+  // Smart constructors
+  // ------------------------------------------------------------------
+
+  /** Build a scan from an explicit `State` plus step/end bodies. The
+    * `State` leaks at the constructor but not in the returned type -- the
+    * path-dependent member `type S = State` hides it. */
+  def make[I, R, O, E, State](
+      initial: State < R,
+      stepFn: [EE] => (I < EE, Frame) => Unit < (Var[State] & Emit[O] & Abort[E] & R & EE),
+      endFn: Frame => Unit < (Var[State] & Emit[O] & Abort[E] & R)
+  )(using stateT: Tag[Var[State]]): Scan[I, R, O, E] { type S = State } =
+    new Scan[I, R, O, E] {
+      type S = State
+      def stateTag: Tag[Var[S]]                                       = stateT
+      def init(using Frame): S < R                                    = initial
+      def step[EE](in: I < EE)(using fr: Frame)
+          : Unit < (Var[S] & Emit[O] & Abort[E] & R & EE)             = stepFn[EE](in, fr)
+      def end(using fr: Frame): Unit < (Var[S] & Emit[O] & Abort[E] & R) = endFn(fr)
+    }
+
+  /** Build a stateless scan. `S = Unit` so Kyo's `Var[Unit]` elides at
+    * runtime. */
+  def stateless[I, R, O, E](
+      stepFn: [EE] => (I < EE, Frame) => Unit < (Emit[O] & Abort[E] & R & EE),
+      endFn: Frame => Unit < (Emit[O] & Abort[E] & R) = (_: Frame) => (): Unit < Any
+  )(using stateT: Tag[Var[Unit]]): Scan[I, R, O, E] { type S = Unit } =
+    new Scan[I, R, O, E] {
+      type S = Unit
+      def stateTag: Tag[Var[S]]    = stateT
+      def init(using Frame): S < R = (): Unit
+      def step[EE](in: I < EE)(using fr: Frame)
+          : Unit < (Var[S] & Emit[O] & Abort[E] & R & EE) =
+        stepFn[EE](in, fr)
+      def end(using fr: Frame): Unit < (Var[S] & Emit[O] & Abort[E] & R) =
+        endFn(fr)
+    }
+
+  // ------------------------------------------------------------------
+  // Pure-function lifts. These are the base cases for `Arr` / `Map`.
+  // ------------------------------------------------------------------
+
+  /** Lift a pure `I => O` into a one-emitting stateless `Scan`. */
+  def liftArr[I, O](f: I => O)(using
+      emitTag: Tag[Emit[O]],
+      stateT: Tag[Var[Unit]]
+  ): Scan[I, Any, O, Nothing] { type S = Unit } =
+    stateless[I, Any, O, Nothing](
+      stepFn = [EE] => (in: I < EE, fr: Frame) => {
+        given Frame = fr
+        in.map(i => Emit.value(f(i)))
+      }
+    )
+
+  /** Lift an effectful `I => O < R1`. The scan's `R` grows by `R1`. */
+  def liftArrEff[I, R1, O](f: I => O < R1)(using
+      emitTag: Tag[Emit[O]],
+      stateT: Tag[Var[Unit]]
+  ): Scan[I, R1, O, Nothing] { type S = Unit } =
+    stateless[I, R1, O, Nothing](
+      stepFn = [EE] => (in: I < EE, fr: Frame) => {
+        given Frame = fr
+        in.map(i => f(i).map(o => Emit.value(o)))
+      }
+    )
+
+  /** Lift an `I => Maybe[O]` filter into a zero-or-one-emitting Scan. */
+  def liftOpt[I, O](f: I => Maybe[O])(using
+      emitTag: Tag[Emit[O]],
+      stateT: Tag[Var[Unit]]
+  ): Scan[I, Any, O, Nothing] { type S = Unit } =
+    stateless[I, Any, O, Nothing](
+      stepFn = [EE] => (in: I < EE, fr: Frame) => {
+        given Frame = fr
+        in.map(i =>
+          f(i) match {
+            case Present(o) => Emit.value(o)
+            case Absent     => (): Unit
+          }
+        )
+      }
+    )
+
+  /** Lift a pure batch function `Chunk[I] => Chunk[O]`. A single input is
+    * wrapped and sent through; a batch is processed in one call. Emits
+    * the whole output chunk in one `Emit.value` (Kyo's `Emit[O]` is a
+    * per-element stream, so we foreach). */
+  def liftChunk[I, O](f: Chunk[I] => Chunk[O])(using
+      emitTag: Tag[Emit[O]],
+      stateT: Tag[Var[Unit]]
+  ): Scan[I, Any, O, Nothing] { type S = Unit } =
+    stateless[I, Any, O, Nothing](
+      stepFn = [EE] => (in: I < EE, fr: Frame) => {
+        given Frame = fr
+        in.map(i => Kyo.foreachDiscard(f(Chunk(i)))(o => Emit.value(o)))
+      }
+    )
+
+  /** The identity scan. */
+  def identityScan[A](using
+      emitTag: Tag[Emit[A]],
+      stateT: Tag[Var[Unit]]
+  ): Scan[A, Any, A, Nothing] { type S = Unit } =
+    liftArr[A, A](a => a)
+
+  // ===================================================================
+  // Legacy façade (retained).
+  //
+  // The rest of the module builds `FreeScan[I, O]` values, which are the
+  // describable-as-data surface. `FreeScan.compile` lowers them into
+  // `Scan[I, R, O, E]` instances of this trait. These helpers keep the
+  // existing call-sites (`Scan.map`, `Scan.fastCdc`, ...) working and
+  // will be migrated in follow-up commits as more primitives grow
+  // honest capability types.
+  // ===================================================================
 
   /** Build a single-primitive scan. */
   def lift[I, O](p: ScanPrim[I, StepOut.StepOut[O]]): FreeScan[I, O] = FreeScan.lift(p)
@@ -30,80 +215,43 @@ object Scan {
   /** A pure-function scan. */
   def arr[I, O](f: I => O): FreeScan[I, O] = FreeScan.arr(f)
 
-  /** The identity scan. */
+  /** The identity FreeScan. */
   def id[A]: FreeScan[A, A] = FreeScan.id[A]
 
-  // -------- Primitive helpers --------
-
-  def map[I, O](f: I => O): FreeScan[I, O]                    = FreeScan.lift(ScanPrim.Map(f))
-  def filter[A](p: A => Boolean): FreeScan[A, A]              = FreeScan.lift(ScanPrim.Filter(p))
-  def take[A](n: Int): FreeScan[A, A]                         = FreeScan.lift(ScanPrim.Take(n))
-  def drop[A](n: Int): FreeScan[A, A]                         = FreeScan.lift(ScanPrim.Drop(n))
-  def fold[I, S](seed: S)(step: (S, I) => S): FreeScan[I, S]  =
+  def map[I, O](f: I => O): FreeScan[I, O]                   = FreeScan.lift(ScanPrim.Map(f))
+  def filter[A](p: A => Boolean): FreeScan[A, A]             = FreeScan.lift(ScanPrim.Filter(p))
+  def take[A](n: Int): FreeScan[A, A]                        = FreeScan.lift(ScanPrim.Take(n))
+  def drop[A](n: Int): FreeScan[A, A]                        = FreeScan.lift(ScanPrim.Drop(n))
+  def fold[I, St](seed: St)(step: (St, I) => St): FreeScan[I, St] =
     FreeScan.lift(ScanPrim.Fold(seed, step))
-  def hash(algo: HashAlgo): FreeScan[Byte, Byte]              = FreeScan.lift(ScanPrim.Hash(algo))
-  def countBytes: FreeScan[Byte, Byte]                        = FreeScan.lift(ScanPrim.CountBytes)
-  def bombGuard(maxBytes: Long): FreeScan[Byte, Byte]         = FreeScan.lift(ScanPrim.BombGuard(maxBytes))
-  /** Content-defined chunker. Each emitted unit is a `Chunk[Byte]`. */
+  def hash(algo: HashAlgo): FreeScan[Byte, Byte]             = FreeScan.lift(ScanPrim.Hash(algo))
+  def countBytes: FreeScan[Byte, Byte]                       = FreeScan.lift(ScanPrim.CountBytes)
+  def bombGuard(maxBytes: Long): FreeScan[Byte, Byte]        = FreeScan.lift(ScanPrim.BombGuard(maxBytes))
   def fastCdc(min: Int, avg: Int, max: Int): FreeScan[Byte, Chunk[Byte]] =
     FreeScan.lift(ScanPrim.FastCDC(min, avg, max))
-
-  /** Fixed-size chunker. Each emitted unit is a `Chunk[Byte]`. */
   def fixedChunk(n: Int): FreeScan[Byte, Chunk[Byte]] =
     FreeScan.lift(ScanPrim.FixedChunk(n))
 
-  // -------- Arrow / ArrowChoice helpers exposed on the façade --------
-
-  /** Pure tuple swap: `(a, b) => (b, a)`. */
-  def swap[A, B]: FreeScan[(A, B), (B, A)] = FreeScan.swap
-
-  /** Pure Either swap. */
-  def mirror[A, B]: FreeScan[Either[A, B], Either[B, A]] = FreeScan.mirror
-
-  /** Diagonal: `a => (a, a)`. */
-  def diag[A]: FreeScan[A, (A, A)] = FreeScan.diag
-
-  /** Untag `Either[A, A]` to `A`. */
-  def merge[A]: FreeScan[Either[A, A], A] = FreeScan.merge
-
-  /** Inject into the left side of an Either. */
-  def injectLeft[A, B]: FreeScan[A, Either[A, B]] = FreeScan.injectLeft
-
-  /** Inject into the right side of an Either. */
-  def injectRight[A, B]: FreeScan[B, Either[A, B]] = FreeScan.injectRight
-
-  /** Boolean test: route by predicate. */
+  def swap[A, B]: FreeScan[(A, B), (B, A)]                  = FreeScan.swap
+  def mirror[A, B]: FreeScan[Either[A, B], Either[B, A]]    = FreeScan.mirror
+  def diag[A]: FreeScan[A, (A, A)]                          = FreeScan.diag
+  def merge[A]: FreeScan[Either[A, A], A]                   = FreeScan.merge
+  def injectLeft[A, B]: FreeScan[A, Either[A, B]]           = FreeScan.injectLeft
+  def injectRight[A, B]: FreeScan[B, Either[A, B]]          = FreeScan.injectRight
   def test[A, B](p: A => Boolean)(yes: FreeScan[A, B])(no: FreeScan[A, B]): FreeScan[A, B] =
     FreeScan.test(p)(yes)(no)
+  def const[A, B](b: B): FreeScan[A, B]                     = FreeScan.const(b)
+  def fst[A, B]: FreeScan[(A, B), A]                        = FreeScan.fst
+  def snd[A, B]: FreeScan[(A, B), B]                        = FreeScan.snd
+  def void[A, B](self: FreeScan[A, B]): FreeScan[A, Unit]   = FreeScan.void(self)
 
-  /** Constant scan. */
-  def const[A, B](b: B): FreeScan[A, B] = FreeScan.const(b)
-
-  /** Tuple projections. */
-  def fst[A, B]: FreeScan[(A, B), A] = FreeScan.fst
-  def snd[A, B]: FreeScan[(A, B), B] = FreeScan.snd
-
-  /** Discard the output of a scan. */
-  def void[A, B](self: FreeScan[A, B]): FreeScan[A, Unit] = FreeScan.void(self)
-
-  // -------- Runners --------
+  // --- Runners: delegate to the legacy single-pass interpreter for now ---
 
   /** Pure synchronous driver. */
   def runDirect[I, O, E](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, E], Vector[O]) =
     SinglePassInterp.runDirect(scan, inputs)
 
-  /** Kyo-effect-typed runner. The returned computation requires no
-    * additional effects -- all of Poll/Emit/Abort are handled inside, the
-    * underlying stepper is pure, and only the Kyo machinery for
-    * suspension/resumption shows up in the type.
-    *
-    * Two paths:
-    *
-    *   1. Fully-fused: if `Fusion.tryFuse` returns a single function,
-    *      lower it directly to a tight `Loop` that does
-    *      `Poll -> Emit(f(i)) -> continue`. No `StepEffect` allocations.
-    *
-    *   2. General: drive a compiled `Stepper` through the same Loop. */
+  /** Kyo-effect-typed runner. */
   def runKyo[I, O, E](scan: FreeScan[I, O], inputs: Seq[I])(using
       pollTag: Tag[Poll[I]],
       emitTag: Tag[Emit[O]],
@@ -117,9 +265,6 @@ object Scan {
     ScanRunner.run[I, O, E, Any](inputs)(prog)
   }
 
-  /** Fast-path lowering: a single function I => O becomes a Loop with
-    * exactly one `Poll`, one function application, and one `Emit` per
-    * input. No buffering, no stepper, no `StepEffect`. */
   private[scan] def fusedFnToProg[I, O](f: I => O)(using
       pollTag: Tag[Poll[I]],
       emitTag: Tag[Emit[O]],
@@ -134,10 +279,6 @@ object Scan {
       }
     }
 
-  /** Lower a `Stepper` into a `ScanProg.Of`. The driver loop polls one
-    * input at a time; when the stepper signals `done`, the abort fires
-    * with that signal. Trailing emits arising from `Stepper.end` are
-    * pushed before the abort. */
   private[scan] def stepperToProg[I, O, E](
       initial: Stepper[I, O, E]
   )(using
@@ -148,7 +289,6 @@ object Scan {
     Loop(initial: Stepper[I, O, E]) { (current: Stepper[I, O, E]) =>
       Poll.andMap[I] {
         case Absent =>
-          // End-of-stream -- drain the stepper.
           val eff = current.end
           val emitAll: Unit < Emit[O] =
             Kyo.foreachDiscard(eff.out)(o => Emit.value(o))

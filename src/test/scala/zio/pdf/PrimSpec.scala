@@ -47,7 +47,7 @@ object PrimSpec extends ZIOSpecDefault {
     },
 
     test("Prim.Array round-trips") {
-      val a = Prim.Array(List(Prim.Number(BigDecimal(1)), Prim.Number(BigDecimal(2)), Prim.Ref(7, 0)))
+      val a = Prim.Array(Prim.Number(BigDecimal(1)), Prim.Number(BigDecimal(2)), Prim.Ref(7, 0))
       assertTrue(Prim.Codec_Prim.decode(Prim.Codec_Prim.encode(a).require).require.value == a)
     },
 

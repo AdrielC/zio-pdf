@@ -101,6 +101,9 @@ object StepOut {
     case o                      => Chunk(o.asInstanceOf[O])
   }
 
+  /** True if the StepOut carries no values. */
+  inline def isEmpty[O](s: StepOut[O]): Boolean = s == null
+
   /** Composition algebra at the *type* level. What comes out when you compose
     * a step emitting `OL` into a stage expecting `M`?
     *
