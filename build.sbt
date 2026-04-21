@@ -4,6 +4,8 @@ val zioBlocksSchemaVersion     = "0.0.33"
 val zioBlocksRingbufferVersion = "0.0.32"
 val zioBlocksStreamsVersion    = "0.0.20"
 val zioBlocksScopeVersion      = "0.0.33"
+val zioBlocksMediatypeVersion  = "0.0.33"
+val zioHttpModelVersion        = "0.0.33"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
 
@@ -40,6 +42,8 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
       "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
       "dev.zio"   %% "zio-blocks-scope"      % zioBlocksScopeVersion,
+      "dev.zio"   %% "zio-blocks-mediatype"  % zioBlocksMediatypeVersion,
+      "dev.zio"   %% "zio-http-model"        % zioHttpModelVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,

@@ -11,6 +11,7 @@
 - **Scala 3.8.3** (the latest 3.8.x release).
 - **ZIO 2.1.25** with `zio-streams`, `zio-prelude` 1.0.0-RC47.
 - **`zio-blocks-schema` 0.0.33** for schema-derived codecs (smoke-tested).
+- **`zio-blocks-mediatype`** + **`zio-http-model`** 0.0.33 — see `zio.pdf.PdfMime` for `MediaType` / `ContentType` (`application/pdf`).
 - **scodec-core 2.3.3** + **scodec-bits 1.2.4**.
 - A **ZIO port of `scodec.stream.StreamDecoder`** (the file from the
   original prompt) implemented on top of `ZChannel`.
@@ -26,6 +27,8 @@
 ```bash
 sbt test
 ```
+
+GitHub Actions installs `sbt` via [coursier/setup-action](https://github.com/coursier/setup-action) (runners do not ship `sbt` on `PATH`).
 
 ```
 [info] + StreamDecoder
@@ -449,7 +452,7 @@ partStream.via(WritePdf.parts).runFold(0L)(_ + _.size)  // counts bytes; ~64 KiB
 
 There is **one** primary decode path on bytes:
 
-- **`PdfStream.decode(log, config)`** — runs `StreamingDecode.pipeline` then `DecodedFromStreaming`: streaming parse (duplicate suppression, memory-bounded large streams) plus the same **stream expansion** as before (ObjStm, XRef stream metadata, lazy Flate) so `elements` / `validate` / `compare` keep working.
+- **`PdfStream.decode(log, config)`** — runs `StreamingDecode.pipeline` then `DecodedFromStreaming`: streaming parse (approximate duplicate suppression via a **fixed-size bit table** — `DuplicateFilterState`, Bloom-style single hash; no unbounded `Set`; end-of-stream log is a **suppression count** only) plus the same **stream expansion** as before (ObjStm, XRef stream metadata, lazy Flate) so `elements` / `validate` / `compare` keep working.
 
 - **`PdfStream.streamingDecode`** — raw `StreamingDecoded` events only (no expansion to `Decoded`). Use when you only need bytes on the wire.
 
