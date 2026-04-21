@@ -47,9 +47,32 @@ object PdfStream {
    * (`Decoded.Meta`) consisting of accumulated xrefs, the
    * sanitised trailer, and the version. Equivalent to the legacy
    * `PdfStream.decode`.
+   *
+   * Peak memory is bounded by *the largest single content stream*
+   * because each `Decoded.ContentObj` carries the full payload as
+   * a `BitVector`. For PDFs with multi-MB attachments / images /
+   * fonts use `streamingDecode` instead - that pipeline emits
+   * payloads as a sequence of `ContentObjBytes` chunks.
    */
   def decode(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Decoded] =
     Decode(log)
+
+  /**
+   * Memory-bounded SAX-style decoder. Same coverage as `decode`
+   * (version / comment / xref / startxref / data objects / content
+   * objects / accumulated Meta), but each content-stream payload
+   * is forwarded as a sequence of `ContentObjBytes` chunks instead
+   * of being materialised as a single `BitVector`. Peak memory is
+   * bounded by the upstream chunk size, regardless of how big any
+   * individual content stream is.
+   *
+   * Use this when you have multi-MB content streams (large
+   * attachments, embedded images, font subsets) that you want to
+   * forward straight to a sink (CDC chunker, S3 multipart, hash
+   * digest) without materialising in memory.
+   */
+  val streamingDecode: ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
+    StreamingDecode.pipeline
 
   /**
    * Decode the high-level Element layer: Page / Pages / Image /

@@ -105,6 +105,67 @@ private[pdf] trait IndirectObjCodec {
         { case (o, s) => IndirectObj(o, s) },
         i => (i.obj, i.stream)
       )
+
+  // -------------------------------------------------------------------
+  // Header-only decoder for memory-bounded streaming.
+  //
+  // The standard `Codec[IndirectObj]` materialises the entire content
+  // stream's payload as a `BitVector` so it can resolve `/Length` and
+  // confirm the trailing `endstream`. That works fine for small/medium
+  // PDFs but blows the heap on multi-GB content streams (large
+  // attachments, embedded fonts, etc.).
+  //
+  // `headerOnly` decodes just the part of an indirect object that
+  // comes *before* the stream payload:
+  //
+  //   <num> <gen> obj
+  //   <data dict>
+  //   stream\n           <-- only present iff the object has a stream
+  //
+  // and yields an `IndirectObjHeader` carrying the parsed `Obj` plus,
+  // for stream-bearing objects, the declared `/Length`. The caller is
+  // then responsible for consuming exactly `length` bytes from the
+  // remainder of the byte stream and then re-entering the top-level
+  // pipeline at `\nendstream\nendobj`.
+  // -------------------------------------------------------------------
+
+  /** Header of an indirect object as recognised by `headerOnly`. */
+  final case class IndirectObjHeader(obj: Obj, streamLength: Option[Long])
+
+  /** Decoder for the header part of an indirect object. Stops *just
+    * after* the `stream\n` (or `stream\r\n`) keyword for a
+    * stream-bearing object, or after `endobj\n` for a no-stream
+    * object. */
+  val headerOnly: Codec[IndirectObjHeader] = {
+    val headerCodec: Codec[(Obj, Option[Unit])] =
+      preStream
+        .flatZip(_ => optional(recover(streamStartKeyword), constant(ByteVector.empty)))
+    headerCodec.exmap(
+      {
+        case (obj, Some(())) =>
+          // Stream-bearing object: pull /Length out of the data dict.
+          Content.streamLength(obj.data).map(len => IndirectObjHeader(obj, Some(len)))
+        case (obj, None) =>
+          // No stream - we still need to consume the trailing `endobj`.
+          // We cannot do that inside this codec because we are
+          // header-only. Instead callers handle it by consuming the
+          // bytes that precede `endobj` (i.e. nothing) and then the
+          // `endobj` keyword itself.
+          // For symmetry with the stream-bearing case, return a
+          // length of 0 and let the streaming pipeline consume `endobj`
+          // unconditionally.
+          Attempt.successful(IndirectObjHeader(obj, None))
+      },
+      _ => Attempt.failure(_root_.scodec.Err("IndirectObj.headerOnly is decode-only"))
+    )
+  }
+
+  /** Codec for the trailer of a stream-bearing object: the literal
+    * `endstream` keyword (preceded by newline / whitespace) followed
+    * by `endobj`. Used by the streaming pipeline once it has
+    * forwarded `length` bytes. */
+  val streamTrailer: Codec[Unit] =
+    nlWs ~> str("endstream") ~> nlWs ~> endobj
 }
 
 /** Encoded indirect object + xref metadata. */
