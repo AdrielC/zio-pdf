@@ -8,6 +8,7 @@
 package zio.scodec.stream
 
 import _root_.scodec.bits.BitVector
+import _root_.scodec.codecs as scodecCodecs
 import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
 import zio.*
 import zio.prelude.fx.ZPure
@@ -22,7 +23,9 @@ import zio.prelude.fx.ZPure
  *   - **Log**   `W  = A` is the decoded values produced by this step.
  *     Using the log channel for emissions means `runAll` already
  *     gives us back a `Chunk[A]` of outputs — no extra accumulator
- *     in the call site.
+ *     in the call site. For batched [[many]](`scodecCodecs.uint8`)
+ *     the underlying `ZPure` logs `Chunk[Int]` batches; use
+ *     [[decodeStrict]] or [[runAllNormalized]] for a flat `Chunk[Int]`.
  *   - **Error** `E  = CodecError` is reserved for *fatal* decoding
  *     failures. Recoverable "need more bits" is modelled in the
  *     success channel via [[PureDecoder.Status]] so callers can
@@ -46,14 +49,22 @@ import zio.prelude.fx.ZPure
  * `Runtime`, then dropped into the streaming pipeline at the end.
  */
 final case class PureDecoder[+A](
-  run: ZPure[A, BitVector, BitVector, Any, CodecError, PureDecoder.Status]
+  run: ZPure[A, BitVector, BitVector, Any, CodecError, PureDecoder.Status],
+  private[zio] val normalizeLog: Chunk[Any] => Chunk[A] = PureDecoder.castLog[A],
+  /**
+   * When set, this decoder was built from batched `many(scodecCodecs.uint8)`; [[++]]
+   * must fall back to the per-element [[decodeStep]] so the ZPure log shape stays
+   * consistent across composition.
+   */
+  private val uint8ManyFailOnErr: Option[Boolean] = None
 ) { self =>
   import PureDecoder.*
 
 
   /** Decode a single in-memory `BitVector` strictly. */
   def decodeStrict(bits: BitVector): Either[CodecError, DecodeResult[Chunk[A]]] = {
-    val (log, result) = run.runAll(bits)
+    val (rawLog, result) = run.runAll(bits)
+    val log              = normalizeLog(rawLog.asInstanceOf[Chunk[Any]])
     result match {
       case Left(err)              => Left(err)
       case Right((leftover, _))   => Right(DecodeResult(log, leftover))
@@ -76,7 +87,8 @@ final case class PureDecoder[+A](
   def map[B](f: A => B): PureDecoder[B] =
     PureDecoder(
       ZPure.get[BitVector].flatMap { s0 =>
-        val (log, result) = run.runAll(s0)
+        val (rawLog, result) = run.runAll(s0)
+        val log                = normalizeLog(rawLog.asInstanceOf[Chunk[Any]])
         result match {
           case Left(err) =>
             // Replay the (possibly partial) log so observers still see
@@ -100,11 +112,22 @@ final case class PureDecoder[+A](
    * Sequence two pure decoders. The leftover state from `this` is
    * the input state of `that`. Logs (i.e. emitted values) concatenate.
    */
-  def ++[B >: A](that: => PureDecoder[B]): PureDecoder[B] =
+  def ++[B >: A](that: => PureDecoder[B]): PureDecoder[B] = {
+    lazy val t = that
+    val leftRun: ZPure[B, BitVector, BitVector, Any, CodecError, Status] =
+      uint8ManyFailOnErr match {
+        case Some(failOnErr) =>
+          PureDecoder
+            .decodeStep(scodecCodecs.uint8, repeat = true, failOnErr = failOnErr)
+            .run
+            .asInstanceOf[ZPure[B, BitVector, BitVector, Any, CodecError, Status]]
+        case None =>
+          self.run.asInstanceOf[ZPure[B, BitVector, BitVector, Any, CodecError, Status]]
+      }
     PureDecoder(
-      // run self, then run that regardless of self's status
-      self.run.flatMap(_ => that.run.asInstanceOf[ZPure[B, BitVector, BitVector, Any, CodecError, Status]])
+      leftRun.flatMap(_ => t.run.asInstanceOf[ZPure[B, BitVector, BitVector, Any, CodecError, Status]])
     )
+  }
 
   /**
    * Convert this pure decoder into a streaming [[StreamDecoder]] by
@@ -114,9 +137,25 @@ final case class PureDecoder[+A](
    * and the resulting state becomes the new carry.
    */
   def toStreamDecoder: StreamDecoder[A] = StreamDecoder.fromPure(self)
+
+  /**
+   * Like `run.runAll` but applies [[normalizeLog]] so batched `many(uint8)` emits a
+   * flat `Chunk` (used by [[StreamDecoder]] / `flatMap` interpreters).
+   */
+  private[zio] def runAllNormalized(
+    bits: BitVector
+  ): (Chunk[A], Either[CodecError, (BitVector, Status)]) = {
+    val (rawLog, result) = run.runAll(bits)
+    (normalizeLog(rawLog.asInstanceOf[Chunk[Any]]), result)
+  }
 }
 
 object PureDecoder {
+
+  private def castLog[A]: Chunk[Any] => Chunk[A] = _.asInstanceOf[Chunk[A]]
+
+  private val flattenUInt8BatchLog: Chunk[Any] => Chunk[Int] =
+    c => c.asInstanceOf[Chunk[Chunk[Int]]].flatten
 
   /**
    * The result of a single pure decoding step. Modelled in the
@@ -222,9 +261,22 @@ object PureDecoder {
    * Repeatedly decode `A` values using the supplied scodec
    * [[Decoder]]. As long as the buffer can produce a value, this
    * decoder loops in pure-state and emits each one through the log.
+   *
+   * The canonical [[scodecCodecs.uint8]] uses a batched `ZPure.log(Chunk[Int])`
+   * per full-byte drain (see [[manyUInt8Chunked]]): one log append per batch
+   * instead of millions of single-byte [[ZPure.log]] nodes, while
+   * [[decodeStrict]] / [[map]] still see a flat `Chunk[Int]`.
    */
   def many[A](decoder: Decoder[A], failOnErr: Boolean = true): PureDecoder[A] =
-    decodeStep(decoder, repeat = true, failOnErr = failOnErr)
+    if (decoder eq scodecCodecs.uint8)
+      PureDecoder(
+        manyUInt8Chunked.run
+          .asInstanceOf[ZPure[A, BitVector, BitVector, Any, CodecError, Status]],
+        flattenUInt8BatchLog.asInstanceOf[Chunk[Any] => Chunk[A]],
+        Some(failOnErr)
+      )
+    else
+      decodeStep(decoder, repeat = true, failOnErr = failOnErr)
 
   /** Alias for `many(decoder, failOnErr = false)`. */
   def tryMany[A](decoder: Decoder[A]): PureDecoder[A] = many(decoder, failOnErr = false)
@@ -298,7 +350,7 @@ object PureDecoder {
             ZPure.succeed(Status.NeedMore)
         }
       }
-    PureDecoder(step)
+    PureDecoder(step, castLog[Chunk[A]], None)
   }
 
   // -----------------------------------------------------------------
@@ -315,7 +367,7 @@ object PureDecoder {
    * `many(uint8)` over millions of values). [[fromDecoder]] stays the
    * canonical `DecoderStep` lift; behavior here matches it.
    */
-  private def decodeStep[A](
+  private[stream] def decodeStep[A](
     decoder: Decoder[A],
     repeat: Boolean,
     failOnErr: Boolean
@@ -342,6 +394,6 @@ object PureDecoder {
         }
       }
 
-    PureDecoder(step)
+    PureDecoder(step, castLog[A], None)
   }
 }

@@ -120,7 +120,7 @@ final class StreamDecoder[+A] private (private[stream] val step: StreamDecoder.S
             new StreamDecoder[A](FromPure(pure)).flatMap(f)
           val pureStep: PureDecoder.DecoderStep[StreamDecoder[B]] =
             ZPure.get[BitVector].flatMap { buffer =>
-              val (log, result) = pure.run.runAll(buffer)
+              val (log, result) = pure.runAllNormalized(buffer)
               result match {
                 case Left(err) =>
                   if (log.isEmpty)
@@ -344,7 +344,7 @@ object StreamDecoder {
       else ZChannel.write(log) *> next
 
     def runOnce(buffer: BitVector): BitChannel[A] = {
-      val (log, result) = pure.run.runAll(buffer)
+      val (log, result) = pure.runAllNormalized(buffer)
       result match {
         case Left(err) =>
           emitLog(log, ZChannel.fail(err))
@@ -562,7 +562,7 @@ object StreamDecoder {
 
     case FromPure(pure) =>
       // The pure decoder does the loop itself - just `runAll` it.
-      val (log, result) = pure.run.runAll(bits)
+      val (log, result) = pure.runAllNormalized(bits)
       result match {
         case Left(err)              => Left(err)
         case Right((leftover, _))   => Right((acc ++ log, leftover))
