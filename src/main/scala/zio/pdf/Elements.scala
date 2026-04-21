@@ -1,15 +1,18 @@
 /*
  * Port of fs2.pdf.Elements to Scala 3 + ZIO.
  *
- * Semantic analysis of decoded PDF objects: classify each into a
- * Page / Pages / FontResource / Image / Info / Array / etc. variant.
+ * Pure step over Decoded values, classifying each into a
+ * Page / Pages / FontResource / Image / Info / Array / etc.
+ * variant. The pipeline plumbing is the standard StatefulPipe
+ * pattern - no per-element ZChannel state machine.
  */
 
 package zio.pdf
 
 import _root_.scodec.Attempt
-import zio.{Cause, Chunk}
-import zio.stream.{ZChannel, ZPipeline}
+import zio.prelude.fx.ZPure
+import zio.scodec.stream.StatefulPipe
+import zio.stream.ZPipeline
 
 private[pdf] object AnalyzeData {
 
@@ -60,28 +63,16 @@ object Elements {
       Attempt.successful(Element.Meta(trailer, version))
   }
 
-  /** Pipeline `Decoded -> Element`. Failures during analysis are
-    * raised as `RuntimeException` on the channel error channel. */
-  val pipe: ZPipeline[Any, Throwable, Decoded, Element] = {
-    def loop: ZChannel[Any, Throwable, Chunk[Decoded], Any, Throwable, Chunk[Element], Unit] =
-      ZChannel.readWithCause[Any, Throwable, Chunk[Decoded], Any, Throwable, Chunk[Element], Unit](
-        (chunk: Chunk[Decoded]) => {
-          val out = Chunk.newBuilder[Element]
-          var err: Option[String] = None
-          chunk.foreach { d =>
-            if (err.isEmpty) element(d) match {
-              case Attempt.Successful(e) => out += e
-              case Attempt.Failure(c)    => err = Some(s"failed to analyze object: ${c.messageWithContext}")
-            }
-          }
-          err match {
-            case Some(msg) => ZChannel.fail(new RuntimeException(msg))
-            case None      => ZChannel.write(out.result()) *> loop
-          }
-        },
-        (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
-        (_: Any)                  => ZChannel.unit
-      )
-    ZPipeline.fromChannel(loop)
-  }
+  /** Pure step: emit one Element per Decoded, or fail if analysis
+    * fails. No state. */
+  private val step: StatefulPipe.Step[Decoded, Unit, Element] =
+    d => element(d) match {
+      case Attempt.Successful(e) => ZPure.log[Unit, Element](e)
+      case Attempt.Failure(c)    =>
+        ZPure.fail(new RuntimeException(s"failed to analyze object: ${c.messageWithContext}"))
+    }
+
+  /** Pipeline `Decoded -> Element`. */
+  val pipe: ZPipeline[Any, Throwable, Decoded, Element] =
+    StatefulPipe[Decoded, Unit, Element]((), _ => ZPure.unit[Unit])(step)
 }
