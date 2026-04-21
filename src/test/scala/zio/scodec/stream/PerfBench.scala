@@ -68,9 +68,9 @@ object PerfBench extends ZIOSpecDefault {
         require(r.value.size == N)
       }
 
-      val pureMs = timeMillis("PureDecoder.many(uint8).run.runAll", 5) {
-        val (log, _) = PureDecoder.many(uint8).run.runAll(payload)
-        require(log.size == N)
+      val pureMs = timeMillis("PureDecoder.many(uint8).decodeStrict", 5) {
+        val r = PureDecoder.many(uint8).decodeStrict(payload)
+        require(r.exists(_.value.size == N))
       }
 
       val pureChunkMs = timeMillis("PureDecoder.manyUInt8Chunked (1 log / pass)", 5) {
