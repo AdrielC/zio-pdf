@@ -18,6 +18,26 @@ import zio.stream.{ZPipeline, ZStream}
 object PdfStream {
 
   /**
+   * Which PDF decode pipeline to run on raw bytes. Both modes apply
+   * the same duplicate-object filtering as the legacy decoder; they
+   * differ only in how content-stream payloads are represented.
+   *
+   *  - [[DecodeMode.Materialized]] — each stream is decoded (and for
+   *    non-ObjStm objects, lazily decompressed) into [[Decoded]].
+   *    Convenient for [[elements]] and typical PDFs; peak memory is
+   *    bounded by the largest single object's payload.
+   *  - [[DecodeMode.Streaming]] — SAX-style [[StreamingDecoded]] events;
+   *    payload bytes are forwarded in chunks. Use for very large
+   *    embedded streams when you want memory bounded by upstream chunk
+   *    size.
+   */
+  sealed trait DecodeMode
+  object DecodeMode {
+    case object Materialized extends DecodeMode
+    case object Streaming extends DecodeMode
+  }
+
+  /**
    * Rechunk byte input into ~10 MiB BitVector chunks. Crucial for
    * performance, since constructors like `ZStream.fromInputStream`
    * and `ZStream.fromFile` use chunk sizes of a few KiB, which
@@ -51,28 +71,31 @@ object PdfStream {
    * Peak memory is bounded by *the largest single content stream*
    * because each `Decoded.ContentObj` carries the full payload as
    * a `BitVector`. For PDFs with multi-MB attachments / images /
-   * fonts use `streamingDecode` instead - that pipeline emits
-   * payloads as a sequence of `ContentObjBytes` chunks.
+   * fonts use [[decode]] with [[DecodeMode.Streaming]] instead.
    */
   def decode(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Decoded] =
+    decode(log, DecodeMode.Materialized)
+
+  /** @see [[DecodeMode]] */
+  def decode(log: Log, mode: DecodeMode.Materialized.type): ZPipeline[Any, Throwable, Byte, Decoded] =
     Decode(log)
 
+  /** @see [[DecodeMode]] */
+  def decode(log: Log, mode: DecodeMode.Streaming.type): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
+    StreamingDecode.pipeline(log)
+
+  def decode(log: Log, mode: DecodeMode): ZPipeline[Any, Throwable, Byte, Decoded | StreamingDecoded] =
+    mode match {
+      case DecodeMode.Materialized => Decode(log)
+      case DecodeMode.Streaming    => StreamingDecode.pipeline(log)
+    }
+
   /**
-   * Memory-bounded SAX-style decoder. Same coverage as `decode`
-   * (version / comment / xref / startxref / data objects / content
-   * objects / accumulated Meta), but each content-stream payload
-   * is forwarded as a sequence of `ContentObjBytes` chunks instead
-   * of being materialised as a single `BitVector`. Peak memory is
-   * bounded by the upstream chunk size, regardless of how big any
-   * individual content stream is.
-   *
-   * Use this when you have multi-MB content streams (large
-   * attachments, embedded images, font subsets) that you want to
-   * forward straight to a sink (CDC chunker, S3 multipart, hash
-   * digest) without materialising in memory.
+   * Memory-bounded SAX-style decoder. Same as
+   * `decode(Log.noop, DecodeMode.Streaming)`.
    */
   val streamingDecode: ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    StreamingDecode.pipeline
+    StreamingDecode.pipeline(Log.noop)
 
   /**
    * Decode the high-level Element layer: Page / Pages / Image /
