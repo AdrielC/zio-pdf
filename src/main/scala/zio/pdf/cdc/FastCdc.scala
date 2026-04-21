@@ -74,8 +74,8 @@ object FastCdc {
   /** Default config: 4 KiB min, 16 KiB avg, 64 KiB max. */
   val defaultConfig: Config = Config()
 
-  /** Concatenate two byte arrays (used by [[zio.pdf.cdc.FastCdcKyo]] and tests). */
-  private[cdc] def mergeArrays(prefix: Array[Byte], suffix: Array[Byte]): Array[Byte] = {
+  /** Concatenate two byte arrays (used by [[zio.pdf.cdc.FastCdcKyo]], Graviton scan, tests). */
+  private[zio] def mergeArrays(prefix: Array[Byte], suffix: Array[Byte]): Array[Byte] = {
     val merged = new Array[Byte](prefix.length + suffix.length)
     System.arraycopy(prefix, 0, merged, 0, prefix.length)
     System.arraycopy(suffix, 0, merged, prefix.length, suffix.length)
@@ -86,7 +86,7 @@ object FastCdc {
    * Drain complete CDC segments as raw arrays (no `zio.Chunk` allocation).
    * Same cut semantics as [[pipeline]].
    */
-  private[cdc] def drainToArrays(
+  private[zio] def drainToArrays(
     buffer: Array[Byte],
     flushTail: Boolean,
     cfg: Config
