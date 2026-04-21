@@ -12,7 +12,7 @@
 package zio.pdf
 
 import zio.pdf.{Comment as CommentCodec}
-import zio.scodec.stream.StreamDecoder
+import zio.scodec.stream.syntax.*
 import _root_.scodec.{Decoder, Err}
 import _root_.scodec.bits.ByteVector
 import zio.stream.ZPipeline
@@ -68,5 +68,5 @@ object TopLevel {
 
   /** ZIO `ZPipeline` from raw bytes to `TopLevel` chunks. */
   val pipe: ZPipeline[Any, Throwable, Byte, TopLevel] =
-    StreamDecoder.many(streamDecoder).toBytePipeline
+    streamDecoder.streamMany.toBytePipeline
 }

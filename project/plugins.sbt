@@ -1,1 +1,1 @@
-// no plugins required
+addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.8")
