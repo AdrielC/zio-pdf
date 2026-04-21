@@ -9,7 +9,7 @@ val zioHttpModelVersion        = "0.0.33"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
 /** Kyo effect system + bidirectional ZIO interop (same release line). */
-val kyoVersion                 = "0.19.0"
+val kyoVersion                 = "1.0-RC1"
 
 ThisBuild / organization      := "com.springernature"
 ThisBuild / scalaVersion      := "3.8.3"
