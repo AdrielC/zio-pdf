@@ -8,6 +8,8 @@ val zioBlocksMediatypeVersion  = "0.0.33"
 val zioHttpModelVersion        = "0.0.33"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
+/** Kyo effect system + bidirectional ZIO interop (same release line). */
+val kyoVersion                 = "0.19.0"
 
 ThisBuild / organization      := "com.springernature"
 ThisBuild / scalaVersion      := "3.8.3"
@@ -46,6 +48,8 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio-http-model"        % zioHttpModelVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
+      "io.getkyo" %% "kyo-core"               % kyoVersion,
+      "io.getkyo" %% "kyo-zio"                % kyoVersion,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt"      % zioVersion % Test
     ),
