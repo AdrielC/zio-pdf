@@ -68,9 +68,14 @@ object PerfBench extends ZIOSpecDefault {
         require(r.value.size == N)
       }
 
-      val pureMs = timeMillis("PureDecoder.many(uint8).run.runAll", 5) {
-        val (log, _) = PureDecoder.many(uint8).run.runAll(payload)
-        require(log.size == N)
+      val pureMs = timeMillis("PureDecoder.many(uint8).decodeStrict", 5) {
+        val r = PureDecoder.many(uint8).decodeStrict(payload)
+        require(r.exists(_.value.size == N))
+      }
+
+      val pureChunkMs = timeMillis("PureDecoder.manyUInt8Chunked (1 log / pass)", 5) {
+        val (log, _) = PureDecoder.manyUInt8Chunked.run.runAll(payload)
+        require(log.size == 1 && log(0).size == N)
       }
 
       val sdStrictMs = timeMillis("StreamDecoder.many(uint8).strict.decode", 5) {
@@ -78,7 +83,7 @@ object PerfBench extends ZIOSpecDefault {
         require(r.value.size == N)
       }
 
-      println(s"  baseline=$baselineMs ms  pure=$pureMs ms  strict-stream=$sdStrictMs ms")
+      println(s"  baseline=$baselineMs ms  pure=$pureMs ms  pureChunk=$pureChunkMs ms  strict-stream=$sdStrictMs ms")
       assertCompletes
     },
 

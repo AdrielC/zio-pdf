@@ -13,7 +13,7 @@
  * thereof) of N `uint8` values, comparing every layer of the API:
  *
  *   - scodec.codecs.vector(uint8).decode  (strict baseline)
- *   - PureDecoder.many(uint8).run.runAll  (ZPure layer, no Runtime)
+ *   - PureDecoder.many(uint8).runAllNormalized  (ZPure layer, flat log)
  *   - StreamDecoder.many(uint8).strict    (pure interpreter over Step)
  *   - StreamDecoder.many(uint8) over a chunked ZStream (ZChannel)
  *   - StreamDecoder.fromPure(many(uint8)) over a chunked ZStream (hybrid)
@@ -101,7 +101,7 @@ class StreamDecoderBench {
 
   @Benchmark
   def pureDecoderRunAll: Chunk[Int] =
-    pureMany.run.runAll(bits)._1
+    pureMany.runAllNormalized(bits)._1
 
   @Benchmark
   def streamDecoderStrict: Chunk[Int] =
