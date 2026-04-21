@@ -200,32 +200,66 @@ Day-to-day callsites no longer have to mention `StreamDecoder.fromPure(PureDecod
 
 ## Performance
 
-There are two perf harnesses in the repo:
+Run JMH with:
 
-1. A self-test microbench in `src/test/scala/.../PerfBench.scala` that runs as part of `sbt test` and prints timings to stdout. It's there so the perf claims in the README are checked on every build, not so it's a precision tool.
-2. A proper **JMH** subproject under `bench/` (sbt-jmh 0.4.8, JMH 1.37). Run with:
+```bash
+sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*StreamDecoderBench.*'
+sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*RingBufferBench.*'
+```
 
-   ```bash
-   sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*StreamDecoderBench.*'
-   ```
+### `StreamDecoder` / `PureDecoder` — 1 MiB of `uint8`, JDK 21
 
-   Sample output on the build VM (Scala 3.8.3, JDK 21, 1 MiB of `uint8`, 64 KiB chunks for the streaming variants, average time, lower is better):
+```
+Benchmark                                     (chunkSize)      (n)  Mode  Cnt    Score    Error  Units
+StreamDecoderBench.chunkedFastPathStrict            65536  1048576  avgt    5    0.890 ±  0.081  ms/op   <-- ~57x baseline
+StreamDecoderBench.chunkedFastPathChannel           65536  1048576  avgt    5    1.146 ±  0.224  ms/op   <-- ~44x baseline
+StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   50.873 ±  0.751  ms/op   reference
+StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   95.215 ± 11.892  ms/op
+StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5  105.574 ±  9.118  ms/op
+StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5  106.975 ±  3.026  ms/op
+StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5  106.703 ±  7.950  ms/op
+StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5  243.897 ±  6.592  ms/op
+```
 
-   ```
-   Benchmark                                     (chunkSize)      (n)  Mode  Cnt    Score    Error  Units
-   StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   54.012 ±  6.266  ms/op
-   StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   93.361 ±  4.806  ms/op
-   StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5  103.934 ± 28.065  ms/op
-   StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5  107.250 ± 15.568  ms/op
-   StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5  102.978 ± 15.909  ms/op
-   StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5  255.220 ± 15.018  ms/op
-   ```
+Five takeaways:
 
-   Three takeaways:
+1. **The chunked fast path beats `scodec.codecs.vector` by ~57×.** It uses `PureDecoder.manyChunked + StreamDecoder.fromPureChunked`: each upstream chunk is consumed in **one** `ZPure.runAll`, decoded in **one** tight `while` loop on the underlying `Array[Byte]`, and shipped downstream as **one** `ZChannel.write`. By contrast, `scodec.codecs.vector(uint8)` does ~1M individual `uint8.decode` calls (each allocates a 1-element `BitVector` slice and a `DecodeResult`) and concats into a boxed `Vector[Int]` — most of its time is allocation and per-element dispatch, not actual byte reading.
+2. **`inline` extension methods are free.** `uint8.streamMany.strict.decode` (sugar) and `StreamDecoder.many(uint8).strict.decode` (raw) are within JMH's error bars.
+3. **`strict` is no `Runtime` away from `scodec`.** The first cut spun up a `ZChannel` and `unsafe`-ran it (~1800 ms); `runStrict` walks the `Step` algebra directly in pure code (~107 ms), within ~2× of `vector`. ZIO IO belongs at the streaming-I/O boundary; never on the in-memory-decode hot path.
+4. **The two-layer architecture pays for itself.** `streamDecoderHybrid` (= `StreamDecoder.fromPure(PureDecoder.many)`) is ~2.3× faster than the plain `ZChannel`-only path because each upstream chunk drives one `ZPure.runAll` instead of looping through `ZChannel.write` per emitted value.
+5. **For maximum throughput on byte-aligned, fixed-width formats, use the chunked fast path.** It's the only one that bypasses both per-element scodec dispatch *and* per-element ZPure log overhead.
 
-   1. **`strict` is no `Runtime` away from `scodec`**. The first cut of `strict` was ~5× slower than the baseline because it spun up a `ZChannel` and unsafe-ran it; `runStrict` walks the `Step` algebra directly in pure code, so we are back within ~2× of the hand-written `scodec.codecs.vector` baseline. ZIO IO is the right tool for the streaming-I/O boundary, but it should never appear on the in-memory-decode hot path.
-   2. **Syntax is free.** `uint8.streamMany.strict.decode` and `StreamDecoder.many(uint8).strict.decode` are within JMH's error bars of each other.
-   3. **The two-layer architecture pays for itself.** `streamDecoderHybrid` (= `StreamDecoder.fromPure(PureDecoder.many)`) decodes streaming input ~2.5× faster than the plain `ZChannel`-only path and matches the strict in-memory result, because each upstream chunk is consumed by one `ZPure.runAll` instead of looping through `ZChannel.write` per emitted value.
+How to write your own chunked fast path:
+
+```scala
+import zio.scodec.stream.*, zio.scodec.stream.syntax.*
+import zio.Chunk
+
+inline def uint8Batch: PureDecoder[Chunk[Int]] =
+  PureDecoder.manyChunked[Int] { arr =>
+    val out = new Array[Int](arr.length)
+    var i   = 0
+    while (i < arr.length) { out(i) = arr(i) & 0xff; i += 1 }
+    Chunk.fromArray(out)
+  }
+
+val sd: StreamDecoder[Int] = uint8Batch.toStreamChunked
+// then:  byteStream.viaDecoder(sd) : ZStream[..., Int]
+```
+
+The `inline` on `manyChunked` matters: the JIT inlines the per-batch body straight into the `runAll` loop, with no method-call boundary.
+
+### `SpscRingBuffer` (`zio-blocks-ringbuffer`) vs `ArrayBlockingQueue`
+
+```
+Benchmark                                      (n)  Mode  Cnt    Score    Error  Units
+RingBufferBench.spscRingBufferFillDrain      16384  avgt    5   70.929 ± 13.977  us/op   ~7x faster
+RingBufferBench.arrayBlockingQueueFillDrain  16384  avgt    5  485.797 ± 33.699  us/op
+```
+
+For 16 K element fill-then-drain on a single thread, `SpscRingBuffer` is ~7× faster than `ArrayBlockingQueue` per element. The win when there's a real thread boundary is bigger because `ABQ` has to acquire a lock per `offer`/`poll` while `SpscRingBuffer` only needs a single relaxed write per slot. Use it for "decoder fiber → consumer fiber" handoff when the work is CPU-bound and the queue is on the hot path.
+
+**About `zio-blocks-streams`**: the project ships (`0.0.20`) but the API is still pull-based, alpha-grade, and not a drop-in replacement for `ZStream` for our purposes. The dep is wired into `build.sbt` so it's available; it'll be the natural target for a deeper refactor once it stabilises.
 
 ## What's ported from the original fs2-pdf
 

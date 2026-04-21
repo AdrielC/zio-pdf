@@ -1,8 +1,10 @@
-val zioVersion             = "2.1.25"
-val zioPreludeVersion      = "1.0.0-RC47"
-val zioBlocksSchemaVersion = "0.0.33"
-val scodecCoreVersion      = "2.3.3"
-val scodecBitsVersion      = "1.2.4"
+val zioVersion                 = "2.1.25"
+val zioPreludeVersion          = "1.0.0-RC47"
+val zioBlocksSchemaVersion     = "0.0.33"
+val zioBlocksRingbufferVersion = "0.0.32"
+val zioBlocksStreamsVersion    = "0.0.20"
+val scodecCoreVersion          = "2.3.3"
+val scodecBitsVersion          = "1.2.4"
 
 ThisBuild / organization      := "com.springernature"
 ThisBuild / scalaVersion      := "3.8.3"
@@ -33,9 +35,11 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio"               % zioVersion,
       "dev.zio"   %% "zio-streams"       % zioVersion,
       "dev.zio"   %% "zio-prelude"       % zioPreludeVersion,
-      "dev.zio"   %% "zio-blocks-schema" % zioBlocksSchemaVersion,
-      "org.scodec" %% "scodec-core"      % scodecCoreVersion,
-      "org.scodec" %% "scodec-bits"      % scodecBitsVersion,
+      "dev.zio"   %% "zio-blocks-schema"     % zioBlocksSchemaVersion,
+      "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
+      "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
+      "org.scodec" %% "scodec-core"          % scodecCoreVersion,
+      "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt"      % zioVersion % Test
     ),

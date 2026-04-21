@@ -64,6 +64,19 @@ class StreamDecoderBench {
   private val hybridMany  = StreamDecoder.fromPure(PureDecoder.many(uint8))
   private val streamMany2 = uint8.streamMany           // via syntax, identity-equal at runtime
 
+  // The byte-aligned, fixed-width fast path: read the whole batch
+  // of bytes into an Int chunk per ZPure step, then ship one log
+  // entry per upstream chunk. This is what `StreamDecoder.fromPureChunked`
+  // uses to amortise per-element ZPure / ZChannel overhead.
+  private val uint8BatchPure: PureDecoder[Chunk[Int]] =
+    PureDecoder.manyChunked[Int] { arr =>
+      val out = new Array[Int](arr.length)
+      var i   = 0
+      while (i < arr.length) { out(i) = arr(i) & 0xff; i += 1 }
+      Chunk.fromArray(out)
+    }
+  private val streamMany3 = StreamDecoder.fromPureChunked(uint8BatchPure)
+
   private val runtime = Runtime.default
 
   @Setup(Level.Trial)
@@ -112,5 +125,24 @@ class StreamDecoderBench {
   def streamDecoderHybrid: Long =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe.run(byteStream.viaDecoder(hybridMany).runCount).getOrThrow()
+    }
+
+  // -------------------------------------------------------------------
+  // The byte-aligned batched fast path - the actual point of this
+  // exercise. Should beat scodec.codecs.vector both strictly and
+  // streaming, because it skips per-element decoder dispatch *and*
+  // per-element ZPure.log overhead.
+  // -------------------------------------------------------------------
+
+  @Benchmark
+  def chunkedFastPathStrict: Chunk[Int] = {
+    val (log, _) = uint8BatchPure.run.runAll(bits)
+    if (log.size == 1) log(0) else log.flatten
+  }
+
+  @Benchmark
+  def chunkedFastPathChannel: Long =
+    Unsafe.unsafe { implicit u =>
+      runtime.unsafe.run(byteStream.viaDecoder(streamMany3).runCount).getOrThrow()
     }
 }

@@ -96,6 +96,14 @@ final class StreamDecoder[+A] private (private[stream] val step: StreamDecoder.S
           Decode(s.map(_.flatMap(f)), once, failOnErr)
         case Isolate(bits, decoder)      => Isolate(bits, decoder.flatMap(f))
         case Append(x, y)                => Append(x.flatMap(f), () => y().flatMap(f))
+        case FromPureChunked(pure)       =>
+          // Re-express the chunked variant by lifting the
+          // batched PureDecoder into a regular StreamDecoder of
+          // chunks, flattening the chunks, and then applying f.
+          val flattened: StreamDecoder[A] =
+            new StreamDecoder[Chunk[A]](FromPure(pure))
+              .flatMap(c => StreamDecoder.emits(c))
+          flattened.flatMap(f).step
         case FromPure(pure)              =>
           // Collapse `FromPure(p).flatMap(f)` into a `Decode` step
           // built from a `DecoderStep`. The step runs the pure
@@ -170,6 +178,7 @@ object StreamDecoder {
   private[stream] case class Isolate[A](bits: Long, decoder: StreamDecoder[A]) extends Step[A]
   private[stream] case class Append[A](x: StreamDecoder[A], y: () => StreamDecoder[A]) extends Step[A]
   private[stream] case class FromPure[A](pure: PureDecoder[A]) extends Step[A]
+  private[stream] case class FromPureChunked[A](pure: PureDecoder[Chunk[A]]) extends Step[A]
 
   /**
    * Type alias used internally for the channels we build: read
@@ -262,6 +271,21 @@ object StreamDecoder {
   def fromPure[A](pure: PureDecoder[A]): StreamDecoder[A] =
     new StreamDecoder[A](FromPure(pure))
 
+  /**
+   * Lift a *batched* pure decoder. Where [[fromPure]] expects the
+   * pure decoder to log one element per emission, `fromPureChunked`
+   * expects each log entry to itself be a `Chunk[A]` (i.e. a batch
+   * already prepared in pure code). The streaming layer flattens
+   * those batches into the downstream chunk stream verbatim - one
+   * downstream `ZChannel.write` per batch instead of per element.
+   *
+   * Combined with [[PureDecoder.manyChunked]] this is the fastest
+   * path for byte-aligned, fixed-width formats: it amortises both
+   * the streaming-channel cost *and* the per-element decoding cost.
+   */
+  def fromPureChunked[A](pure: PureDecoder[Chunk[A]]): StreamDecoder[A] =
+    new StreamDecoder[A](FromPureChunked(pure))
+
   // -------------------------------------------------------------------
   // Interpreter
   // -------------------------------------------------------------------
@@ -281,6 +305,7 @@ object StreamDecoder {
       case Append(x, y) =>
         runStep(x.step, carry).flatMap(leftover => runStep(y().step, leftover))
       case FromPure(pure)              => fromPureChannel(pure, carry)
+      case FromPureChunked(pure)       => fromPureChunkedChannel(pure, carry)
     }
 
   /**
@@ -298,6 +323,49 @@ object StreamDecoder {
     def emitLog(log: Chunk[A], next: BitChannel[A]): BitChannel[A] =
       if (log.isEmpty) next
       else ZChannel.write(log) *> next
+
+    def runOnce(buffer: BitVector): BitChannel[A] = {
+      val (log, result) = pure.run.runAll(buffer)
+      result match {
+        case Left(err) =>
+          emitLog(log, ZChannel.fail(err))
+        case Right((leftover, status)) =>
+          status match {
+            case PureDecoder.Status.NeedMore     => emitLog(log, waitForMore(leftover))
+            case PureDecoder.Status.Done         => emitLog(log, ZChannel.succeed(leftover))
+            case PureDecoder.Status.DoneTryAgain =>
+              if (leftover == buffer) emitLog(log, waitForMore(leftover))
+              else emitLog(log, runOnce(leftover))
+          }
+      }
+    }
+
+    def waitForMore(buffer: BitVector): BitChannel[A] =
+      ZChannel.readWithCause(
+        (chunk: Chunk[BitVector]) => runOnce(buffer ++ concatChunk(chunk)),
+        (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
+        (_: Any)                  => ZChannel.succeed(buffer)
+      )
+
+    if (carry.isEmpty) waitForMore(carry) else runOnce(carry)
+  }
+
+  /**
+   * Drive a *batched* `PureDecoder[Chunk[A]]` from the streaming
+   * side. Each log entry is itself a `Chunk[A]` and is shipped
+   * downstream verbatim. Combined with `PureDecoder.manyChunked`
+   * this is the fastest streaming path: one upstream pull -> one
+   * pure batch decode -> one downstream `ZChannel.write`.
+   */
+  private def fromPureChunkedChannel[A](
+    pure: PureDecoder[Chunk[A]],
+    carry: BitVector
+  ): BitChannel[A] = {
+
+    def emitLog(log: Chunk[Chunk[A]], next: BitChannel[A]): BitChannel[A] =
+      if (log.isEmpty) next
+      else if (log.size == 1) ZChannel.write(log(0)) *> next
+      else ZChannel.write(log.flatten) *> next
 
     def runOnce(buffer: BitVector): BitChannel[A] = {
       val (log, result) = pure.run.runAll(buffer)
@@ -479,6 +547,16 @@ object StreamDecoder {
       result match {
         case Left(err)              => Left(err)
         case Right((leftover, _))   => Right((acc ++ log, leftover))
+      }
+
+    case FromPureChunked(pure) =>
+      val (log, result) = pure.run.runAll(bits)
+      result match {
+        case Left(err)              => Left(err)
+        case Right((leftover, _))   =>
+          // Flatten the batches into a single accumulator chunk.
+          val flat = log.foldLeft(acc)((a, c) => a ++ c)
+          Right((flat, leftover))
       }
   }
 }
