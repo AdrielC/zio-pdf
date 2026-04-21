@@ -166,31 +166,66 @@ sanitization, and PDF-object stream extraction are all pure
 state-and-log computations that fit `ZPure` perfectly, and they get
 wired into the streaming pipeline via `fromPure` at the very end.
 
+## API at a glance (`zio.scodec.stream.syntax.*`)
+
+```scala
+import zio.scodec.stream.syntax.*
+import scodec.codecs.uint8
+
+// scodec.Decoder  ->  StreamDecoder
+val sd = uint8.streamMany               // ::= StreamDecoder.many(uint8)
+val so = uint8.streamOnce               // ::= StreamDecoder.once(uint8)
+
+// scodec.Decoder  ->  PureDecoder (the ZPure layer)
+val pd = uint8.pureMany                 // ::= PureDecoder.many(uint8)
+
+// scodec.Decoder  ->  the canonical pure step (a ZPure)
+val ds = uint8.asPureStep               // ::= PureDecoder.fromDecoder(uint8)
+
+// PureDecoder  ->  StreamDecoder
+val pdsd = uint8.pureMany.toStream      // ::= StreamDecoder.fromPure(uint8.pureMany)
+
+// ZStream sugar
+byteStream.decodeMany(uint8)            // Byte stream -> A stream
+byteStream.viaBytesDecoder(pd)          // Byte stream -> A stream via a PureDecoder
+bitStream.decodeManyBits(uint8)         // BitVector stream -> A stream
+bitStream.viaDecoder(sd)                // explicit StreamDecoder
+
+// In-memory strict
+bits.decodeStrict(sd)                   // Either[CodecError, DecodeResult[Chunk[A]]]
+bits.decodePure(pd)                     // same, via the ZPure layer
+```
+
+Day-to-day callsites no longer have to mention `StreamDecoder.fromPure(PureDecoder.many(...))` or chain `.toBytePipeline.via(...)`-style noise.
+
 ## Performance
 
-A microbench in the test suite (`PerfBench`) decodes ~4 MiB of
-`uint8` values four ways. Single-shot in-memory and streaming in
-64 KiB chunks (lower is better, JVM 21, OpenJDK):
+There are two perf harnesses in the repo:
 
-| approach | time / 4 MiB | notes |
-|---|---:|---|
-| `scodec.codecs.vector(uint8).decode` (strict baseline) | ~330 ms | single big strict decode, no streaming overhead |
-| **`PureDecoder.many(uint8).run.runAll`** | ~330 ms | parity with the baseline, *no Runtime needed* |
-| **`StreamDecoder.many(uint8).strict.decode`** | **~360 ms** | pure interpreter over the algebra; no `ZChannel`, no `Runtime`, no `Unsafe.unsafe.run` |
-| `StreamDecoder.many(uint8).decode` (channel, 64 KiB chunks) | ~880 ms | every emitted value flows through `ZChannel.write` |
-| **`StreamDecoder.fromPure(PureDecoder.many)`** (64 KiB chunks) | **~330 ms** | one `runAll` per upstream chunk; beats the plain channel by ~2.7× and matches the in-memory baseline |
+1. A self-test microbench in `src/test/scala/.../PerfBench.scala` that runs as part of `sbt test` and prints timings to stdout. It's there so the perf claims in the README are checked on every build, not so it's a precision tool.
+2. A proper **JMH** subproject under `bench/` (sbt-jmh 0.4.8, JMH 1.37). Run with:
 
-Two takeaways:
+   ```bash
+   sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*StreamDecoderBench.*'
+   ```
 
-1. **`strict` is now 5× faster** than its first cut, because it
-   walks the `Step` algebra directly in pure code (`runStrict`)
-   instead of spinning up a `ZChannel` and an unsafe `Runtime`. ZIO
-   is the right tool for the streaming-I/O boundary, but it's
-   wildly overkill once the input is a `BitVector` already in memory.
-2. **The two-layer architecture pays for itself**: write your
-   decoder as a `PureDecoder`, lift it into the streaming pipeline
-   with `fromPure`, and you get the streaming I/O semantics of a
-   `ZChannel` at the cost of pure per-step decoding.
+   Sample output on the build VM (Scala 3.8.3, JDK 21, 1 MiB of `uint8`, 64 KiB chunks for the streaming variants, average time, lower is better):
+
+   ```
+   Benchmark                                     (chunkSize)      (n)  Mode  Cnt    Score    Error  Units
+   StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   54.012 ±  6.266  ms/op
+   StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   93.361 ±  4.806  ms/op
+   StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5  103.934 ± 28.065  ms/op
+   StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5  107.250 ± 15.568  ms/op
+   StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5  102.978 ± 15.909  ms/op
+   StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5  255.220 ± 15.018  ms/op
+   ```
+
+   Three takeaways:
+
+   1. **`strict` is no `Runtime` away from `scodec`**. The first cut of `strict` was ~5× slower than the baseline because it spun up a `ZChannel` and unsafe-ran it; `runStrict` walks the `Step` algebra directly in pure code, so we are back within ~2× of the hand-written `scodec.codecs.vector` baseline. ZIO IO is the right tool for the streaming-I/O boundary, but it should never appear on the in-memory-decode hot path.
+   2. **Syntax is free.** `uint8.streamMany.strict.decode` and `StreamDecoder.many(uint8).strict.decode` are within JMH's error bars of each other.
+   3. **The two-layer architecture pays for itself.** `streamDecoderHybrid` (= `StreamDecoder.fromPure(PureDecoder.many)`) decodes streaming input ~2.5× faster than the plain `ZChannel`-only path and matches the strict in-memory result, because each upstream chunk is consumed by one `ZPure.runAll` instead of looping through `ZChannel.write` per emitted value.
 
 ## What's ported from the original fs2-pdf
 

@@ -41,3 +41,22 @@ lazy val root = (project in file("."))
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
+
+/**
+ * JMH benchmark subproject. Run with:
+ *
+ *   sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1'
+ *
+ * (-i = measurement iterations, -wi = warmup iterations,
+ *  -f = forks, -t = threads).
+ */
+lazy val bench = (project in file("bench"))
+  .enablePlugins(JmhPlugin)
+  .dependsOn(root)
+  .settings(
+    name              := "zio-pdf-bench",
+    publish / skip    := true,
+    Jmh / version     := "1.37",
+    // JMH-generated source uses Java; nothing to do for Scala 3.
+    scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused"))
+  )
