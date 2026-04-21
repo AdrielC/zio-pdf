@@ -10,6 +10,11 @@ project/target/
 .bloop/
 .scala-build/
 
+# sbt local boot/cache (never commit — large binaries)
+project/.boot/
+project/.ivy/
+project/.sbtboot/
+
 # IDE
 .idea/
 .idea_modules/
