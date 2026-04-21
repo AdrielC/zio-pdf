@@ -50,6 +50,7 @@ final case class PureDecoder[+A](
 ) { self =>
   import PureDecoder.*
 
+
   /** Decode a single in-memory `BitVector` strictly. */
   def decodeStrict(bits: BitVector): Either[CodecError, DecodeResult[Chunk[A]]] = {
     val (log, result) = run.runAll(bits)
@@ -136,6 +137,51 @@ object PureDecoder {
     case object DoneTryAgain extends Status
   }
 
+  /**
+   * A *single* pure decoding step. This is what the legacy code
+   * passed around as `BitVector => Attempt[DecodeResult[X]]` (and
+   * what `scodec.Decoder[X]` essentially is). Both forms are exactly
+   * the same thing as a `ZPure[W, BitVector, BitVector, Any,
+   * CodecError, X]`: input state = buffer, output state = remainder,
+   * error = decode error, success = the decoded value (or, when
+   * `W = X` and we use the log, a stream of decoded values).
+   *
+   * Centralising this as a single named type lets every layer
+   * (per-step decoders, `many`/`tryMany` loops, the `StreamDecoder`
+   * interpreter) speak the same language without each one
+   * re-inventing the same `BitVector => Attempt[…]` shape.
+   */
+  type DecoderStep[+A] = ZPure[Nothing, BitVector, BitVector, Any, CodecError, A]
+
+  /**
+   * Lift a `scodec.Decoder` into a [[DecoderStep]]. This is the
+   * structural identity:
+   *
+   * {{{
+   *   scodec.Decoder[A]         == BitVector => Attempt[DecodeResult[A]]
+   *   PureDecoder.DecoderStep[A] == ZPure[Nothing, BitVector, BitVector, Any, CodecError, A]
+   * }}}
+   *
+   * `Attempt.Failure(InsufficientBits)` is preserved as-is so the
+   * streaming layer can recognise it and pull more bits.
+   */
+  def fromDecoder[A](decoder: Decoder[A]): DecoderStep[A] =
+    ZPure.get[BitVector].flatMap { buffer =>
+      decoder.decode(buffer) match {
+        case Attempt.Successful(DecodeResult(a, remainder)) =>
+          ZPure.set[BitVector](remainder) *> ZPure.succeed(a)
+        case Attempt.Failure(err) =>
+          ZPure.fail(CodecError(err))
+      }
+    }
+
+  /** Run a `DecoderStep` strictly against an in-memory buffer. */
+  def runStep[A](step: DecoderStep[A], bits: BitVector): Either[CodecError, DecodeResult[A]] =
+    step.runAll(bits) match {
+      case (_, Left(err))             => Left(err)
+      case (_, Right((rem, value)))   => Right(DecodeResult(value, rem))
+    }
+
   // -----------------------------------------------------------------
   // Tiny constructors
   // -----------------------------------------------------------------
@@ -193,7 +239,9 @@ object PureDecoder {
   /**
    * The shared decoding step, parameterised by whether we should
    * loop (`many` semantics) and whether non-`InsufficientBits`
-   * failures should propagate.
+   * failures should propagate. Now built on top of
+   * [[PureDecoder.fromDecoder]] so the only `BitVector => …`
+   * function in the codebase lives in one place.
    */
   private def decodeStep[A](
     decoder: Decoder[A],
@@ -201,26 +249,27 @@ object PureDecoder {
     failOnErr: Boolean
   ): PureDecoder[A] = {
 
+    val baseStep: DecoderStep[A] = fromDecoder(decoder)
+
     def step: ZPure[A, BitVector, BitVector, Any, CodecError, Status] =
-      ZPure.get[BitVector].flatMap { buffer =>
-        decoder.decode(buffer) match {
-          case Attempt.Successful(DecodeResult(value, remainder)) =>
-            ZPure.set[BitVector](remainder) *>
-              ZPure.log[BitVector, A](value) *>
-              (if (repeat) step else ZPure.succeed(Status.Done))
-
-          case Attempt.Failure(_: Err.InsufficientBits) =>
-            ZPure.succeed(Status.NeedMore)
-
-          case Attempt.Failure(comp: Err.Composite)
+      // Catch any `CodecError` so we can distinguish 'need more bits'
+      // (recoverable, modeled in the success channel) from a real
+      // decoding failure (only fatal when `failOnErr` is true).
+      baseStep.foldM(
+        {
+          case CodecError(_: Err.InsufficientBits) =>
+            ZPure.succeed[BitVector, Status](Status.NeedMore)
+          case CodecError(comp: Err.Composite)
               if comp.errs.exists(_.isInstanceOf[Err.InsufficientBits]) =>
-            ZPure.succeed(Status.NeedMore)
-
-          case Attempt.Failure(e) =>
-            if (failOnErr) ZPure.fail(CodecError(e))
-            else ZPure.succeed(Status.Done)
-        }
-      }
+            ZPure.succeed[BitVector, Status](Status.NeedMore)
+          case other =>
+            if (failOnErr) ZPure.fail[CodecError](other)
+            else ZPure.succeed[BitVector, Status](Status.Done)
+        },
+        value =>
+          ZPure.log[BitVector, A](value) *>
+            (if (repeat) step else ZPure.succeed[BitVector, Status](Status.Done))
+      )
 
     PureDecoder(step)
   }

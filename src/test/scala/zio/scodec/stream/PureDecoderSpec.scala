@@ -16,6 +16,58 @@ object PureDecoderSpec extends ZIOSpecDefault {
 
   def spec: Spec[Any, Throwable] = suite("PureDecoder (ZPure)")(
 
+    suite("DecoderStep (ZPure[Nothing, BitVector, BitVector, Any, CodecError, A])")(
+
+      test("fromDecoder lifts a scodec.Decoder into a DecoderStep that updates state") {
+        val step                        = PureDecoder.fromDecoder(uint8)
+        val bits                        = hex"42 99".bits
+        val (_, result)                 = step.runAll(bits)
+        result match {
+          case Right((rem, value)) =>
+            assertTrue(value == 0x42, rem == hex"99".bits)
+          case other =>
+            assertTrue(false, s"expected success, got $other".isEmpty)
+        }
+      },
+
+      test("fromDecoder propagates InsufficientBits via the error channel") {
+        val step        = PureDecoder.fromDecoder(uint16)
+        val (_, result) = step.runAll(hex"42".bits)
+        assertTrue(
+          result match {
+            case Left(CodecError(_: Err.InsufficientBits)) => true
+            case _                                          => false
+          }
+        )
+      },
+
+      test("runStep yields a DecodeResult on success") {
+        val r = PureDecoder.runStep(PureDecoder.fromDecoder(uint8), hex"07 ff".bits)
+        assertTrue(
+          r match {
+            case Right(dr) => dr.value == 0x07 && dr.remainder == hex"ff".bits
+            case _         => false
+          }
+        )
+      },
+
+      test("DecoderStep composes via ZPure flatMap, preserving state") {
+        // Read one byte = N, then read N bytes.
+        val read1   = PureDecoder.fromDecoder(uint8)
+        val combined = for {
+          n  <- read1
+          bs <- PureDecoder.fromDecoder(bytes(n))
+        } yield (n, bs)
+        val (_, result) = combined.runAll(hex"03 aa bb cc dd".bits)
+        assertTrue(
+          result match {
+            case Right((rem, (3, bs))) => bs == hex"aa bb cc" && rem == hex"dd".bits
+            case _                     => false
+          }
+        )
+      }
+    ),
+
     suite("pure-only - no Runtime needed")(
 
       test("emit logs the value and finishes Done") {
