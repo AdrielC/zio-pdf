@@ -68,8 +68,55 @@ outermost (drives the program from a `Chunk[I]`). The leftover from the
 abort payload is appended to what `Emit` collected -- no re-emission, no
 broken Stream/Poll symmetry.
 
-Code lives under [`src/main/scala/zio/pdf/scan/`](src/main/scala/zio/pdf/scan/),
-tests under [`src/test/scala/zio/pdf/scan/ScanSpec.scala`](src/test/scala/zio/pdf/scan/ScanSpec.scala).
+Code lives under [`src/main/scala/zio/pdf/scan/`](src/main/scala/zio/pdf/scan/);
+tests under [`src/test/scala/zio/pdf/scan/`](src/test/scala/zio/pdf/scan/)
+(`ScanSpec` for the primitive properties, `AdvancedCompositionSpec` for
+deep `>>>` / `&&&` / `|||` composition and the Graviton-style ingest
+patterns, `ScanPerfBench` for the in-test perf snapshot).
+
+### Performance
+
+The fused `Scan.runDirect` path beats `scodec.codecs.vector(uint8)`'s
+strict baseline by roughly 3-4x on the canonical "decode 1 MiB through a
+4-stage pure pipeline" workload, despite doing strictly more work (the
+scan also runs three arithmetic stages on each decoded byte; the scodec
+baseline just decodes them):
+
+```
+=== scan vs scodec on 1048576 bytes (lower is better, in-test bench) ===
+  [scodec.codecs.vector(uint8).decode                ]   111 ms / iter
+  [Scan.runDirect (fused, 4 maps)                    ]    24 ms / iter
+  [Scan.runDirect (unfused, 4 maps + filter)         ]   204 ms / iter
+  [Scan.runKyo  (fused, 4 maps, N=1024)              ]     7 ms / iter
+  [hand-coded while loop (reference)                 ]     2 ms / iter
+  ratio fused/scodec = 0.35x
+```
+
+JMH numbers from `bench/Jmh/run -p n=1048576 zio.pdf.scan.bench.ScanBench`
+agree:
+
+```
+Benchmark                        (n)  Mode  Cnt    Score     Error  Units
+ScanBench.handCoded          1048576  avgt    3    0.937 ±   0.672  ms/op
+ScanBench.scanFusedDirect    1048576  avgt    3   23.525 ±  35.059  ms/op
+ScanBench.scanUnfusedDirect  1048576  avgt    3  179.283 ± 119.168  ms/op
+ScanBench.scodecBaseline     1048576  avgt    3   63.310 ±  29.787  ms/op
+```
+
+The fast path is `Fusion.tryFuse` recognising that every node in the
+spine is `Arr` or `Prim(ScanPrim.Map)` and collapsing the chain to a
+single `I => O`. The runner then becomes one `builder += f(_)` per
+input byte -- no `Stepper`, no `StepEffect`, no per-stage dispatch.
+
+The unfused lane (4 maps + a `Filter`) measures the cost when fusion is
+not possible: the driver routes each byte through the per-stage stepper
+and pays one `StepEffect` allocation per element.
+
+The Kyo lane pays a fixed per-element suspension cost from
+`Poll`/`Emit`/`Abort`, which dominates trivial workloads but stays flat
+under bigger per-stage work; it's intentionally not part of the JMH
+suite (the in-test bench measures it on a smaller payload so the
+result is visible without dominating the run).
 
 ## Building & testing
 
