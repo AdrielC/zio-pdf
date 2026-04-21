@@ -19,23 +19,46 @@ object Fusion {
 
   /** Try to collapse a `FreeScan[I, O]` into a single `I => O` function.
     * Returns `Some` when every node along the spine is `Arr` or
-    * `Prim(ScanPrim.Map)`; `None` otherwise. */
-  def tryFuse[I, O](scan: FreeScan[I, O]): Option[I => O] = scan match {
-    case FreeScan.Arr(f) =>
-      Some(f.asInstanceOf[I => O])
-    case FreeScan.Prim(ScanPrim.Map(f)) =>
-      Some(f.asInstanceOf[I => O])
-    case FreeScan.AndThen(left, right) =>
-      // Both sides need to fuse; we don't know `M` here so we treat both
-      // as `Any => Any` and rely on the surrounding type-correctness of
-      // `AndThen` to keep the composed function honest.
-      val leftFused  = tryFuse(left.asInstanceOf[FreeScan[I, Any]])
-      val rightFused = tryFuse(right.asInstanceOf[FreeScan[Any, O]])
-      for {
-        fl <- leftFused
-        fr <- rightFused
-      } yield (fl andThen fr).asInstanceOf[I => O]
-    case _ =>
-      None
+    * `Prim(ScanPrim.Map)`; `None` otherwise.
+    *
+    * Stack-safe: iteratively walks the spine left-to-right using an
+    * explicit work-stack rather than recursing through `AndThen`. A
+    * spine of N pure nodes reduces in N composition steps with O(1)
+    * stack depth. */
+  def tryFuse[I, O](scan: FreeScan[I, O]): Option[I => O] = {
+    val stages = scala.collection.mutable.ArrayBuffer.empty[Any => Any]
+    val work   = new scala.collection.mutable.Stack[FreeScan[Any, Any]]
+    work.push(scan.asInstanceOf[FreeScan[Any, Any]])
+    while work.nonEmpty do {
+      val node = work.pop()
+      node match {
+        case FreeScan.AndThen(l, r) =>
+          // Right-most stage runs last -- push right first so the left
+          // pops first. (Stack is LIFO.)
+          work.push(r.asInstanceOf[FreeScan[Any, Any]])
+          work.push(l.asInstanceOf[FreeScan[Any, Any]])
+        case FreeScan.Arr(f) =>
+          stages += f.asInstanceOf[Any => Any]
+        case FreeScan.Prim(ScanPrim.Map(f)) =>
+          stages += f.asInstanceOf[Any => Any]
+        case _ =>
+          // Non-pure node -- whole spine is unfuseable. Bail out.
+          return None
+      }
+    }
+    if stages.isEmpty then Some(((a: I) => a.asInstanceOf[O]))
+    else {
+      val arr      = stages.toArray
+      val composed = (a: Any) => {
+        var v = a
+        var i = 0
+        while i < arr.length do {
+          v = arr(i)(v)
+          i += 1
+        }
+        v
+      }
+      Some(composed.asInstanceOf[I => O])
+    }
   }
 }

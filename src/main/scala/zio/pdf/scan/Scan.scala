@@ -61,15 +61,44 @@ object Scan {
   /** Kyo-effect-typed runner. The returned computation requires no
     * additional effects -- all of Poll/Emit/Abort are handled inside, the
     * underlying stepper is pure, and only the Kyo machinery for
-    * suspension/resumption shows up in the type. */
+    * suspension/resumption shows up in the type.
+    *
+    * Two paths:
+    *
+    *   1. Fully-fused: if `Fusion.tryFuse` returns a single function,
+    *      lower it directly to a tight `Loop` that does
+    *      `Poll -> Emit(f(i)) -> continue`. No `StepEffect` allocations.
+    *
+    *   2. General: drive a compiled `Stepper` through the same Loop. */
   def runKyo[I, O, E](scan: FreeScan[I, O], inputs: Seq[I])(using
       pollTag: Tag[Poll[I]],
       emitTag: Tag[Emit[O]],
       frame: Frame
   ): (ScanDone[O, E], Chunk[O]) < Any = {
-    val prog: ScanProg.Of[I, O, E, Any] = stepperToProg(SinglePassInterp.compile(scan))
+    val prog: ScanProg.Of[I, O, E, Any] =
+      Fusion.tryFuse(scan) match {
+        case Some(f) => fusedFnToProg(f)
+        case None    => stepperToProg(SinglePassInterp.compile(scan))
+      }
     ScanRunner.run[I, O, E, Any](inputs)(prog)
   }
+
+  /** Fast-path lowering: a single function I => O becomes a Loop with
+    * exactly one `Poll`, one function application, and one `Emit` per
+    * input. No buffering, no stepper, no `StepEffect`. */
+  private[scan] def fusedFnToProg[I, O](f: I => O)(using
+      pollTag: Tag[Poll[I]],
+      emitTag: Tag[Emit[O]],
+      frame: Frame
+  ): ScanProg.Of[I, O, Nothing, Any] =
+    Loop.foreach {
+      Poll.andMap[I] {
+        case Absent =>
+          Abort.fail[ScanSignal](ScanDone.success[O]).andThen(Loop.done)
+        case Present(i) =>
+          Emit.value(f(i)).andThen(Loop.continue)
+      }
+    }
 
   /** Lower a `Stepper` into a `ScanProg.Of`. The driver loop polls one
     * input at a time; when the stepper signals `done`, the abort fires

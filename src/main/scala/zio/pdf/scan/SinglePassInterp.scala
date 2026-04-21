@@ -159,8 +159,37 @@ object SinglePassInterp {
     }
 
   /** Drive a compiled scan against an iterable of inputs. Pure -- no Kyo
-    * effects. Useful in tests and as a building block for the Kyo runner. */
-  def runDirect[I, O, E](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, E], Vector[O]) = {
+    * effects. Useful in tests and as a building block for the Kyo runner.
+    *
+    * The implementation has two fast paths:
+    *
+    *   1. Fully-fused: if `Fusion.tryFuse` returns `Some(f)`, we skip the
+    *      stepper layer entirely and run `it.foreach(builder += f(_))`.
+    *      This is the path that beats scodec's strict baseline on long
+    *      pure-map chains -- one function call per element, one
+    *      `Vector.Builder` slot, no `StepEffect` allocations.
+    *
+    *   2. General: lower the spine to a `Stepper` and route inputs
+    *      through it. One `StepEffect` allocation per input. */
+  def runDirect[I, O, E](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, E], Vector[O]) =
+    Fusion.tryFuse(scan) match {
+      case Some(f) =>
+        val builder = Vector.newBuilder[O]
+        // Pre-size when we can: most call-sites pass an `IndexedSeq`/`Array`
+        // and we'd rather pay the size hint up front than reallocate.
+        inputs match {
+          case ix: IndexedSeq[I] @unchecked => builder.sizeHint(ix.size)
+          case _                            => ()
+        }
+        val it = inputs.iterator
+        while it.hasNext do { builder += f(it.next()) }
+        (ScanDone.success[O].asInstanceOf[ScanDone[O, E]], builder.result())
+      case None =>
+        runStepper(scan, inputs)
+    }
+
+  /** General path: walk a compiled stepper byte-by-byte. */
+  private def runStepper[I, O, E](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, E], Vector[O]) = {
     val initial: Stepper[I, O, Any] = compile(scan)
     val emitted = Vector.newBuilder[O]
     var current: Stepper[I, O, Any] = initial
