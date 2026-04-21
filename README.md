@@ -1,315 +1,150 @@
-# :warning: Repository Status: No Longer Maintained
-
-Thank you for your interest in **fs2-pdf**!
-
-Unfortunately, this project is no longer actively maintained. While the code will remain available, no further updates, bug fixes, or support will be provided.
-
-# :question: What Does This Mean?
-
-* The repository will be **archived**, making it **read-only**.
-* You are still welcome to fork the repository and use the code as needed.
-* No new issues, pull requests, or discussions will be accepted.
-
-# :raised_hands: Thank You!
-We appreciate everyone who contributed, used, and supported this project.
-
-## About
-
-**fs2-pdf** is a Scala library for manipulating PDF files in [fs2] streams using [scodec] for parsing.
-
-Prevalent PDF manipulation tools like iText require the whole file to be read into memory, making it hard to estimate
-the memory footprint due to large images and imposing a hard boundary for the document file size of `Int.MaxValue`.
-
-## Module ID
-
-```sbt
-"com.springernature" %% "fs2-pdf" %  "0.1.0-RC8"
-```
-
-# Usage
-
-The provided `fs2` pipes convert pdf data in the shape of a `Stream[IO, Byte]` into data type encodings and back to byte
-streams.
-Raw data is processed with [scodec] and stored as `BitVector`s and `ByteVector`s.
-
-```scala
-import fs2.pdf._
-```
-
-## Decoding
-
-The coarsest useful data types are provided by `wm.pdf.PdfStream.topLevel`, producing the ADT `TopLevel`:
-
-```scala
-case class IndirectObj(obj: pdf.IndirectObj)
-case class Version(version: pdf.Version)
-case class Comment(data: pdf.Comment)
-case class Xref(version: pdf.Xref)
-case class StartXref(startxref: pdf.StartXref)
-```
-
-PDFs consist of a series of objects that look like this:
-
-```pdf
-% a compressed content stream object
-3 0 obj
-<</Filter /FlateDecode /Length 19>>
-stream
-<binary data...>
-endstream
-endobj
-
-% an array object
-112 0 obj
-[/Name 5 4 0 R (string)]
-endobj
-
-% a dict object
-2624 0 obj
-<</Count 48 /Kids [2625 0 R 2626 0 R 2627 0 R 2628 0 R 2629 0 R 2630 0 R] /Parent 2623 0 R /Type /Pages>>
-endobj
-```
-
-These are encoded as `IndirectObj`, with the stream being optional.
-There are special object streams, in which a stream contains more objects; those are decoded in a later stage.
-
-At the very beginning of a document, the version header should appear:
-
-```pdf
-%PDF-1.7
-%Ã¢Ã£ÃÃ
-
-```
-
-The second line is optional and indicates that the PDF contains binary data streams.
-
-At the end of a document, the cross reference table, or xref, indicates the byte offsets of the contained objects,
-looking like this:
-
-```pdf
-xref
-0 1724
-0000000000 65535 f 
-0000111287 00000 n 
-0000111518 00000 n 
-0000111722 00000 n 
-0000111822 00000 n 
-0000112053 00000 n 
-...
-0000111175 00000 n 
-trailer
-<<
-/ID [<9154668ac56ee69570067970a0db0b0a> <3ddbb5faba07f5306b8feb50afd4225c> ]
-/Root 1685 0 R
-/Size 1724
-/Info 1683 0 R
->>
-startxref
-1493726
-%%EOF
-
-```
-
-The dictionary after the `trailer` keyword contains metadata, in particular the `/Root` reference pointing to the object
-describing the pages.
-
-The number after the `startxref` keyword denotes the byte offset of the `xref` keyword for quicker seeking in viewer apps.
-
-Multiple xrefs may occur in a document under two conditions:
-* linearized PDFs, where an additional xref at the beginning of the document references only the first page, for
-  optimized loading
-* incrementally updated PDFs, allowing authoring tools to append arbitrarily many additional objects with xrefs
-
-Xrefs can be compressed into binary streams.
-In that case, only the part starting with `startxref` will be at the end of the file, and the `StartXref` variant will
-encode this part.
-
-In order to use this initial encoding, pipe a stream of bytes through `PdfStream.topLevel`:
-
-```scala
-val raw: Stream[IO, Byte] =
-  openAPdfFile
-
-val topLevel: Stream[IO, TopLevel] =
-  raw.through(PdfStream.topLevel)
-```
-
-For a slightly more abstract encoding, `TopLevel` can be transformed into `Decoded` with the variants:
-
-```scala
-case class DataObj(obj: Obj)
-case class ContentObj(obj: Obj, rawStream: BitVector, stream: Uncompressed)
-case class Meta(xrefs: NonEmptyList[Xref], trailer: Trailer, version: Version)
-```
-
-Here, the distinction between objects with and without streams is made and the metadata is aggregated into a unique
-record containing all xrefs, the aggregated trailer and the version.
-
-To use this:
-
-```scala
-val decoded: Stream[IO, Decoded] =
-  raw.through(PdfStream.decode(Log.noop)) // you can provide a real logger with `fs2.pdf.Log.io`
-```
-
-For another level of abstraction, the `Element` algebra represents semantics of objects:
-
-```scala
-object DataKind
-{
-  case object General
-  case class Page(page: pdf.Page)
-  case class Pages(pages: pdf.Pages)
-  case class Array(data: Prim.Array)
-  case class FontResource(res: pdf.FontResource)
-}
-
-case class Data(obj: Obj, kind: DataKind)
-
-object ContentKind
-{
-  case object General
-  case class Image(image: pdf.Image)
-}
-
-case class Content(obj: Obj, rawStream: BitVector, stream: Uncompressed, kind: ContentKind)
-
-case class Meta(trailer: Trailer, version: Version)
-```
-
-To use this:
-
-```scala
-val elements: Stream[IO, Element] =
-  raw.through(PdfStream.elements(Log.noop))
-```
-
-## Encoding
-
-A stream of indirect objects can be encoded into a pdf document, with automatic generation of the cross reference table.
-
-```scala
-val reencoded: Stream[IO, Byte] =
-  decoded
-    .through(Decoded.parts)
-    .through(WritePdf.parts)
-    .through(Write.bytes("/path/to/file.pdf"))
-```
-
-or
-
-```scala
-val reencoded: Stream[IO, Byte] =
-  elements
-    .through(Element.parts)
-    .through(WritePdf.parts)
-    .through(Write.bytes("/path/to/file.pdf"))
-```
-
-The intermediate data type `Part` is used to carry over the trailer into the encoder.
-Instead of `Decoded.parts` and `WritePdf.parts`, you could also use `Decoded.objects` and `WritePdf.objects`, but then you would
-have to specify a trailer dictionary for the encoder.
-`Decoded.parts` extracts this information from the input trailer.
-
-## Transforming
-
-Since you won't just want to reencode the original data, a step in between decoding and encoding should manipulate it.
-The pipes in `Rewrite` are used in `Decoded.parts`, and they allow more complex transformations by keeping a state when
-analyzing objects and using it to create additions to the document.
-
-The rewrite works in two stages, `collect` and `update`:
-
-```scala
-case class PagesState(pages: List[Pages])
-val initialState: PagesState = PagesState(Nil)
-val result: Stream[IO, ByteVector] =
-  elements
-    .through(Rewrite(initialState)(collect)(update))
-```
-
-In `collect`, every `Element` (or `Decoded`) will be evaluated by a stateful function that allows you to prevent objects from
-being written and instead collect them for an update:
-
-```scala
-def collect(state: RewriteState[PagesState]): Element => Pull[IO, Part[Trailer], RewriteState[PagesState]] = {
-  case Element.Data(_, Element.DataKind.Pages(pages)) =>
-    Pull.pure(state.copy(state = state.state.copy(pages = pages :: state.state.pages)))
-  case Element.obj(obj) =>
-    Pull.output1(Part.Obj(obj)) >> Pull.pure(state)
-  case Element.Meta(trailer, _) =>
-    Pull.pure(state.copy(trailer = Some(trailer)))
-}
-```
-
-Here we get our state, wrapped in `RewriteState`, which tracks the trailer, and an `Element` passed into our function.
-The output is `fs2.Pull`, on which you can call `Pull.output1` to instruct the stream to emit a PDF part, and `Pull.pure` to
-return the updated state.
-
-There is a variant `Rewrite.simple` that hides the `Pull` from these signatures and instead expects you to return
-`(List[Part[Trailer]], RewriteState[PagesState])`.
-
-In this example, we match on `DataKind.Pages` and do not call `Pull.output1` in this case, but add the pages to our state.
-In the case of any other object, which we match with the convenience extractor `Element.obj`, we just pass through as a
-`Part.Obj`.
-Finally, the trailer has to be carried over in the state.
-
-In `update`, we use the collected pages to do some analysis and then write them back to the stream:
-
-```scala
-val fontObj(number: Long): IndirectObj =
-  ???
-
-def update(update: RewriteUpdate[PagesState]): Pull[IO, Part[Trailer], Unit] =
-  Pull.output1(Part.Trailer(update.trailer)) >> update.state.pages.traverse_ {
-    case Pages(index, data, _, true) =>
-      val updatedData = data ++ Prim.dict("Resources" -> Prim.dict("Font" -> Prim.dict("F1" -> Prim.Ref(1000L, 0))))
-      Pull.output1(fontObj(1000L)) >>
-      Pull.output1(Part.Obj(IndirectObj(Obj(index, updatedData), None)))
-    case Pages(index, data, _, false) =>
-      Pull.output1(Part.Obj(IndirectObj(Obj(index, data), None)))
-  }
-```
-
-`RewriteUpdate` is the same as `RewriteState`, except that the trailer isn't optional anymore.
-If there is no trailer in the state at the end of the stream, an error is raised.
-
-In this function, we first emit the trailer, then we iterate over our collected pages and match on the boolean `root`
-field.
-If we found the root page tree object, we first emit a custom font descriptor (not implemented here), then add
-a reference to it to the page root's `Resource` dictionary (this is of course an incomplete simplification).
-For all other pages objects, we just write the original data.
-
-## Validation
-
-```scala
-val result: IO[ValidatedNel[String, Unit]] = raw.through(PdfStream.validate(Log.noop))
-```
-
-# Limitations
-
-Linearization is not possible at the moment, since the linearization parameter dict is the first object and needs
-information that is only available later, like the total file size.
-
-A heuristical method for keeping already linearized documents intact is in development.
-
-# Development
-
-## Testing
+# zio-pdf (formerly fs2-pdf)
+
+> :warning: **Repository Status: rewrite in progress**
+>
+> The original `fs2-pdf` was archived. This branch ports the project
+> off of `cats-effect` / `fs2` / `scodec-stream` (Scala 2.13) and onto
+> the latest **ZIO 2 / Scala 3** ecosystem.
+
+## What this branch contains
+
+- **Scala 3.8.3** (the latest 3.8.x release).
+- **ZIO 2.1.25** with `zio-streams`, `zio-prelude` 1.0.0-RC47.
+- **`zio-blocks-schema` 0.0.33** for schema-derived codecs (smoke-tested).
+- **scodec-core 2.3.3** + **scodec-bits 1.2.4**.
+- A **ZIO port of `scodec.stream.StreamDecoder`** (the file from the
+  original prompt) implemented on top of `ZChannel`.
+- A `zio-test` suite covering the streaming-decoder semantics
+  (`once`, `many`, `tryMany`, `++`, `flatMap`, `isolate`, `ignore`,
+  `emit`/`emits`, `raiseError`, `strict`, byte/bit pipelines).
+- The original Scala 2.13 / fs2 sources are preserved, untouched, in
+  `legacy/` for reference. They are not part of the new build and
+  would need a much larger port to compile against ZIO/Scala 3.
+
+## Building & testing
 
 ```bash
-ops/sbt test
+sbt test
 ```
 
-## Publishing
+```
+[info] + StreamDecoder
+[info]   + once decodes a single value and stops
+[info]   + many decodes all values until the input ends
+[info]   + many decodes across many small chunks (rechunk by 1 byte == 8 bits)
+[info]   + many fails when an inner decoder fails (failOnErr = true)
+[info]   + ++ runs the right decoder on the leftover from the left
+[info]   + emits yields the supplied values
+[info]   + emit yields a single value without consuming any input
+[info]   + tryMany stops cleanly when an inner decoder fails
+[info]   + isolate reads exactly the requested number of bits
+[info]   + ignore drops the requested number of bits
+[info]   + flatMap can choose a continuation based on a decoded value
+[info]   + raiseError(Err) wraps in CodecError
+[info]   + toBytePipeline works on a Byte stream
+[info]   + strict round-trip via Decoder yields the same values plus leftover
+[info]   + raiseError fails the stream with the supplied throwable
+[info] + zio-blocks-schema smoke
+[info]   + derived Schema is non-null and reports the expected name
+[info] 16 tests passed. 0 tests failed. 0 tests ignored.
+```
 
-If you work at SpringerNature and have access to this project's pipeline, you can trigger a deployment to Maven with
-the script at `ops/trigger-publish.bash`, which will verify some conditions and start the publish pipeline job.
+## The ZIO `StreamDecoder` port
 
-# License
+The new module lives at:
 
-Copyright 2020 SpringerNature
+- `src/main/scala/zio/scodec/stream/StreamDecoder.scala`
+- `src/main/scala/zio/scodec/stream/CodecError.scala`
 
-**fs2-pdf** is licensed under the Apache License 2.0
+It is a faithful port of the FS2 implementation: the public API
+(`once`, `many`, `tryOnce`, `tryMany`, `emit`, `emits`, `++`,
+`flatMap`, `map`, `isolate`, `ignore`, `raiseError`, `strict`,
+`decode`, `toPipeline`, `toBytePipeline`) matches the original.
 
-[fs2]: https://fs2.io
-[scodec]: https://scodec.org
+Internally each decoder compiles to a single `ZChannel`:
+
+```scala
+type BitChannel[+A] =
+  ZChannel[Any, Throwable, Chunk[BitVector], Any, Throwable, Chunk[A], BitVector]
+```
+
+The `OutDone` slot of the channel carries the *leftover bits* the
+decoder peeked at but did not consume, which is what makes
+`++`-style sequencing trivial (just `flatMap` the channel) and what
+keeps `isolate` honest (any over-read bits flow back out).
+
+### Usage
+
+```scala
+import zio.*
+import zio.stream.*
+import scodec.bits.BitVector
+import scodec.codecs.uint8
+import zio.scodec.stream.StreamDecoder
+
+val source: ZStream[Any, Throwable, BitVector] = ???
+val decoded: ZStream[Any, Throwable, Int] =
+  StreamDecoder.many(uint8).decode(source)
+```
+
+Or, equivalently, as a `ZPipeline`:
+
+```scala
+val pipe: ZPipeline[Any, Throwable, BitVector, Int] =
+  StreamDecoder.many(uint8).toPipeline
+
+val decoded: ZStream[Any, Throwable, Int] = source.via(pipe)
+```
+
+For byte streams there is `toBytePipeline`:
+
+```scala
+val bytes: ZStream[Any, Throwable, Byte] = ???
+val ints: ZStream[Any, Throwable, Int] =
+  bytes.via(StreamDecoder.many(uint8).toBytePipeline)
+```
+
+## Why use `ZChannel` (and not `ZPure`)
+
+`ZChannel` is ZIO's primitive for *stream-shape* transformations: it
+can read one element type from upstream, write a different element
+type downstream, and finish with a value. It is the underlying
+abstraction for `ZStream`, `ZPipeline`, and `ZSink`. That is exactly
+the shape of a streaming decoder, so the implementation is direct and
+fast (no allocation per byte beyond the carry buffer).
+
+`ZPure` is the right choice for *pure* state/log/error/reader
+computations that produce a single value, but it does not natively
+model the producer/consumer shape of a streaming decoder. Mixing the
+two would mean wrapping `ZPure` runs in a channel, which buys no
+power but adds an allocation per step. So the port stays on
+`ZChannel` and is happy to lean on `zio-prelude.ZPure` for
+*pure helpers* (e.g. accumulating xref tables) when the legacy code
+is migrated.
+
+## Roadmap
+
+The original `fs2-pdf` source tree (~4 700 lines, 56 files) is in
+`legacy/`. Migrating it requires:
+
+1. Replacing `cats.effect.IO` with `zio.Task` / `zio.IO`.
+2. Replacing `fs2.Stream` / `fs2.Pipe` / `fs2.Pull` with ZIO's
+   `ZStream` / `ZPipeline` / `ZChannel`.
+3. Replacing `cats.data.NonEmptyList` / `Validated` with the
+   equivalents from `zio.NonEmptyChunk` and `zio.prelude.Validation`.
+4. Replacing every `scodec.stream.StreamDecoder` callsite with the
+   new `zio.scodec.stream.StreamDecoder`.
+5. Replacing the few `scodec` 1.x APIs that moved/changed in 2.x
+   (mostly cosmetic).
+6. Optionally lifting the existing PDF data ADTs (`Prim`, `Obj`,
+   `IndirectObj`, `Xref`, `Trailer`, `Pages`, etc.) onto
+   `zio-blocks-schema` so they get JSON / Avro / MessagePack codecs
+   for free.
+
+The `StreamDecoder` port and the new build are the foundation. The
+remaining work is mechanical but voluminous and should be done in
+follow-up PRs to keep diffs reviewable.
+
+## License
+
+Copyright 2020-2026 SpringerNature. Apache License 2.0.

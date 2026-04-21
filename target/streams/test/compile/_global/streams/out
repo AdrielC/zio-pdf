@@ -1,0 +1,5 @@
+[warn] -- [E198] Unused Symbol Warning: /workspace/src/test/scala/zio/scodec/stream/StreamDecoderSpec.scala:95:56 
+[warn] 95 |      val decoder = StreamDecoder.once(uint8).flatMap { n =>
+[warn]    |                                                        ^
+[warn]    |                                               unused explicit parameter
+[warn] one warning found
