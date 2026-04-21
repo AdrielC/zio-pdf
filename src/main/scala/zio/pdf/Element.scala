@@ -18,7 +18,16 @@ object Page {
   def fromData(index: Obj.Index): Prim => Attempt[Page] = {
     case Prim.tpe("Page", data) =>
       Prim.Dict.path("MediaBox")(data) {
-        case Prim.Array(List(Prim.Number(x), Prim.Number(y), Prim.Number(w), Prim.Number(h))) =>
+        // A PDF MediaBox is a four-element array [llx lly urx ury] of
+        // numbers. Guard keeps the partial function honest -- if the
+        // shape doesn't match, `Prim.Dict.path`'s `.lift` returns None
+        // and the outer machinery reports the error.
+        case Prim.Array(elems)
+            if elems.length == 4
+              && elems.forall(_.isInstanceOf[Prim.Number]) =>
+          val Vector(x, y, w, h) = elems.iterator
+            .collect { case Prim.Number(n) => n }
+            .toVector: @unchecked
           Page(index, data, MediaBox(x, y, w, h))
       }
     case _ =>
