@@ -49,7 +49,7 @@ lazy val root = (project in file("."))
   )
 
 /**
- * JMH benchmark subproject. Run with:
+ * JMH benchmark subproject for the ZIO-based codec stack. Run with:
  *
  *   sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1'
  *
@@ -63,6 +63,33 @@ lazy val bench = (project in file("bench"))
     name              := "zio-pdf-bench",
     publish / skip    := true,
     Jmh / version     := "1.37",
-    // JMH-generated source uses Java; nothing to do for Scala 3.
     scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused"))
+  )
+
+/**
+ * Head-to-head benches against fs2 + the (folded-into-fs2)
+ * scodec-stream interop. Lives in its own subproject so fs2 +
+ * cats-effect and their transitive cloud of types never touch the
+ * main project. This is the apples-to-apples comparison: same
+ * scodec.Decoder fed to both libraries, decoding the same in-memory
+ * byte stream, throughput in MB/s.
+ *
+ * Run with:
+ *
+ *   sbt 'benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms'
+ */
+lazy val benchFs2 = (project in file("bench-fs2"))
+  .enablePlugins(JmhPlugin)
+  .dependsOn(root)
+  .settings(
+    name              := "zio-pdf-bench-fs2",
+    publish / skip    := true,
+    Jmh / version     := "1.37",
+    scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused")),
+    libraryDependencies ++= List(
+      "co.fs2"         %% "fs2-core"    % "3.13.0",
+      "co.fs2"         %% "fs2-io"      % "3.13.0",
+      "co.fs2"         %% "fs2-scodec"  % "3.13.0",
+      "org.typelevel"  %% "cats-effect" % "3.7.0"
+    )
   )
