@@ -445,7 +445,66 @@ partStream.via(WritePdf.parts).runFold(0L)(_ + _.size)  // counts bytes; ~64 KiB
 
 `StreamObjSpec` proves this end-to-end: it encodes a 1 MiB content stream and a 10 MiB content stream by piping a synthetic `ZStream[Byte]` through `WritePdf.parts` directly into a `runFold(0L)(_ + _.size)` byte counter — the total file bytes are never materialised. A separate test then encodes 1 MiB the same way, materialises the bytes, decodes them back, and verifies all 1 048 576 bytes of the deterministic `i & 0xff` pattern come through byte-perfect.
 
-**Decoder-side caveat**: the decoder still materialises an *individual content stream's* payload as a `BitVector` (because `IndirectObj.streamPayload` needs to resolve `/Length` and confirm the trailing `endstream` keyword on the underlying bytes). For pure decoding workflows on a multi-GB file this means peak memory is bounded by *the largest single object*, not by the total file size. Streaming the payload of an individual object back out of the decoder would require splitting `IndirectObj.streamPayload` into a header decoder + a payload `ZPipeline`; that's a follow-up.
+### Memory-bounded *decoder* via `PdfStream.streamingDecode`
+
+The standard `PdfStream.decode` materialises each content stream's payload as a single `BitVector` so it can resolve `/Length` and verify the trailing `endstream`. For PDFs with multi-MB attachments / images / fonts this means peak memory is bounded by the largest single object, not by the upstream chunk size — fine for typical text-heavy PDFs, problematic for big binary blobs.
+
+`PdfStream.streamingDecode: ZPipeline[Any, Throwable, Byte, StreamingDecoded]` is the SAX-style alternative. Same coverage as `decode` (version, comment, xref, startxref, data objects, content objects, accumulated `Meta`), but each content-stream payload is forwarded as a sequence of `ContentObjBytes` chunks instead of being materialised:
+
+```scala
+sealed trait StreamingDecoded
+object StreamingDecoded {
+  case class DataObj(obj: Obj)                                       extends StreamingDecoded
+  case class VersionT(v: Version)                                    extends StreamingDecoded
+  case class XrefT(x: Xref)                                          extends StreamingDecoded
+  case class StartXrefT(s: StartXref)                                extends StreamingDecoded
+  case class CommentT(b: ByteVector)                                 extends StreamingDecoded
+  // SAX events for one content stream:
+  case class ContentObjHeader(obj: Obj, length: Long)                extends StreamingDecoded
+  case class ContentObjBytes(bytes: Chunk[Byte])                     extends StreamingDecoded
+  case object ContentObjEnd                                           extends StreamingDecoded
+  case class Meta(xrefs: List[Xref], trailer: Option[Trailer], version: Option[Version]) extends StreamingDecoded
+}
+```
+
+Internally the pipeline alternates between two modes:
+
+- **WaitingHeader**: try to decode one of `Version | Xref | StartXref | Comment | IndirectObj.headerOnly` from the carry buffer. The new `IndirectObj.headerOnly` codec stops *just after* the `stream\n` keyword and yields an `IndirectObjHeader(obj, Option[Long])`. On success, emit the matching event (and for stream-bearing objects, a `ContentObjHeader` plus a transition).
+- **ForwardingBytes(remaining)**: forward upstream bytes downstream as `ContentObjBytes` chunks, decrementing `remaining`. When it hits zero, parse `\nendstream\nendobj\n` and return to WaitingHeader.
+
+Peak memory = upstream chunk size + the carry buffer for one TopLevel-shaped header. **The actual content stream payload is forwarded chunk-by-chunk; it never lives in a single buffer.**
+
+```scala
+import zio.pdf.{PdfStream, StreamingDecoded}
+import java.security.MessageDigest
+
+// Hash a 256 KiB embedded blob without ever holding it in memory:
+val digest: ZIO[Any, Throwable, Array[Byte]] =
+  ZStream
+    .fromInputStream(...)                              // big PDF
+    .via(PdfStream.streamingDecode)
+    .collect { case StreamingDecoded.ContentObjBytes(c) => c }
+    .runFold(MessageDigest.getInstance("SHA-256")) { (md, c) =>
+      md.update(c.toArray); md
+    }
+    .map(_.digest())
+```
+
+`StreamingDecodeSpec` proves the API works:
+
+- **Header / Bytes\* / End sequence** is emitted exactly once per content object.
+- **Byte-perfect concatenation**: all `ContentObjBytes` chunks for one object concatenate to the original payload.
+- **1 MiB and 10 MiB streaming payloads** decoded end-to-end without materialisation (verified by `runFold(0L)` byte counters that never collect the chunks).
+- **Streaming SHA-256**: piping `ContentObjBytes` straight into `MessageDigest.update` produces the byte-perfect hash without buffering.
+
+When to use which:
+
+| Workload | Pipeline |
+|---|---|
+| Text-heavy PDFs, small content streams, need lazy decompression / ObjStm extraction | `PdfStream.decode` (returns `Decoded`) |
+| Big embedded streams, want to forward to a sink (CDC chunker, S3, hash digest) without materialising | `PdfStream.streamingDecode` (returns `StreamingDecoded` events) |
+
+This finally closes the loop: **both encoder and decoder are now memory-bounded.** `Part.StreamObj` lets the encoder write multi-GB attachments without materialisation; `PdfStream.streamingDecode` lets the decoder read them the same way.
 
 ## Content-defined chunking (FastCDC) for storage dedup
 
