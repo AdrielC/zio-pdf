@@ -52,6 +52,40 @@ object Scan {
   def fixedChunk(n: Int): FreeScan[Byte, Chunk[Byte]] =
     FreeScan.lift(ScanPrim.FixedChunk(n))
 
+  // -------- Arrow / ArrowChoice helpers exposed on the façade --------
+
+  /** Pure tuple swap: `(a, b) => (b, a)`. */
+  def swap[A, B]: FreeScan[(A, B), (B, A)] = FreeScan.swap
+
+  /** Pure Either swap. */
+  def mirror[A, B]: FreeScan[Either[A, B], Either[B, A]] = FreeScan.mirror
+
+  /** Diagonal: `a => (a, a)`. */
+  def diag[A]: FreeScan[A, (A, A)] = FreeScan.diag
+
+  /** Untag `Either[A, A]` to `A`. */
+  def merge[A]: FreeScan[Either[A, A], A] = FreeScan.merge
+
+  /** Inject into the left side of an Either. */
+  def injectLeft[A, B]: FreeScan[A, Either[A, B]] = FreeScan.injectLeft
+
+  /** Inject into the right side of an Either. */
+  def injectRight[A, B]: FreeScan[B, Either[A, B]] = FreeScan.injectRight
+
+  /** Boolean test: route by predicate. */
+  def test[A, B](p: A => Boolean)(yes: FreeScan[A, B])(no: FreeScan[A, B]): FreeScan[A, B] =
+    FreeScan.test(p)(yes)(no)
+
+  /** Constant scan. */
+  def const[A, B](b: B): FreeScan[A, B] = FreeScan.const(b)
+
+  /** Tuple projections. */
+  def fst[A, B]: FreeScan[(A, B), A] = FreeScan.fst
+  def snd[A, B]: FreeScan[(A, B), B] = FreeScan.snd
+
+  /** Discard the output of a scan. */
+  def void[A, B](self: FreeScan[A, B]): FreeScan[A, Unit] = FreeScan.void(self)
+
   // -------- Runners --------
 
   /** Pure synchronous driver. */
