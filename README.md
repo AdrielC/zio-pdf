@@ -166,28 +166,53 @@ sanitization, and PDF-object stream extraction are all pure
 state-and-log computations that fit `ZPure` perfectly, and they get
 wired into the streaming pipeline via `fromPure` at the very end.
 
-## Roadmap
+## Performance
+
+A microbench in the test suite (`PerfBench`) decodes ~4 MiB of
+`uint8` values four ways. Single-shot in-memory and streaming in
+64 KiB chunks (lower is better, JVM 21, OpenJDK):
+
+| approach | time / 4 MiB | notes |
+|---|---:|---|
+| `scodec.codecs.vector(uint8).decode` (strict baseline) | ~320–460 ms | single big strict decode, no streaming overhead |
+| **`PureDecoder.many(uint8).run.runAll`** | ~410–510 ms | competitive with the baseline, *no Runtime needed* |
+| `StreamDecoder.many(uint8).decode` (channel, 64 KiB chunks) | ~900 ms | every emitted value flows through ZChannel.write |
+| **`StreamDecoder.fromPure(PureDecoder.many)`** (64 KiB chunks) | **~340 ms** | one `runAll` per upstream chunk; beats the channel by ~2.7× |
+| `StreamDecoder.many(uint8).strict.decode` | ~1800 ms | spins up an unsafe Runtime per call; for tests only |
+
+The takeaway is the two-layer architecture pays for itself: write
+your decoder as a `PureDecoder`, lift it into the streaming pipeline
+with `fromPure`, and you get the streaming I/O semantics of a
+`ZChannel` at the cost of pure per-step decoding.
+
+## What's ported from the original fs2-pdf
 
 The original `fs2-pdf` source tree (~4 700 lines, 56 files) is in
-`legacy/`. Migrating it requires:
+`legacy/` for reference. The current port covers the foundational
+layer end-to-end:
 
-1. Replacing `cats.effect.IO` with `zio.Task` / `zio.IO`.
-2. Replacing `fs2.Stream` / `fs2.Pipe` / `fs2.Pull` with ZIO's
-   `ZStream` / `ZPipeline` / `ZChannel`.
-3. Replacing `cats.data.NonEmptyList` / `Validated` with the
-   equivalents from `zio.NonEmptyChunk` and `zio.prelude.Validation`.
-4. Replacing every `scodec.stream.StreamDecoder` callsite with the
-   new `zio.scodec.stream.StreamDecoder`.
-5. Replacing the few `scodec` 1.x APIs that moved/changed in 2.x
-   (mostly cosmetic).
-6. Optionally lifting the existing PDF data ADTs (`Prim`, `Obj`,
-   `IndirectObj`, `Xref`, `Trailer`, `Pages`, etc.) onto
-   `zio-blocks-schema` so they get JSON / Avro / MessagePack codecs
-   for free.
+| module | status |
+|---|---|
+| `zio.scodec.stream.StreamDecoder` (ZChannel) | ✅ ported, 15 tests |
+| `zio.scodec.stream.PureDecoder`   (ZPure)   | ✅ ported, 16 tests |
+| `zio.pdf.codec.Newline / Whitespace / Text / Many / Codecs` | ✅ ported |
+| `zio.pdf.Comment`                            | ✅ ported |
+| `zio.pdf.Version`                            | ✅ ported |
+| `zio.pdf.StartXref`                          | ✅ ported |
+| `zio.pdf.TopLevel` (Version + Comment + StartXref) wired through `StreamDecoder.many(...)` and exposed as a `ZPipeline[Any, Throwable, Byte, TopLevel]` | ✅ ported, includes a parse of the legacy `xref-stream.pdf` fixture |
+| `Prim` (PDF primitive objects: Dict, Array, Ref, ...) | ⏳ remaining |
+| `Obj` / `IndirectObj`                        | ⏳ remaining |
+| `Xref` (textual + stream form) / `Trailer`   | ⏳ remaining |
+| Higher-level pipes (`Decode`, `Elements`, `Rewrite`, `WritePdf`) | ⏳ remaining |
 
-The `StreamDecoder` port and the new build are the foundation. The
-remaining work is mechanical but voluminous and should be done in
-follow-up PRs to keep diffs reviewable.
+The remaining work is mechanical (replace `cats.effect.IO` →
+`zio.Task`, `fs2.Stream` → `ZStream`, `fs2.Pull` → `ZChannel`,
+`cats.data.NonEmptyList` → `zio.NonEmptyChunk`, `Validated` →
+`zio.prelude.Validation`, `shapeless.HList` → Scala 3 tuples) but
+voluminous, and should land in follow-up PRs. The new `StreamDecoder`
++ `PureDecoder` + `zio-blocks-schema` are wired in, so the existing
+PDF ADTs can additionally get JSON / Avro / MessagePack codecs
+derived for free as they are ported.
 
 ## License
 
