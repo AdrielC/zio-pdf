@@ -92,4 +92,26 @@ private[pdf] object Text {
 
   def str(data: String): Codec[Unit] =
     constant(ByteVector(data.getBytes)).withContext(s"constant string `$data`")
+
+  private[pdf] def takeCharsUntilAny(
+    decoder: Codec[String]
+  )(chars: List[Char])(bits: BitVector): Attempt[DecodeResult[String]] = {
+    val result = bits.bytes.takeWhile(a => !chars.contains(a.toChar)).bits
+    decoder.decode(result).map { case DecodeResult(s, _) =>
+      DecodeResult(s, bits.drop(result.size))
+    }
+  }
+
+  def charsNoneOf(decoder: Codec[String])(chars: List[Char]): Codec[String] =
+    Codec(utf8, Decoder(takeCharsUntilAny(decoder)(chars) _))
+
+  def stringOf(count: Int): Codec[String] =
+    bytes(count).exmap(
+      a =>
+        a.decodeUtf8 match {
+          case Right(s)  => Attempt.successful(s)
+          case Left(err) => Attempt.failure(Err(err.toString))
+        },
+      a => Attempt.successful(ByteVector(a.getBytes))
+    )
 }

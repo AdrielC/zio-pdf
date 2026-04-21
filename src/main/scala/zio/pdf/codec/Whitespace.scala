@@ -54,4 +54,13 @@ private[pdf] object Whitespace {
 
   val space: Codec[Unit] =
     Codecs.byte(' ')
+
+  /**
+   * Whitespace + optional inline comments + final newline.
+   * Equivalent to the legacy `whitespaceAndCommentAsNewline`.
+   * Lives here (not in `Comment`) so the dependency graph stays
+   * one-way.
+   */
+  val nlWs: Codec[Unit] =
+    skipWs ~> zio.pdf.Comment.many.unit(Nil) ~> whitespaceAsNewline
 }

@@ -18,7 +18,7 @@ final case class StartXref(offset: Long)
 object StartXref {
 
   import Text.{ascii, str}
-  import Whitespace.skipWs as nlWs
+  import Whitespace.nlWs
 
   /** `%%EOF` followed by optional trailing whitespace / EOF. */
   val eof: Codec[Unit] =
