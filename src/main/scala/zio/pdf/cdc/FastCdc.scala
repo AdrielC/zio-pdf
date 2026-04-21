@@ -74,6 +74,35 @@ object FastCdc {
   /** Default config: 4 KiB min, 16 KiB avg, 64 KiB max. */
   val defaultConfig: Config = Config()
 
+  /** Concatenate two byte arrays (used by [[zio.pdf.cdc.FastCdcKyo]] and tests). */
+  private[cdc] def mergeArrays(prefix: Array[Byte], suffix: Array[Byte]): Array[Byte] = {
+    val merged = new Array[Byte](prefix.length + suffix.length)
+    System.arraycopy(prefix, 0, merged, 0, prefix.length)
+    System.arraycopy(suffix, 0, merged, prefix.length, suffix.length)
+    merged
+  }
+
+  /** Same cut semantics as [[pipeline]]'s channel: drain complete CDC chunks from `buffer`. */
+  private[cdc] def drainBuffer(
+    buffer: Array[Byte],
+    flushTail: Boolean,
+    cfg: Config
+  ): (Chunk[Chunk[Byte]], Array[Byte]) = {
+    val out = Chunk.newBuilder[Chunk[Byte]]
+    var buf = buffer
+    while (buf.length >= cfg.maxSize || (flushTail && buf.nonEmpty)) {
+      val window =
+        if (buf.length >= cfg.maxSize) java.util.Arrays.copyOfRange(buf, 0, cfg.maxSize)
+        else buf
+      val cut   = cutOffset(window, cfg)
+      val chunk = java.util.Arrays.copyOfRange(buf, 0, cut)
+      val rest  = java.util.Arrays.copyOfRange(buf, cut, buf.length)
+      out += Chunk.fromArray(chunk)
+      buf = rest
+    }
+    (out.result(), buf)
+  }
+
   /**
    * Pre-computed gear-hash table: 256 random Longs, one per byte
    * value. The exact values don't matter as long as they're well-
@@ -139,37 +168,6 @@ object FastCdc {
     cfg: Config
   ): ZChannel[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[Chunk[Byte]], Unit] = {
 
-    /** Drain the buffer into as many CDC chunks as possible.
-      *
-      * To stay rechunking-invariant we must only ever ask for a
-      * cut when we are *guaranteed* to have looked at the same set
-      * of input bytes that a single-shot pass would have looked
-      * at. That means: only cut when the buffer is at least
-      * `maxSize` long (so `cutOffset`'s phase-1 / phase-2 / phase-3
-      * search window is fully populated) - or when `flushTail` is
-      * true and we're at end-of-stream. */
-    def drain(
-      buffer: Array[Byte],
-      flushTail: Boolean
-    ): (Chunk[Chunk[Byte]], Array[Byte]) = {
-      val out = Chunk.newBuilder[Chunk[Byte]]
-      var buf = buffer
-      while (buf.length >= cfg.maxSize || (flushTail && buf.nonEmpty)) {
-        // Only feed `cutOffset` as many bytes as it might actually
-        // consume, so the search window is well-defined regardless
-        // of how much extra we have buffered.
-        val window =
-          if (buf.length >= cfg.maxSize) java.util.Arrays.copyOfRange(buf, 0, cfg.maxSize)
-          else buf
-        val cut    = cutOffset(window, cfg)
-        val chunk  = java.util.Arrays.copyOfRange(buf, 0, cut)
-        val rest   = java.util.Arrays.copyOfRange(buf, cut, buf.length)
-        out += Chunk.fromArray(chunk)
-        buf = rest
-      }
-      (out.result(), buf)
-    }
-
     def loop(
       buffer: Array[Byte]
     ): ZChannel[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[Chunk[Byte]], Unit] =
@@ -177,22 +175,16 @@ object FastCdc {
         (chunk: Chunk[Byte]) => {
           if (chunk.isEmpty) loop(buffer)
           else {
-            // Append the new chunk to the carry buffer.
-            val incoming = chunk.toArray
-            val merged   = new Array[Byte](buffer.length + incoming.length)
-            System.arraycopy(buffer, 0, merged, 0, buffer.length)
-            System.arraycopy(incoming, 0, merged, buffer.length, incoming.length)
-
-            val (emit, rest) = drain(merged, flushTail = false)
+            val incoming     = chunk.toArray
+            val merged       = mergeArrays(buffer, incoming)
+            val (emit, rest) = drainBuffer(merged, flushTail = false, cfg)
             if (emit.isEmpty) loop(rest)
             else ZChannel.write(emit) *> loop(rest)
           }
         },
         (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
         (_: Any) => {
-          // End of upstream: flush whatever is left, even if it's
-          // shorter than minSize.
-          val (emit, _) = drain(buffer, flushTail = true)
+          val (emit, _) = drainBuffer(buffer, flushTail = true, cfg)
           if (emit.isEmpty) ZChannel.unit
           else ZChannel.write(emit) *> ZChannel.unit
         }
