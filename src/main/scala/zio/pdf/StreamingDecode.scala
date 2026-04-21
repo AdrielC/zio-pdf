@@ -89,31 +89,60 @@ object StreamingDecode {
   private sealed trait State
   private final case class WaitingHeader(carry: BitVector)              extends State
   private final case class ForwardingBytes(remaining: Long, carry: BitVector) extends State
+  /** Drop stream payload bytes without emitting (duplicate object suppression). */
+  private final case class SkippingStreamPayload(remaining: Long, carry: BitVector) extends State
   private final case class ConsumingTrailer(carry: BitVector)           extends State
+
+  /** Same rules as [[FilterDuplicates]]: suppress repeat object numbers before the first xref. */
+  private final case class DupState(
+    nums: Set[Long],
+    duplicates: Set[Long],
+    update: Boolean
+  )
 
   /** Convert a header event into a SAX-style emission plus the next state. */
   private def headerToEvent(
     event: HeaderEvent,
-    state: WaitingHeader,
-    remainingBits: BitVector
-  ): (Chunk[StreamingDecoded], State) = event match {
-    case HeaderEvent.V(v)                    => (Chunk.single(StreamingDecoded.VersionT(v)), WaitingHeader(remainingBits))
-    case HeaderEvent.C(b)                    => (Chunk.single(StreamingDecoded.CommentT(b)), WaitingHeader(remainingBits))
-    case HeaderEvent.S(s)                    => (Chunk.single(StreamingDecoded.StartXrefT(s)), WaitingHeader(remainingBits))
-    case HeaderEvent.X(x)                    => (Chunk.single(StreamingDecoded.XrefT(x)), WaitingHeader(remainingBits))
-    case HeaderEvent.W(_)                    => (Chunk.empty, WaitingHeader(remainingBits))
-    case HeaderEvent.H(IndirectObj.IndirectObjHeader(obj, None)) =>
-      // No-stream object - the streamStartKeyword wasn't there, so
-      // the only thing left to consume is the `endobj\n` keyword.
-      // We dispatch to the trailer-consumer state with no payload.
-      // For symmetry with the streaming case we emit DataObj here
-      // and ConsumingTrailer afterwards.
-      (Chunk.single(StreamingDecoded.DataObj(obj)), ConsumingTrailerNoStream(remainingBits))
-    case HeaderEvent.H(IndirectObj.IndirectObjHeader(obj, Some(length))) =>
-      (
-        Chunk.single(StreamingDecoded.ContentObjHeader(obj, length)),
-        ForwardingBytes(length, remainingBits)
-      )
+    remainingBits: BitVector,
+    dup: DupState
+  ): (Chunk[StreamingDecoded], State, DupState) = event match {
+    case HeaderEvent.V(v) =>
+      (Chunk.single(StreamingDecoded.VersionT(v)), WaitingHeader(remainingBits), dup)
+    case HeaderEvent.C(b) =>
+      (Chunk.single(StreamingDecoded.CommentT(b)), WaitingHeader(remainingBits), dup)
+    case HeaderEvent.S(s) =>
+      val nextDup = dup.copy(update = true)
+      (Chunk.single(StreamingDecoded.StartXrefT(s)), WaitingHeader(remainingBits), nextDup)
+    case HeaderEvent.X(x) =>
+      val nextDup = dup.copy(update = true)
+      (Chunk.single(StreamingDecoded.XrefT(x)), WaitingHeader(remainingBits), nextDup)
+    case HeaderEvent.W(_) =>
+      (Chunk.empty, WaitingHeader(remainingBits), dup)
+    case HeaderEvent.H(IndirectObj.IndirectObjHeader(obj, streamLen)) =>
+      val num = obj.index.number
+      val (suppress, nextDup) =
+        if (!dup.update && dup.nums.contains(num))
+          (true, dup.copy(duplicates = dup.duplicates + num))
+        else
+          (false, dup.copy(nums = dup.nums + num))
+      if (suppress)
+        streamLen match {
+          case None =>
+            (Chunk.empty, ConsumingTrailerNoStream(remainingBits), nextDup)
+          case Some(length) =>
+            (Chunk.empty, SkippingStreamPayload(length, remainingBits), nextDup)
+        }
+      else
+        streamLen match {
+          case None =>
+            (Chunk.single(StreamingDecoded.DataObj(obj)), ConsumingTrailerNoStream(remainingBits), nextDup)
+          case Some(length) =>
+            (
+              Chunk.single(StreamingDecoded.ContentObjHeader(obj, length)),
+              ForwardingBytes(length, remainingBits),
+              nextDup
+            )
+        }
   }
 
   /** A second flavour of trailer-consumer: just `endobj\n` (no `endstream`). */
@@ -158,16 +187,17 @@ object StreamingDecode {
     * exhausted, the caller pulls more from upstream and recurses. */
   private def stepAll(
     state: State,
+    dup: DupState,
     in: Chunk[StreamingDecoded] = Chunk.empty
-  ): (Chunk[StreamingDecoded], State) = state match {
+  ): (Chunk[StreamingDecoded], State, DupState) = state match {
 
     // ---- Forwarding payload bytes ---------------------------------
     case fb @ ForwardingBytes(remaining, carry) =>
       if (remaining == 0L)
         // Payload done; next step is to consume the `endstream\nendobj` trailer.
-        stepAll(ConsumingTrailer(carry), in :+ StreamingDecoded.ContentObjEnd)
+        stepAll(ConsumingTrailer(carry), dup, in :+ StreamingDecoded.ContentObjEnd)
       else if (carry.isEmpty)
-        (in, fb)
+        (in, fb, dup)
       else {
         val carryBytes = carry.bytes
         val take       = math.min(remaining, carryBytes.size).toInt
@@ -175,8 +205,22 @@ object StreamingDecode {
         val rest       = carry.drop(take.toLong * 8)
         stepAll(
           ForwardingBytes(remaining - take.toLong, rest),
+          dup,
           in :+ StreamingDecoded.ContentObjBytes(emit)
         )
+      }
+
+    // ---- Skipping payload (duplicate indirect object) ------------
+    case sb @ SkippingStreamPayload(remaining, carry) =>
+      if (remaining == 0L)
+        stepAll(ConsumingTrailer(carry), dup, in)
+      else if (carry.isEmpty)
+        (in, sb, dup)
+      else {
+        val carryBytes = carry.bytes
+        val take       = math.min(remaining, carryBytes.size).toInt
+        val rest       = carry.drop(take.toLong * 8)
+        stepAll(SkippingStreamPayload(remaining - take.toLong, rest), dup, in)
       }
 
     // ---- Consuming the trailing endstream/endobj ------------------
@@ -189,8 +233,8 @@ object StreamingDecode {
         case Left(needMore)               => (in, ct match {
           case _: ConsumingTrailer         => ConsumingTrailer(needMore)
           case _: ConsumingTrailerNoStream => ConsumingTrailerNoStream(needMore)
-        })
-        case Right(Right(rest))           => stepAll(WaitingHeader(rest), in)
+        }, dup)
+        case Right(Right(rest))           => stepAll(WaitingHeader(rest), dup, in)
         case Right(Left(err))             => throw err
       }
 
@@ -198,11 +242,11 @@ object StreamingDecode {
     case wh @ WaitingHeader(carry) =>
       streamingHeaderDecoder.decode(carry) match {
         case Attempt.Successful(DecodeResult(event, rest)) =>
-          val (events, next) = headerToEvent(event, wh, rest)
-          stepAll(next, in ++ events)
+          val (events, next, nextDup) = headerToEvent(event, rest, dup)
+          stepAll(next, nextDup, in ++ events)
         case Attempt.Failure(_) =>
           // Out of bits - need to pull more.
-          (in, wh)
+          (in, wh, dup)
       }
   }
 
@@ -210,22 +254,25 @@ object StreamingDecode {
     * state has, then run the state machine to exhaustion. */
   private def feed(
     state: State,
+    dup: DupState,
     chunk: Chunk[Byte]
-  ): (Chunk[StreamingDecoded], State) = {
+  ): (Chunk[StreamingDecoded], State, DupState) = {
     val incoming = BitVector.view(chunk.toArray)
     val newCarry = state match {
       case WaitingHeader(c)             => c ++ incoming
       case ForwardingBytes(r, c)        => c ++ incoming
+      case SkippingStreamPayload(r, c)  => c ++ incoming
       case ConsumingTrailer(c)          => c ++ incoming
       case ConsumingTrailerNoStream(c)  => c ++ incoming
     }
     val withCarry: State = state match {
       case _: WaitingHeader               => WaitingHeader(newCarry)
       case ForwardingBytes(r, _)          => ForwardingBytes(r, newCarry)
+      case SkippingStreamPayload(r, _)    => SkippingStreamPayload(r, newCarry)
       case _: ConsumingTrailer            => ConsumingTrailer(newCarry)
       case _: ConsumingTrailerNoStream    => ConsumingTrailerNoStream(newCarry)
     }
-    try stepAll(withCarry)
+    try stepAll(withCarry, dup)
     catch { case _: NoSuchElementException => sys.error("unreachable") }
   }
 
@@ -235,11 +282,14 @@ object StreamingDecode {
 
   private final case class FinalState(
     state: State,
+    dup: DupState,
     xrefs: List[Xref],
     version: Option[Version]
   )
 
-  private val initial: FinalState = FinalState(WaitingHeader(BitVector.empty), Nil, None)
+  private val dupInitial: DupState = DupState(Set.empty, Set.empty, update = false)
+
+  private def initial: FinalState = FinalState(WaitingHeader(BitVector.empty), dupInitial, Nil, None)
 
   /** Update the version/xrefs accumulators for a single emitted event. */
   private def updateAccumulators(fs: FinalState, ev: StreamingDecoded): FinalState = ev match {
@@ -249,17 +299,23 @@ object StreamingDecode {
   }
 
   private def loop(
+    log: Log,
     fs: FinalState
   ): ZChannel[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[StreamingDecoded], FinalState] =
     ZChannel.readWithCause[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[StreamingDecoded], FinalState](
       (chunk: Chunk[Byte]) => {
-        val (out, next) = feed(fs.state, chunk)
-        val updated     = out.foldLeft(fs.copy(state = next))(updateAccumulators)
-        if (out.isEmpty) loop(updated)
-        else ZChannel.write(out) *> loop(updated)
+        val (out, nextState, nextDup) = feed(fs.state, fs.dup, chunk)
+        val updatedBase               = fs.copy(state = nextState, dup = nextDup)
+        val updated                   = out.foldLeft(updatedBase)(updateAccumulators)
+        if (out.isEmpty) loop(log, updated)
+        else ZChannel.write(out) *> loop(log, updated)
       },
       (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
-      (_: Any) => ZChannel.succeed(fs)
+      (_: Any) =>
+        if (fs.dup.duplicates.nonEmpty)
+          ZChannel.fromZIO(log.debug(s"duplicate objects in pdf: ${fs.dup.duplicates}")).as(fs)
+        else
+          ZChannel.succeed(fs)
     )
 
   /** Emit the final Meta event from the accumulated state. */
@@ -270,10 +326,10 @@ object StreamingDecode {
   }
 
   /** Memory-bounded streaming decoder pipeline. Equivalent in
-    * coverage to `Decode.fromTopLevel >>> ` (xref + trailer
+    * coverage to `Decode(log)` (duplicate filtering, xref + trailer
     * accumulation, terminating Meta) but emits content stream
     * payloads as a sequence of `ContentObjBytes` chunks instead of
     * one big `BitVector`. */
-  val pipeline: ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    ZPipeline.fromChannel(loop(initial).flatMap(emitMeta))
+  def pipeline(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
+    ZPipeline.fromChannel(loop(log, initial).flatMap(emitMeta))
 }
