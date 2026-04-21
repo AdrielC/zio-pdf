@@ -19,6 +19,7 @@ package zio.scodec.stream
 
 import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
 import _root_.scodec.bits.BitVector
+import _root_.scodec.codecs as scodecCodecs
 import zio.*
 import zio.prelude.fx.ZPure
 import zio.stream.*
@@ -216,13 +217,28 @@ object StreamDecoder {
   private def liftEmitting[A](decoder: Decoder[A]): PureDecoder.DecoderStep[StreamDecoder[A]] =
     PureDecoder.fromDecoder(decoder).map(emit[A])
 
+  /**
+   * `StreamDecoder.many(uint8)` used to compile to [[Decode]] (per-element
+   * `ZChannel.write`), which is catastrophically slow on large byte streams.
+   * The canonical `scodec.codecs.uint8` codec is byte-aligned and
+   * infallible until EOF — same semantics as [[PureDecoder.manyUInt8Chunked]]
+   * batched through [[fromPureChunked]] (one downstream write per upstream
+   * chunk). Custom `Decoder[Int]` values (e.g. `uint8.exmap(...)`) must stay
+   * on the generic [[Decode]] path, so we key this on reference equality.
+   */
+  private def isStandardUInt8[A](decoder: Decoder[A]): Boolean =
+    decoder eq scodecCodecs.uint8
+
   /** Decode exactly one value with the given decoder. */
   def once[A](decoder: Decoder[A]): StreamDecoder[A] =
     new StreamDecoder[A](Decode(liftEmitting(decoder), once = true, failOnErr = true))
 
   /** Repeatedly decode values with the given decoder. */
   def many[A](decoder: Decoder[A]): StreamDecoder[A] =
-    new StreamDecoder[A](Decode(liftEmitting(decoder), once = false, failOnErr = true))
+    if (isStandardUInt8(decoder))
+      fromPureChunked(PureDecoder.manyUInt8Chunked).asInstanceOf[StreamDecoder[A]]
+    else
+      new StreamDecoder[A](Decode(liftEmitting(decoder), once = false, failOnErr = true))
 
   /**
    * Try to decode one value. If decoding fails, no input is consumed
@@ -237,7 +253,10 @@ object StreamDecoder {
    * emitted any successfully decoded values up to that point.
    */
   def tryMany[A](decoder: Decoder[A]): StreamDecoder[A] =
-    new StreamDecoder[A](Decode(liftEmitting(decoder), once = false, failOnErr = false))
+    if (isStandardUInt8(decoder))
+      fromPureChunked(PureDecoder.manyUInt8Chunked).asInstanceOf[StreamDecoder[A]]
+    else
+      new StreamDecoder[A](Decode(liftEmitting(decoder), once = false, failOnErr = false))
 
   /** A decoder that fails immediately with the given exception. */
   def raiseError(cause: Throwable): StreamDecoder[Nothing] = new StreamDecoder(Failed(cause))
