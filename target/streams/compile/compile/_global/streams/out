@@ -1,0 +1,53 @@
+[error] -- [E007] Type Mismatch Error: /workspace/src/main/scala/zio/scodec/stream/StreamDecoder.scala:77:62 
+[error] 77 |                    case Right(leftover) => ZIO.succeed((acc, leftover))
+[error]    |                                                              ^^^^^^^^
+[error]    |                                         Found:    (leftover : Any)
+[error]    |                                         Required: scodec.bits.BitVector
+[error]    |
+[error]    | longer explanation available when compiling with `-explain`
+[error] -- [E007] Type Mismatch Error: /workspace/src/main/scala/zio/scodec/stream/StreamDecoder.scala:78:53 
+[error] 78 |                    case Left(err)       => ZIO.fail(err)
+[error]    |                                                     ^^^
+[error]    |                                                   Found:    (err : Any)
+[error]    |                                                   Required: Throwable
+[error]    |
+[error]    | longer explanation available when compiling with `-explain`
+[error] -- [E134] Type Error: /workspace/src/main/scala/zio/scodec/stream/StreamDecoder.scala:80:36 
+[error] 80 |                  chunk => loop(acc ++ chunk)
+[error]    |                                ^^^^^^
+[error]    |None of the overloaded alternatives of method ++ in class Chunk with types
+[error]    | [A1 >: A](that: zio.NonEmptyChunk[A1]): zio.NonEmptyChunk[A1]
+[error]    | [A1 >: A](that: zio.Chunk[A1]): zio.Chunk[A1]
+[error]    | [B >: A](suffix: IterableOnce[B]): zio.Chunk[B]
+[error]    |match arguments ((chunk : Either[scodec.bits.BitVector, zio.Chunk[A]]))
+[error]    |
+[error]    |where:    A1 is a type variable with constraint >: A
+[error] -- [E008] Not Found Error: /workspace/src/main/scala/zio/scodec/stream/StreamDecoder.scala:88:20 
+[error] 88 |              cause.failureOrCause match {
+[error]    |              ^^^^^^^^^^^^^^^^^^^^
+[error]    |              value failureOrCause is not a member of Throwable
+[error] -- [E006] Not Found Error: /workspace/src/main/scala/zio/scodec/stream/StreamDecoder.scala:89:62 
+[error] 89 |                case Left(CodecError(err)) => Attempt.failure(err)
+[error]    |                                                              ^^^
+[error]    |                                      Not found: err - did you mean Err?
+[error]    |
+[error]    | longer explanation available when compiling with `-explain`
+[error] -- [E006] Not Found Error: /workspace/src/main/scala/zio/scodec/stream/StreamDecoder.scala:91:53 
+[error] 91 |                  Attempt.failure(Err.General(Option(other.getMessage).getOrElse(other.toString), Nil))
+[error]    |                                                     ^^^^^
+[error]    |                                                     Not found: other
+[error]    |
+[error]    | longer explanation available when compiling with `-explain`
+[error] -- [E006] Not Found Error: /workspace/src/main/scala/zio/scodec/stream/StreamDecoder.scala:91:81 
+[error] 91 |                  Attempt.failure(Err.General(Option(other.getMessage).getOrElse(other.toString), Nil))
+[error]    |                                                                                 ^^^^^
+[error]    |                                                        Not found: other
+[error]    |
+[error]    | longer explanation available when compiling with `-explain`
+[error] -- [E006] Not Found Error: /workspace/src/main/scala/zio/scodec/stream/StreamDecoder.scala:92:84 
+[error] 92 |                case Right(c) => Attempt.failure(Err.General(s"unexpected defect: ${c.prettyPrint}", Nil))
+[error]    |                                                                                    ^
+[error]    |                                                            Not found: c
+[error]    |
+[error]    | longer explanation available when compiling with `-explain`
+[error] 8 errors found

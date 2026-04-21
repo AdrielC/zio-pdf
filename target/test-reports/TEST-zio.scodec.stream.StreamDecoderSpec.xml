@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuite hostname="cursor" name="zio.scodec.stream.StreamDecoderSpec" tests="15" errors="0" failures="0" skipped="0" time="1.163" timestamp="2026-04-21T03:52:02">
+          <properties>
+      <property name="java.specification.version" value="21"/><property name="sun.jnu.encoding" value="UTF-8"/><property name="sun.arch.data.model" value="64"/><property name="java.vendor.url" value="https://ubuntu.com/"/><property name="jline.terminal" value="none"/><property name="sun.boot.library.path" value="/usr/lib/jvm/java-21-openjdk-amd64/lib"/><property name="sun.java.command" value="/home/ubuntu/.cache/sbt/boot/sbt-launch/1.12.9/sbt-launch-1.12.9.jar test"/><property name="jdk.debug" value="release"/><property name="java.specification.vendor" value="Oracle Corporation"/><property name="java.version.date" value="2026-01-20"/><property name="java.home" value="/usr/lib/jvm/java-21-openjdk-amd64"/><property name="file.separator" value="/"/><property name="java.vm.compressedOopsMode" value="Zero based"/><property name="line.separator" value="
+"/><property name="java.vm.specification.vendor" value="Oracle Corporation"/><property name="java.specification.name" value="Java Platform API Specification"/><property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/><property name="java.runtime.version" value="21.0.10+7-Ubuntu-124.04"/><property name="user.name" value="ubuntu"/><property name="log4j.ignoreTCL" value="true"/><property name="file.encoding" value="UTF-8"/><property name="jnidispatch.path" value="/home/ubuntu/.cache/JNA/temp/jna3598038227839917823.tmp"/><property name="jna.loaded" value="true"/><property name="java.io.tmpdir" value="/tmp"/><property name="java.version" value="21.0.10"/><property name="java.vm.specification.name" value="Java Virtual Machine Specification"/><property name="native.encoding" value="UTF-8"/><property name="java.library.path" value="/usr/java/packages/lib:/usr/lib/x86_64-linux-gnu/jni:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/jni:/lib:/usr/lib"/><property name="stderr.encoding" value="UTF-8"/><property name="java.vendor" value="Ubuntu"/><property name="scala.ext.dirs" value="/home/ubuntu/.sbt/1.0/java9-rt-ext-ubuntu_21_0_10"/><property name="sun.io.unicode.encoding" value="UnicodeLittle"/><property name="java.class.path" value="/home/ubuntu/.cache/sbt/boot/sbt-launch/1.12.9/sbt-launch-1.12.9.jar"/><property name="java.vm.vendor" value="Ubuntu"/><property name="jline.shutdownhook" value="false"/><property name="user.timezone" value="Etc/UTC"/><property name="java.vm.specification.version" value="21"/><property name="os.name" value="Linux"/><property name="sun.java.launcher" value="SUN_STANDARD"/><property name="user.country" value="US"/><property name="sun.cpu.endian" value="little"/><property name="user.home" value="/home/ubuntu"/><property name="user.language" value="en"/><property name="sbt.script" value="/usr/bin/sbt"/><property name="sbt.ipcsocket.tmpdir" value="/tmp/.sbtb449bcef/ipcsocket"/><property name="swoval.tmpdir" value="/tmp/.sbtb449bcef/swoval"/><property name="jline.esc.timeout" value="0"/><property name="stdout.encoding" value="UTF-8"/><property name="path.separator" value=":"/><property name="os.version" value="6.1.147"/><property name="jna.nosys" value="true"/><property name="java.runtime.name" value="OpenJDK Runtime Environment"/><property name="sbt.log.noformat" value="true"/><property name="java.vm.name" value="OpenJDK 64-Bit Server VM"/><property name="jna.platform.library.path" value="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib64:/lib64:/usr/lib:/lib"/><property name="java.vendor.url.bug" value="https://bugs.launchpad.net/ubuntu/+source/openjdk-21"/><property name="user.dir" value="/workspace"/><property name="os.arch" value="amd64"/><property name="java.vm.info" value="mixed mode, sharing"/><property name="java.vm.version" value="21.0.10+7-Ubuntu-124.04"/><property name="java.class.version" value="65.0"/>
+    </properties>
+          <testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - many fails when an inner decoder fails (failOnErr = true)" time="0.249">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - many decodes across many small chunks (rechunk by 1 byte == 8 bits)" time="0.248">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - once decodes a single value and stops" time="0.254">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - many decodes all values until the input ends" time="0.247">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - ++ runs the right decoder on the leftover from the left" time="0.013">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - emits yields the supplied values" time="0.015">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - emit yields a single value without consuming any input" time="0.016">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - tryMany stops cleanly when an inner decoder fails" time="0.025">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - isolate reads exactly the requested number of bits" time="0.01">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - ignore drops the requested number of bits" time="0.012">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - flatMap can choose a continuation based on a decoded value" time="0.019">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - raiseError(Err) wraps in CodecError" time="0.01">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - toBytePipeline works on a Byte stream" time="0.007">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - strict round-trip via Decoder yields the same values plus leftover" time="0.012">
+                      
+                    </testcase><testcase classname="zio.scodec.stream.StreamDecoderSpec" name="StreamDecoder - raiseError fails the stream with the supplied throwable" time="0.026">
+                      
+                    </testcase>
+          <system-out><![CDATA[]]></system-out>
+          <system-err><![CDATA[]]></system-err>
+        </testsuite>

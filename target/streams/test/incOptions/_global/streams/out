@@ -1,0 +1,29 @@
+[debug] Created transactional ClassFileManager with tempDir = /workspace/target/scala-3.8.3/test-classes.bak
+[debug] About to delete class files:
+[debug] 	StreamDecoderSpec.class
+[debug] 	StreamDecoderSpec$.class
+[debug] 	StreamDecoderSpec.tasty
+[debug] 	StreamDecoderSpec$.tasty
+[debug] We backup class files:
+[debug] 	StreamDecoderSpec.class
+[debug] 	StreamDecoderSpec$.class
+[debug] 	StreamDecoderSpec.tasty
+[debug] 	StreamDecoderSpec$.tasty
+[debug] Registering generated classes:
+[debug] 	ZioBlocksSchemaSmokeSpec$Pair$.class
+[debug] 	StreamDecoderSpec.class
+[debug] 	ZioBlocksSchemaSmokeSpec$Pair$$anon$2.class
+[debug] 	ZioBlocksSchemaSmokeSpec$.class
+[debug] 	StreamDecoderSpec$.class
+[debug] 	ZioBlocksSchemaSmokeSpec$Pair.class
+[debug] 	ZioBlocksSchemaSmokeSpec$Pair$$anon$1.class
+[debug] 	ZioBlocksSchemaSmokeSpec.class
+[debug] 	ZioBlocksSchemaSmokeSpec$Pair$.tasty
+[debug] 	StreamDecoderSpec.tasty
+[debug] 	ZioBlocksSchemaSmokeSpec$Pair$$anon$2.tasty
+[debug] 	ZioBlocksSchemaSmokeSpec$.tasty
+[debug] 	StreamDecoderSpec$.tasty
+[debug] 	ZioBlocksSchemaSmokeSpec$Pair.tasty
+[debug] 	ZioBlocksSchemaSmokeSpec$Pair$$anon$1.tasty
+[debug] 	ZioBlocksSchemaSmokeSpec.tasty
+[debug] Removing the temporary directory used for backing up class files: /workspace/target/scala-3.8.3/test-classes.bak
