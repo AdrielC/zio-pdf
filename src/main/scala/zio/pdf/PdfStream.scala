@@ -7,14 +7,9 @@
 package zio.pdf
 
 import _root_.scodec.bits.BitVector
-import zio.Chunk
+import zio.{Chunk, ZIO}
 import zio.stream.{ZPipeline, ZStream}
 
-/**
- * The main API for this library provides ZIO `ZPipeline`s for
- * decoding PDF streams. The encoder side (`write`, `transformElements`,
- * `validate`, `compare`) will land in a follow-up.
- */
 object PdfStream {
 
   /**
@@ -42,37 +37,77 @@ object PdfStream {
     )
 
   /**
-   * Decode the data layer: data objects (without stream), content
-   * objects (with stream and lazy uncompression), and metadata
-   * (`Decoded.Meta`) consisting of accumulated xrefs, the
-   * sanitised trailer, and the version. Equivalent to the legacy
-   * `PdfStream.decode`.
-   *
-   * Peak memory is bounded by *the largest single content stream*
-   * because each `Decoded.ContentObj` carries the full payload as
-   * a `BitVector`. For PDFs with multi-MB attachments / images /
-   * fonts use `streamingDecode` instead - that pipeline emits
-   * payloads as a sequence of `ContentObjBytes` chunks.
+   * Decode to [[Decoded]]: streaming parse (memory-bounded for large
+   * streams) plus expansion of each content stream via
+   * [[Decode.expandStreamPayload]] (ObjStm, XRef stream metadata,
+   * lazy decompression). Small streams (length <=
+   * `config.inlineMaxBytes`) are buffered once as
+   * [[StreamingDecoded.ContentObjStart]].inlinePayload; larger
+   * streams use chunked bytes on the wire before expansion.
    */
-  def decode(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Decoded] =
-    Decode(log)
+  def decode(
+    log: Log = Log.noop,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZPipeline[Any, Throwable, Byte, Decoded] =
+    StreamingDecode.pipeline(log, config) >>> DecodedFromStreaming.pipeline
 
   /**
-   * Memory-bounded SAX-style decoder. Same coverage as `decode`
-   * (version / comment / xref / startxref / data objects / content
-   * objects / accumulated Meta), but each content-stream payload
-   * is forwarded as a sequence of `ContentObjBytes` chunks instead
-   * of being materialised as a single `BitVector`. Peak memory is
-   * bounded by the upstream chunk size, regardless of how big any
-   * individual content stream is.
-   *
-   * Use this when you have multi-MB content streams (large
-   * attachments, embedded images, font subsets) that you want to
-   * forward straight to a sink (CDC chunker, S3 multipart, hash
-   * digest) without materialising in memory.
+   * One synchronous byte-chunk step for [[decode]]: same semantics as
+   * `bytes.via(decode(...))` but without building a [[ZStream]]. Intended
+   * for drivers that must keep the [[java.io.InputStream]] inside a
+   * zio-blocks-scope `$` block.
    */
-  val streamingDecode: ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    StreamingDecode.pipeline
+  def decodeSyncStep(
+    config: StreamingDecode.Config
+  )(
+    decodeAcc: DecodedFromStreaming.Acc,
+    streamingFs: StreamingDecode.FinalState,
+    chunk: Chunk[Byte]
+  ): Either[Throwable, (Chunk[Decoded], DecodedFromStreaming.Acc, StreamingDecode.FinalState)] = {
+    val (evs, fs1) = StreamingDecode.stepChunk(config, streamingFs, chunk)
+    if (evs.isEmpty) Right((Chunk.empty, decodeAcc, fs1))
+    else
+      DecodedFromStreaming.foldChunk(decodeAcc, evs) match {
+        case (_, Left(err))       => Left(err)
+        case (decoded, Right(acc)) => Right((decoded, acc, fs1))
+      }
+  }
+
+  /**
+   * After the last byte chunk, append trailing [[StreamingDecoded.Meta]]
+   * through the decode bridge (same order as the [[decode]] pipeline).
+   */
+  def decodeSyncFinish(
+    log: Log
+  )(decodeAcc: DecodedFromStreaming.Acc, streamingFs: StreamingDecode.FinalState): ZIO[Any, Throwable, Chunk[Decoded]] =
+    StreamingDecode.finalizeToMeta(log, streamingFs).flatMap { metaChunk =>
+      val (d0, r0) = DecodedFromStreaming.foldChunk(decodeAcc, metaChunk)
+      r0 match {
+        case Left(err) => ZIO.fail(err)
+        case Right(acc1) =>
+          DecodedFromStreaming.finalizeAcc(acc1) match {
+            case Left(err)   => ZIO.fail(err)
+            case Right(rest) => ZIO.succeed(d0 ++ rest)
+          }
+      }
+    }
+
+  /**
+   * Raw streaming events only (no ObjStm / XRef expansion). Prefer
+   * [[decode]] when you need [[elements]], [[validate]], or
+   * [[compare]].
+   *
+   * Returns a **new** pipeline on each call so duplicate-filter state
+   * is not shared across streams (a shared `val` would reuse one
+   * mutable [[DuplicateFilterState]] and break subsequent runs).
+   * Call with empty parentheses: `streamingDecode()` — a bare
+   * reference eta-expands to a function type in `.via(...)`.
+   */
+  def streamingDecode(
+    log: Log = Log.noop,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
+    StreamingDecode.pipeline(log, config)
 
   /**
    * Decode the high-level Element layer: Page / Pages / Image /

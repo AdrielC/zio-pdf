@@ -54,6 +54,15 @@ object Decode {
         }
     }
 
+  /** Expand a raw (encoded) content stream into xref updates or
+    * `Decoded` rows — shared by [[apply]] and [[DecodedFromStreaming]]. */
+  private[pdf] def expandStreamPayload(
+    index: Obj.Index,
+    data: Prim,
+    rawStream: _root_.scodec.bits.BitVector
+  ): Attempt[Either[Xref, List[Decoded]]] =
+    analyzeStream(index, data)(rawStream, Content.uncompress(rawStream)(data))
+
   /** Pure step: convert one TopLevel into zero-or-more Decoded
     * outputs, threading the xref / version accumulator. */
   private val step: StatefulPipe.Step[TopLevel, State, Decoded] = {
