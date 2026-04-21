@@ -58,44 +58,21 @@ final class StreamDecoder[+A] private (private[stream] val step: StreamDecoder.S
   def toChannel: BitChannel[A] = runStep(step, BitVector.empty)
 
   /**
-   * Decode the entire input as a single value. Useful when a
-   * `StreamDecoder` is composed inside an `Isolate` or as part of a
-   * non-streaming use site (mainly tests).
+   * Decode the entire input as a single value. This used to spin up
+   * a `Runtime` and run the channel via `unsafe.run` — which is
+   * wildly heavyweight for code that has no I/O at all once the
+   * `BitVector` is in memory. We now interpret the algebra directly
+   * in pure code via [[StreamDecoder.runStrict]], which gives us
+   * stack-safe decoding with no fiber, no executor, no allocation
+   * per step beyond an accumulator and the carry buffer.
    */
   def strict: Decoder[Chunk[A]] =
     new Decoder[Chunk[A]] {
-      def decode(bits: BitVector): Attempt[DecodeResult[Chunk[A]]] = {
-        val source: ZStream[Any, Throwable, BitVector] = ZStream.succeed(bits)
-        val channel: ZChannel[Any, Any, Any, Any, Throwable, Chunk[A], BitVector] =
-          source.channel >>> self.toChannel
-        val program: ZIO[Any, Throwable, (Chunk[A], BitVector)] =
-          ZIO.scoped[Any] {
-            channel.toPull.flatMap { pull =>
-              def loop(acc: Chunk[A]): ZIO[Any, Throwable, (Chunk[A], BitVector)] =
-                pull.foldZIO(
-                  err => ZIO.fail(err),
-                  {
-                    case Left(leftover) => ZIO.succeed((acc, leftover))
-                    case Right(chunk)   => loop(acc ++ chunk)
-                  }
-                )
-              loop(Chunk.empty)
-            }
-          }
-        Unsafe.unsafe { implicit u =>
-          Runtime.default.unsafe.run(program) match {
-            case Exit.Success((acc, leftover)) => Attempt.successful(DecodeResult(acc, leftover))
-            case Exit.Failure(cause) =>
-              cause.failureOption match {
-                case Some(CodecError(err)) => Attempt.failure(err)
-                case Some(other) =>
-                  Attempt.failure(Err.General(Option(other.getMessage).getOrElse(other.toString), Nil))
-                case None =>
-                  Attempt.failure(Err.General(s"unexpected defect: ${cause.prettyPrint}", Nil))
-              }
-          }
+      def decode(bits: BitVector): Attempt[DecodeResult[Chunk[A]]] =
+        StreamDecoder.runStrict(self.step, bits, Chunk.empty[A]) match {
+          case Right((acc, leftover))    => Attempt.successful(DecodeResult(acc, leftover))
+          case Left(CodecError(err))     => Attempt.failure(err)
         }
-      }
     }
 
   /**
@@ -422,4 +399,80 @@ object StreamDecoder {
     if (chunk.isEmpty) BitVector.empty
     else if (chunk.size == 1) chunk(0)
     else chunk.foldLeft(BitVector.empty)(_ ++ _)
+
+  // -------------------------------------------------------------------
+  // Pure, Runtime-free interpreter used by `strict`.
+  //
+  // Walks the same algebra as `runStep` but in plain `Either`. There
+  // is no fiber, no executor, no `Unsafe.unsafe`, no allocation per
+  // step beyond the accumulator and the carry buffer. This matters
+  // because `strict` is on the hot path of every `Codec` use site
+  // that wants to embed a streaming decoder inside a non-streaming
+  // codec - and there is genuinely no I/O to manage at that point.
+  // -------------------------------------------------------------------
+
+  private[stream] def runStrict[A](
+    step: Step[A],
+    bits: BitVector,
+    acc: Chunk[A]
+  ): Either[CodecError, (Chunk[A], BitVector)] = step match {
+
+    case Empty         => Right((acc, bits))
+    case Result(a)     => Right((acc :+ a, bits))
+    case Failed(cause) =>
+      // We can't smuggle an arbitrary Throwable through `Attempt`'s
+      // failure channel, so wrap as Err.General when needed.
+      cause match {
+        case CodecError(err) => Left(CodecError(err))
+        case other           => Left(CodecError(Err.General(Option(other.getMessage).getOrElse(other.toString), Nil)))
+      }
+
+    case Append(x, y) =>
+      runStrict(x.step, bits, acc) match {
+        case Right((acc1, leftover)) => runStrict(y().step, leftover, acc1)
+        case left                    => left
+      }
+
+    case Decode(f, once, failOnErr) =>
+      def loop(acc1: Chunk[A], buffer: BitVector): Either[CodecError, (Chunk[A], BitVector)] =
+        f(buffer) match {
+          case Attempt.Successful(DecodeResult(subDecoder, remainder)) =>
+            runStrict(subDecoder.step, remainder, acc1) match {
+              case Right((acc2, leftover)) =>
+                if (once) Right((acc2, leftover))
+                else loop(acc2, leftover)
+              case left => left
+            }
+          case Attempt.Failure(_: Err.InsufficientBits) =>
+            // No more input is coming in strict mode, so InsufficientBits
+            // means we are done - hand the unconsumed buffer back.
+            Right((acc1, buffer))
+          case Attempt.Failure(comp: Err.Composite)
+              if comp.errs.exists(_.isInstanceOf[Err.InsufficientBits]) =>
+            Right((acc1, buffer))
+          case Attempt.Failure(e) =>
+            if (failOnErr) Left(CodecError(e))
+            else Right((acc1, buffer))
+        }
+      loop(acc, bits)
+
+    case Isolate(n, decoder) =>
+      if (bits.size < n)
+        Left(CodecError(Err.InsufficientBits(n, bits.size, Nil)))
+      else {
+        val (used, rest) = bits.splitAt(n)
+        runStrict(decoder.step, used, acc) match {
+          case Right((acc1, _)) => Right((acc1, rest))
+          case left             => left
+        }
+      }
+
+    case FromPure(pure) =>
+      // The pure decoder does the loop itself - just `runAll` it.
+      val (log, result) = pure.run.runAll(bits)
+      result match {
+        case Left(err)              => Left(err)
+        case Right((leftover, _))   => Right((acc ++ log, leftover))
+      }
+  }
 }

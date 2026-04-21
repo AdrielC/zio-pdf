@@ -174,16 +174,23 @@ A microbench in the test suite (`PerfBench`) decodes ~4 MiB of
 
 | approach | time / 4 MiB | notes |
 |---|---:|---|
-| `scodec.codecs.vector(uint8).decode` (strict baseline) | ~320–460 ms | single big strict decode, no streaming overhead |
-| **`PureDecoder.many(uint8).run.runAll`** | ~410–510 ms | competitive with the baseline, *no Runtime needed* |
-| `StreamDecoder.many(uint8).decode` (channel, 64 KiB chunks) | ~900 ms | every emitted value flows through ZChannel.write |
-| **`StreamDecoder.fromPure(PureDecoder.many)`** (64 KiB chunks) | **~340 ms** | one `runAll` per upstream chunk; beats the channel by ~2.7× |
-| `StreamDecoder.many(uint8).strict.decode` | ~1800 ms | spins up an unsafe Runtime per call; for tests only |
+| `scodec.codecs.vector(uint8).decode` (strict baseline) | ~330 ms | single big strict decode, no streaming overhead |
+| **`PureDecoder.many(uint8).run.runAll`** | ~330 ms | parity with the baseline, *no Runtime needed* |
+| **`StreamDecoder.many(uint8).strict.decode`** | **~360 ms** | pure interpreter over the algebra; no `ZChannel`, no `Runtime`, no `Unsafe.unsafe.run` |
+| `StreamDecoder.many(uint8).decode` (channel, 64 KiB chunks) | ~880 ms | every emitted value flows through `ZChannel.write` |
+| **`StreamDecoder.fromPure(PureDecoder.many)`** (64 KiB chunks) | **~330 ms** | one `runAll` per upstream chunk; beats the plain channel by ~2.7× and matches the in-memory baseline |
 
-The takeaway is the two-layer architecture pays for itself: write
-your decoder as a `PureDecoder`, lift it into the streaming pipeline
-with `fromPure`, and you get the streaming I/O semantics of a
-`ZChannel` at the cost of pure per-step decoding.
+Two takeaways:
+
+1. **`strict` is now 5× faster** than its first cut, because it
+   walks the `Step` algebra directly in pure code (`runStrict`)
+   instead of spinning up a `ZChannel` and an unsafe `Runtime`. ZIO
+   is the right tool for the streaming-I/O boundary, but it's
+   wildly overkill once the input is a `BitVector` already in memory.
+2. **The two-layer architecture pays for itself**: write your
+   decoder as a `PureDecoder`, lift it into the streaming pipeline
+   with `fromPure`, and you get the streaming I/O semantics of a
+   `ZChannel` at the cost of pure per-step decoding.
 
 ## What's ported from the original fs2-pdf
 
