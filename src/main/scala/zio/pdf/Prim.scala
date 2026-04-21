@@ -29,15 +29,17 @@ object Prim extends PrimCodec {
     * Covers the nine constructors (Null / Ref / Bool / Number / Name /
     * Str / HexStr / Array / Dict), threading through
     * `Schema[ByteVector]` (for `Str` / `HexStr`) and recursive
-    * `Schema[List[Prim]]` / `Schema[Map[String, Prim]]` (for `Array` /
+    * `Schema[zio.blocks.chunk.Chunk[Prim]]` /
+    * `Schema[zio.blocks.chunk.ChunkMap[String, Prim]]` (for `Array` /
     * `Dict`). The `zio.blocks.schema.Schema.derived` macro handles the
     * recursion via its internal `Lazy` wrapper.
     *
     * Once this lands, every downstream facility becomes available
     * without extra code:
-    *   - JSON / CBOR / Avro / Protobuf codecs (via `Schema.getInstance`);
+    *   - JSON / CBOR / Avro / Protobuf codecs (via
+    *     `Schema.getInstance(format)` or `.jsonCodec`);
     *   - Optics (`Schema#lens`, `Schema#prism`, `Schema#traversal`)
-    *     for court-grade policy expressions;
+    *     for policy expressions over the parsed PDF model;
     *   - `DynamicValue` for schema-less inspection;
     *   - `Patch` / `DynamicPatch` for describing mutations with
     *     chain-of-custody semantics.
