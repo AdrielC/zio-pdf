@@ -271,6 +271,18 @@ object PureDecoder {
    *   }
    * }}}
    */
+  /** Batched [[scodec.codecs.uint8]] drain: one log entry per full-byte run. */
+  inline def manyUInt8Chunked: PureDecoder[Chunk[Int]] =
+    manyChunked[Int] { arr =>
+      val out = new Array[Int](arr.length)
+      var i   = 0
+      while (i < arr.length) {
+        out(i) = arr(i) & 0xff
+        i += 1
+      }
+      Chunk.fromArray(out)
+    }
+
   inline def manyChunked[A](
     inline batch: Array[Byte] => Chunk[A]
   ): PureDecoder[Chunk[A]] = {
