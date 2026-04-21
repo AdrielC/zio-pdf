@@ -466,6 +466,59 @@ This is what an "embedded-file deduplication" workflow looks like: the encoder s
 - **Want fixed-size chunking** → `ZStream#rechunk(N)` is the right tool. Use it for I/O batching, not for dedup; a 1-byte insertion shifts every chunk and dedup ratio drops to zero.
 - **Want semantic chunking of *extracted PDF text*** (sentences/paragraphs/headings, for embedding in a vector DB) → that's a different domain (the Rust `text-splitter` crate is a good reference); not part of this port. The natural place to add it is downstream of a future text-extraction layer that produces `ZStream[String]` from a decoded `Page`.
 
+## File-handle lifetime: Scope vs ZIO
+
+`zio-blocks-scope` provides `Resource[A]` + `Scope` + the `$` macro for **compile-time** prevention of resource-escape bugs. The `$[A]` path-dependent type literally cannot leave a `scoped { … }` block — forgetting to close a file is a *type error*, not a runtime bug. This is genuinely interesting and worth wiring into the PDF library.
+
+It does **not** "erase ZIO". The streaming substrate (`ZStream` / `ZPipeline` / `ZChannel`) is not replaced by `Resource`; only the **file-handle ownership boundary** moves. The two APIs sit side-by-side in `zio.pdf.io.PdfIO`:
+
+```scala
+import zio.pdf.io.PdfIO
+import java.nio.file.Path
+
+// A) Scope-based: synchronous, compile-time leak prevention
+val bytes: Chunk[Byte] = PdfIO.scoped.readAll(Path.of("doc.pdf"))
+PdfIO.scoped.writeAll(Path.of("out.pdf"), bytes)
+
+// B) ZIO-based: streaming, ZIO-shaped lifetime
+val stream: ZStream[Any, Throwable, Byte] = PdfIO.zio.reader(Path.of("big.pdf"))
+val sink:   ZSink[Any, Throwable, Byte, Byte, Long] = PdfIO.zio.writer(Path.of("out.pdf"))
+
+stream.via(PdfStream.decode()).runDrain      // file handle closed by ZStream's scope
+```
+
+When to use which:
+
+- **`PdfIO.scoped.{readAll, writeAll}`** — small/medium PDFs where you want the strongest possible "did I forget to close this?" guarantee. The `$` macro forbids the file handle from escaping the scoped block, so the InputStream/OutputStream is forced to be consumed inline. Returns pure data (`Chunk[Byte]`, `Long`); side effect is the file I/O.
+- **`PdfIO.zio.{reader, writer}`** — large files, async workflows, and anything that wants `ZStream` composition past the function boundary. Standard `ZIO.scoped` lifetime; the stream value flows freely through ZIO-shaped code.
+
+`PdfIOSpec` proves both work:
+
+- Round-trip via either API
+- **Resource finalizer runs even when the scoped block throws** (counter test: the close-counter increments to 1 even though `RuntimeException("boom")` propagates out of `Scope.global.scoped`)
+- `Resource.flatMap` composes two file handles, finalized in LIFO order
+- `PdfIO.zio.reader` streams a 1 MiB file without materialising it
+- A real PDF round-trips end-to-end: `PdfIO.zio.reader → PdfStream.decode → Decoded.{DataObj, ContentObj, Meta}`
+
+### Why both APIs
+
+The `$[A]` path-dependent type is the killer feature of `Scope` but it's also its limitation: a value tagged `scope.$[InputStream]` cannot escape the `scoped` block, which is **exactly** what makes a `ZStream.fromInputStream`-style wrapper impossible — that wrapper would have to capture the InputStream in a closure, and the macro forbids capture. So:
+
+- `Scope` is a great fit for synchronous, "open file → process inline → close" workflows.
+- For streaming I/O across function boundaries, `ZIO.scoped` + `ZStream.fromInputStream` is the right tool. The cost is that you give up the macro's compile-time leak prevention.
+
+This is a feature, not a bug — `Scope` says, on the tin: "your resource cannot leave this block at compile time". If you want it to leave the block, you've chosen the wrong abstraction. Stay on ZIO's resource scopes for that case.
+
+### Could `Scope` replace ZIO entirely?
+
+For this codebase, no. `ZStream` / `ZPipeline` / `ZChannel` *is* the streaming substrate; the entire decoder + encoder + pipeline layer is built on it. `Scope`/`Resource`/`Wire` solve a different problem (resource lifetime + DI graphs) and would only replace the small set of sites where we currently use `ZIO` directly:
+
+- `Log.live` (`ZIO.logDebug` / `logError`) — could move to a synchronous `Logger` trait wrapped in `Resource`.
+- `StatefulPipe.applyEffect`'s `onDone` hook — same, but it's optional.
+- `PdfIO.zio.{reader, writer}` — could move to `Scope` if every consumer agreed to call `scoped { ... }` synchronously, but that defeats the streaming use case.
+
+So `zio-blocks-scope` is a **complementary** primitive, not a replacement. We use it where it fits (synchronous file I/O with the strongest possible compile-time guarantees) and stay on `ZIO` for the streaming and async sites where `Scope`'s constraints would be too strict.
+
 ## Replacements summary
 
 | legacy | new |
