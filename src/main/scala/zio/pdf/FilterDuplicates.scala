@@ -48,7 +48,7 @@ object FilterDuplicates {
       onDone = s =>
         if (s.filter.duplicateCount > 0)
           log.debug(
-            s"duplicate indirect objects suppressed before first xref (approximate count: ${s.filter.duplicateCount})"
+            s"duplicate indirect objects suppressed before first xref (count: ${s.filter.duplicateCount})"
           )
         else ZIO.unit
     )(step)

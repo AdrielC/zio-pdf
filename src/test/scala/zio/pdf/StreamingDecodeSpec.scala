@@ -64,7 +64,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         bytes  <- buildPdf(2048)
         events <- ZStream
                     .fromChunk(Chunk.fromArray(bytes.toArray))
-                    .via(PdfStream.streamingDecode)
+                    .via(PdfStream.streamingDecode())
                     .runCollect
       } yield {
         val headers   = events.collect { case h: StreamingDecoded.ContentObjStart => h }
@@ -91,7 +91,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         bytes  <- buildPdf(payloadSize)
         events <- ZStream
                     .fromChunk(Chunk.fromArray(bytes.toArray))
-                    .via(PdfStream.streamingDecode)
+                    .via(PdfStream.streamingDecode())
                     .runCollect
         inline = events.collect { case s: StreamingDecoded.ContentObjStart => s.inlinePayload }.flatten.headOption
       } yield {
@@ -113,7 +113,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         bytes  <- buildPdf(payloadSize)
         events <- ZStream
                     .fromChunk(Chunk.fromArray(bytes.toArray))
-                    .via(PdfStream.streamingDecode)
+                    .via(PdfStream.streamingDecode())
                     .runCollect
         starts = events.collect { case s: StreamingDecoded.ContentObjStart => s }
         ends   = events.collect { case StreamingDecoded.ContentObjEnd      => () }
@@ -135,7 +135,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         stats <- ZStream
                    .fromChunk(Chunk.fromArray(bytes.toArray))
                    .rechunk(64 * 1024)
-                   .via(PdfStream.streamingDecode)
+                   .via(PdfStream.streamingDecode())
                    .runFold((0L, 0L)) { case ((n, total), ev) =>
                      ev match {
                        case StreamingDecoded.ContentObjBytes(c) => (n + 1L, total + c.size.toLong)
@@ -159,7 +159,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         stats <- ZStream
                    .fromChunk(Chunk.fromArray(bytes.toArray))
                    .rechunk(64 * 1024)
-                   .via(PdfStream.streamingDecode)
+                   .via(PdfStream.streamingDecode())
                    .runFold(0L) { (acc, ev) =>
                      ev match {
                        case StreamingDecoded.ContentObjBytes(c) => acc + c.size.toLong
@@ -182,7 +182,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         bytes  <- buildPdf(payloadSize)
         digest <- ZStream
                     .fromChunk(Chunk.fromArray(bytes.toArray))
-                    .via(PdfStream.streamingDecode)
+                    .via(PdfStream.streamingDecode())
                     .collect { case StreamingDecoded.ContentObjBytes(c) => c }
                     .runFold(java.security.MessageDigest.getInstance("SHA-256")) { (md, c) =>
                       md.update(c.toArray); md

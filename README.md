@@ -452,9 +452,9 @@ partStream.via(WritePdf.parts).runFold(0L)(_ + _.size)  // counts bytes; ~64 KiB
 
 There is **one** primary decode path on bytes:
 
-- **`PdfStream.decode(log, config)`** — runs `StreamingDecode.pipeline` then `DecodedFromStreaming`: streaming parse (approximate duplicate suppression via a **fixed-size bit table** — `DuplicateFilterState`, Bloom-style single hash; no unbounded `Set`; end-of-stream log is a **suppression count** only) plus the same **stream expansion** as before (ObjStm, XRef stream metadata, lazy Flate) so `elements` / `validate` / `compare` keep working.
+- **`PdfStream.decode(log, config)`** — runs `StreamingDecode.pipeline` then `DecodedFromStreaming`: streaming parse (duplicate suppression via `DuplicateFilterState`: a `java.util.BitSet` over object numbers, no `Set[Long]`; end-of-stream log is a **suppression count**) plus the same **stream expansion** as before (ObjStm, XRef stream metadata, lazy Flate) so `elements` / `validate` / `compare` keep working.
 
-- **`PdfStream.streamingDecode`** — raw `StreamingDecoded` events only (no expansion to `Decoded`). Use when you only need bytes on the wire.
+- **`PdfStream.streamingDecode(...)`** — raw `StreamingDecoded` events only (no expansion to `Decoded`). Call per stream — each invocation returns a **fresh** pipeline (do not cache a single `ZPipeline` across PDFs).
 
 `StreamingDecode.Config(inlineMaxBytes)` (default **256 KiB**) controls small-stream behaviour: if `/Length <= inlineMaxBytes`, the parser buffers the raw payload once and emits **`ContentObjStart(..., inlinePayload = Some(bits))`** with **no** following `ContentObjBytes` / `ContentObjEnd`. Larger streams use **`ContentObjStart(..., None)`** then chunked **`ContentObjBytes`** and **`ContentObjEnd`**.
 
@@ -559,6 +559,7 @@ stream.via(PdfStream.decode()).runDrain      // file handle closed by ZStream's 
 When to use which:
 
 - **`PdfIO.scoped.{readAll, writeAll}`** — small/medium PDFs where you want the strongest possible "did I forget to close this?" guarantee. The `$` macro forbids the file handle from escaping the scoped block, so the InputStream/OutputStream is forced to be consumed inline. Returns pure data (`Chunk[Byte]`, `Long`); side effect is the file I/O.
+- **`PdfIO.scoped.{decodeStreamingDecoded, decodeDecoded, validate, comparePaths}`** — same `Scope` + `Resource` ownership: the file is read with **only** `stream.read(...)` as the receiver inside the `$` block (required by the macro). Bytes are fed chunk-by-chunk through the same decoders as `ZStream.via(PdfStream.*)` (no full-file `ByteArrayOutputStream` copy). The **returned** `Chunk[Decoded]` / validation still aggregates the full decode like `runCollect` would; for lazy `ZStream` composition past the function boundary, use **`PdfIO.zio.reader`**.
 - **`PdfIO.zio.{reader, writer}`** — large files, async workflows, and anything that wants `ZStream` composition past the function boundary. Standard `ZIO.scoped` lifetime; the stream value flows freely through ZIO-shaped code.
 
 `PdfIOSpec` proves both work:
@@ -568,10 +569,11 @@ When to use which:
 - `Resource.flatMap` composes two file handles, finalized in LIFO order
 - `PdfIO.zio.reader` streams a 1 MiB file without materialising it
 - A real PDF round-trips end-to-end: `PdfIO.zio.reader → PdfStream.decode → Decoded.{DataObj, ContentObj, Meta}`
+- `PdfIO.scoped.decodeDecoded` matches that decode on `xref-stream.pdf` (byte-for-byte same `Chunk[Decoded]`).
 
 ### Why both APIs
 
-The `$[A]` path-dependent type is the killer feature of `Scope` but it's also its limitation: a value tagged `scope.$[InputStream]` cannot escape the `scoped` block, which is **exactly** what makes a `ZStream.fromInputStream`-style wrapper impossible — that wrapper would have to capture the InputStream in a closure, and the macro forbids capture. So:
+The `$[A]` path-dependent type is the killer feature of `Scope` but it's also its limitation: a value tagged `scope.$[InputStream]` cannot escape the `scoped` block, which forbids building a `ZStream.fromInputStream` that captures the handle in a pull closure. The decode helpers instead run **synchronous incremental steps** (`StreamingDecode.stepChunk` + `DecodedFromStreaming.foldChunk`) inside the `$` block while calling `stream.read` on the receiver. So:
 
 - `Scope` is a great fit for synchronous, "open file → process inline → close" workflows.
 - For streaming I/O across function boundaries, `ZIO.scoped` + `ZStream.fromInputStream` is the right tool. The cost is that you give up the macro's compile-time leak prevention.
