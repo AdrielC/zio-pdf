@@ -113,6 +113,45 @@ final class StreamDecoder[+A] private (private[stream] val step: StreamDecoder.S
           Decode(in => g(in).map(_.map(_.flatMap(f))), once, failOnErr)
         case Isolate(bits, decoder)     => Isolate(bits, decoder.flatMap(f))
         case Append(x, y)               => Append(x.flatMap(f), () => y().flatMap(f))
+        case FromPure(pure)             =>
+          // Collapse `FromPure(p).flatMap(f)` into a `Decode` step
+          // that runs `p` once on the buffer and feeds every emitted
+          // value through `f` via `emits >>= f`. When `p` reports
+          // `NeedMore` after having emitted at least one value we
+          // splice in a self-recursive call (via lazy `++`) so the
+          // streaming loop keeps pulling bits and re-running `p`.
+          lazy val self: StreamDecoder[B] =
+            new StreamDecoder[A](FromPure(pure)).flatMap(f)
+          Decode(
+            buffer => {
+              val (log, result) = pure.run.runAll(buffer)
+              result match {
+                case Left(err) =>
+                  if (log.isEmpty) Attempt.failure(err.err)
+                  else Attempt.successful(
+                    DecodeResult(
+                      StreamDecoder.emits(log).flatMap(f) ++ StreamDecoder.raiseError(err),
+                      BitVector.empty
+                    )
+                  )
+                case Right((leftover, status)) =>
+                  status match {
+                    case PureDecoder.Status.NeedMore if log.isEmpty =>
+                      Attempt.failure(Err.InsufficientBits(0L, buffer.size, Nil))
+                    case PureDecoder.Status.NeedMore =>
+                      Attempt.successful(
+                        DecodeResult(StreamDecoder.emits(log).flatMap(f) ++ self, leftover)
+                      )
+                    case _ =>
+                      Attempt.successful(
+                        DecodeResult(StreamDecoder.emits(log).flatMap(f), leftover)
+                      )
+                  }
+              }
+            },
+            once = true,
+            failOnErr = true
+          )
       }
     )
 
@@ -149,6 +188,7 @@ object StreamDecoder {
   ) extends Step[A]
   private[stream] case class Isolate[A](bits: Long, decoder: StreamDecoder[A]) extends Step[A]
   private[stream] case class Append[A](x: StreamDecoder[A], y: () => StreamDecoder[A]) extends Step[A]
+  private[stream] case class FromPure[A](pure: PureDecoder[A]) extends Step[A]
 
   /**
    * Type alias used internally for the channels we build: read
@@ -224,6 +264,21 @@ object StreamDecoder {
   def ignore(bits: Long): StreamDecoder[Nothing] =
     once(_root_.scodec.codecs.ignore(bits)).flatMap(_ => empty)
 
+  /**
+   * Lift a [[PureDecoder]] into the streaming side. This is the
+   * bridge between the pure-step world (`zio-prelude.ZPure`) and
+   * the streaming world (`zio.stream.ZChannel`).
+   *
+   * On every chunk pulled from upstream the buffer is appended to
+   * the carry, the pure decoder is `runAll`-ed against the new
+   * carry, every entry from its log is written downstream, and the
+   * resulting state becomes the next carry. The pure decoder's
+   * [[PureDecoder.Status]] decides whether to keep pulling
+   * (`NeedMore` / `DoneTryAgain`) or to stop (`Done`).
+   */
+  def fromPure[A](pure: PureDecoder[A]): StreamDecoder[A] =
+    new StreamDecoder[A](FromPure(pure))
+
   // -------------------------------------------------------------------
   // Interpreter
   // -------------------------------------------------------------------
@@ -242,7 +297,50 @@ object StreamDecoder {
       case Isolate(bits, decoder)      => isolateChannel(bits, decoder, carry)
       case Append(x, y) =>
         runStep(x.step, carry).flatMap(leftover => runStep(y().step, leftover))
+      case FromPure(pure)              => fromPureChannel(pure, carry)
     }
+
+  /**
+   * Drive a [[PureDecoder]] from the streaming side. On every chunk
+   * pulled from upstream, append it to the carry, `runAll` the pure
+   * decoder, write its log entries downstream, take its updated
+   * state as the new carry, and decide whether to keep going based
+   * on the returned [[PureDecoder.Status]].
+   */
+  private def fromPureChannel[A](
+    pure: PureDecoder[A],
+    carry: BitVector
+  ): BitChannel[A] = {
+
+    def emitLog(log: Chunk[A], next: BitChannel[A]): BitChannel[A] =
+      if (log.isEmpty) next
+      else ZChannel.write(log) *> next
+
+    def runOnce(buffer: BitVector): BitChannel[A] = {
+      val (log, result) = pure.run.runAll(buffer)
+      result match {
+        case Left(err) =>
+          emitLog(log, ZChannel.fail(err))
+        case Right((leftover, status)) =>
+          status match {
+            case PureDecoder.Status.NeedMore     => emitLog(log, waitForMore(leftover))
+            case PureDecoder.Status.Done         => emitLog(log, ZChannel.succeed(leftover))
+            case PureDecoder.Status.DoneTryAgain =>
+              if (leftover == buffer) emitLog(log, waitForMore(leftover))
+              else emitLog(log, runOnce(leftover))
+          }
+      }
+    }
+
+    def waitForMore(buffer: BitVector): BitChannel[A] =
+      ZChannel.readWithCause(
+        (chunk: Chunk[BitVector]) => runOnce(buffer ++ concatChunk(chunk)),
+        (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
+        (_: Any)                  => ZChannel.succeed(buffer)
+      )
+
+    if (carry.isEmpty) waitForMore(carry) else runOnce(carry)
+  }
 
   /**
    * Pull from upstream until we have at least `bits` bits buffered,

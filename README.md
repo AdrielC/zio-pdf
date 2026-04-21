@@ -104,23 +104,67 @@ val ints: ZStream[Any, Throwable, Int] =
   bytes.via(StreamDecoder.many(uint8).toBytePipeline)
 ```
 
-## Why use `ZChannel` (and not `ZPure`)
+## `ZPure` and `ZChannel`: the hybrid story
 
-`ZChannel` is ZIO's primitive for *stream-shape* transformations: it
-can read one element type from upstream, write a different element
-type downstream, and finish with a value. It is the underlying
-abstraction for `ZStream`, `ZPipeline`, and `ZSink`. That is exactly
-the shape of a streaming decoder, so the implementation is direct and
-fast (no allocation per byte beyond the carry buffer).
+The port uses **both** primitives, and they have very different jobs:
 
-`ZPure` is the right choice for *pure* state/log/error/reader
-computations that produce a single value, but it does not natively
-model the producer/consumer shape of a streaming decoder. Mixing the
-two would mean wrapping `ZPure` runs in a channel, which buys no
-power but adds an allocation per step. So the port stays on
-`ZChannel` and is happy to lean on `zio-prelude.ZPure` for
-*pure helpers* (e.g. accumulating xref tables) when the legacy code
-is migrated.
+- **`ZChannel`** (`StreamDecoder`) is ZIO's native primitive for
+  stream-shape transformations: it can read one element type from
+  upstream, write a different element type downstream, and finish
+  with a value. It is the underlying abstraction for `ZStream`,
+  `ZPipeline`, and `ZSink`. That is exactly the shape of a *streaming
+  I/O boundary*, so the channel-based implementation is direct and
+  allocation-free per byte beyond the carry buffer.
+
+- **`ZPure`** (`PureDecoder`) is the right tool for the *per-step
+  pure decoding logic* — the part that doesn't actually do I/O, just
+  consumes some buffered bits and produces zero or more values. By
+  modeling that step as `ZPure[A, BitVector, BitVector, Any,
+  CodecError, Status]` we get every capability we need without ever
+  needing a `Runtime`:
+
+  | `ZPure` slot | Decoder role |
+  |---|---|
+  | `S1 = S2 = BitVector`           | the *carry buffer* of bits not yet consumed |
+  | `W = A`                         | each emitted value is a *log entry* (so `runAll` returns `Chunk[A]` of outputs directly) |
+  | `E = CodecError`                | only *fatal* failures bubble up |
+  | success channel `Status`        | `NeedMore` / `Done` / `DoneTryAgain` lets the caller loop without paying for a `ZPure.fail` allocation |
+  | `R = Any`                       | reserved (the legacy `Log` / config can plug in here later) |
+
+  Pure decoders are testable **without a `Runtime`** — every test in
+  the `pure-only` suite calls `pd.run.runAll(bits)` directly:
+
+  ```scala
+  val pd            = PureDecoder.many(uint8)
+  val (log, result) = pd.run.runAll(bits)
+  // log: Chunk[Int] - all decoded values
+  // result: Either[CodecError, (BitVector, Status)]
+  ```
+
+The two halves compose through `StreamDecoder.fromPure` (or
+`PureDecoder#toStreamDecoder`):
+
+```scala
+import zio.scodec.stream.{PureDecoder, StreamDecoder}
+
+val pd: PureDecoder[Int]      = PureDecoder.many(scodec.codecs.uint8)
+val sd: StreamDecoder[Int]    = StreamDecoder.fromPure(pd)
+// or:
+val sd2: StreamDecoder[Int]   = pd.toStreamDecoder
+```
+
+Inside `fromPure`, the channel pulls a chunk from upstream, appends
+it to the carry, calls `pd.run.runAll(carry)`, writes everything in
+the returned log downstream, and decides whether to keep pulling
+based on the returned `Status`. This is the proper division of labor
+between `zio-prelude.ZPure` (the pure step) and `zio.stream.ZChannel`
+(the producer/consumer plumbing).
+
+This hybrid is exactly the shape needed when porting the rest of
+the legacy `fs2-pdf` code: things like xref accumulation, trailer
+sanitization, and PDF-object stream extraction are all pure
+state-and-log computations that fit `ZPure` perfectly, and they get
+wired into the streaming pipeline via `fromPure` at the very end.
 
 ## Roadmap
 
