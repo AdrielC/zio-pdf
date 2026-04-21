@@ -10,16 +10,66 @@
 
 - **Scala 3.8.3** (the latest 3.8.x release).
 - **ZIO 2.1.25** with `zio-streams`, `zio-prelude` 1.0.0-RC47.
+- **Kyo 1.0-RC1** (`kyo-data`, `kyo-kernel`, `kyo-prelude`, `kyo-core`)
+  for the algebraic-effect runtime used by the Scan algebra.
 - **`zio-blocks-schema` 0.0.33** for schema-derived codecs (smoke-tested).
 - **scodec-core 2.3.3** + **scodec-bits 1.2.4**.
 - A **ZIO port of `scodec.stream.StreamDecoder`** (the file from the
   original prompt) implemented on top of `ZChannel`.
+- A **Graviton Scan algebra** under `zio.pdf.scan` -- a free symmetric
+  monoidal category over a small primitive set (`Map`, `Filter`,
+  `Take`/`Drop`, `Fold`, `Hash`, `CountBytes`, `BombGuard`, `FastCDC`,
+  `FixedChunk`), interpreted into Kyo's `Poll`/`Emit`/`Abort` triple.
+  See [Graviton Scan](#graviton-scan) below.
 - A `zio-test` suite covering the streaming-decoder semantics
   (`once`, `many`, `tryMany`, `++`, `flatMap`, `isolate`, `ignore`,
-  `emit`/`emits`, `raiseError`, `strict`, byte/bit pipelines).
+  `emit`/`emits`, `raiseError`, `strict`, byte/bit pipelines) and the
+  Scan algebra (composition, fusion, stack-safety, fanout/choice,
+  hash, count, bomb-guard, take/drop, fold).
 - The original Scala 2.13 / fs2 sources are preserved, untouched, in
   `legacy/` for reference. They are not part of the new build and
   would need a much larger port to compile against ZIO/Scala 3.
+
+## Graviton Scan
+
+A scan is a morphism `FreeScan[I, O]` in a free symmetric monoidal
+category whose primitives are `ScanPrim[I, Out]`. Each primitive carries
+its output cardinality *statically* as a subtype:
+
+- `Null`        -- zero outputs (literally `scala.Null`)
+- `One[O]`      -- exactly one output (opaque alias for `O`, no boxing)
+- `NonEmpty[O]` -- one or more outputs (opaque alias for `O | Chunk[O]`)
+
+with `One[O] <: NonEmpty[O]` so the compiler can fuse `One`-emitting
+chains into a single `I => O`. The runtime execution model is three Kyo
+effects in one row: `Poll[I]` for pulling inputs, `Emit[O]` for pushing
+outputs, and `Abort[ScanSignal]` for typed completion (`ScanDone[O, E]`)
+with leftover. State lives in `Var[S]`; resources, when needed, in
+`Scope`.
+
+```scala
+import zio.pdf.scan.*
+
+val pipeline: FreeScan[Byte, kyo.Chunk[Byte]] =
+  Scan.bombGuard(maxBytes = 1L << 30) >>>
+  Scan.fastCdc(min = 4 * 1024, avg = 16 * 1024, max = 64 * 1024)
+
+val (signal, chunks) = Scan.runDirect(pipeline, fileBytes)
+//   ^ ScanDone.Success | Stop | Failure   ^ all emitted CDC chunks
+```
+
+The same scan can be executed through Kyo's effect machinery with
+`Scan.runKyo`. The interpreter (`SinglePassInterp`) flattens left-nested
+`AndThen` spines once, fuses any pure-function chain into a single
+`I => O`, and lowers the rest to a stack-safe stepper. Kyo 1.0 supplies
+the `Poll`/`Emit`/`Abort` plumbing; the layer order is `Abort` innermost
+(catches `ScanSignal`), `Emit` middle (collects outputs), `Poll`
+outermost (drives the program from a `Chunk[I]`). The leftover from the
+abort payload is appended to what `Emit` collected -- no re-emission, no
+broken Stream/Poll symmetry.
+
+Code lives under [`src/main/scala/zio/pdf/scan/`](src/main/scala/zio/pdf/scan/),
+tests under [`src/test/scala/zio/pdf/scan/ScanSpec.scala`](src/test/scala/zio/pdf/scan/ScanSpec.scala).
 
 ## Building & testing
 
