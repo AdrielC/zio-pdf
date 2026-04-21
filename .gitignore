@@ -1,0 +1,28 @@
+# Build outputs
+target/
+**/target/
+project/project/
+project/target/
+
+# Tooling caches
+.bsp/
+.metals/
+.bloop/
+.scala-build/
+
+# IDE
+.idea/
+.idea_modules/
+*.iml
+.vscode/
+.history/
+
+# OS
+.DS_Store
+
+# Misc
+*.swp
+*.log
+.cache
+.cache-main
+.cache-tests
