@@ -93,6 +93,12 @@ object FastCdc {
    *
    * If the buffer is shorter than `minSize`, returns `buffer.length`.
    */
+  /** Public alias of [[cutOffset]] for the scan package, which needs to
+    * drive FastCDC byte-by-byte through the Kyo `Var`-based interpreter
+    * rather than via a `ZPipeline`. */
+  def cutOffsetForScan(buffer: Array[Byte], cfg: Config): Int =
+    cutOffset(buffer, cfg)
+
   private[cdc] def cutOffset(buffer: Array[Byte], cfg: Config): Int = {
     val n = buffer.length
     if (n <= cfg.minSize) return n
