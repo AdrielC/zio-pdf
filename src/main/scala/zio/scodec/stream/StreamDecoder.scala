@@ -20,6 +20,7 @@ package zio.scodec.stream
 import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
 import _root_.scodec.bits.BitVector
 import zio.*
+import zio.prelude.fx.ZPure
 import zio.stream.*
 
 /**
@@ -83,52 +84,55 @@ final class StreamDecoder[+A] private (private[stream] val step: StreamDecoder.S
   def flatMap[B](f: A => StreamDecoder[B]): StreamDecoder[B] =
     new StreamDecoder[B](
       self.step match {
-        case Empty                      => Empty
-        case Result(a)                  => f(a).step
-        case Failed(cause)              => Failed(cause)
-        case Decode(g, once, failOnErr) =>
-          Decode(in => g(in).map(_.map(_.flatMap(f))), once, failOnErr)
-        case Isolate(bits, decoder)     => Isolate(bits, decoder.flatMap(f))
-        case Append(x, y)               => Append(x.flatMap(f), () => y().flatMap(f))
-        case FromPure(pure)             =>
+        case Empty                       => Empty
+        case Result(a)                   => f(a).step
+        case Failed(cause)               => Failed(cause)
+        case Decode(s, once, failOnErr)  =>
+          // ZPure.map at the type level gives us `f` over the inner
+          // value, then we lift that back into a sub-StreamDecoder
+          // by chaining `flatMap(f)`. This is the structural reason
+          // the algebra wants `DecoderStep` and not a raw function:
+          // map composes natively through `ZPure`.
+          Decode(s.map(_.flatMap(f)), once, failOnErr)
+        case Isolate(bits, decoder)      => Isolate(bits, decoder.flatMap(f))
+        case Append(x, y)                => Append(x.flatMap(f), () => y().flatMap(f))
+        case FromPure(pure)              =>
           // Collapse `FromPure(p).flatMap(f)` into a `Decode` step
-          // that runs `p` once on the buffer and feeds every emitted
-          // value through `f` via `emits >>= f`. When `p` reports
-          // `NeedMore` after having emitted at least one value we
-          // splice in a self-recursive call (via lazy `++`) so the
-          // streaming loop keeps pulling bits and re-running `p`.
+          // built from a `DecoderStep`. The step runs the pure
+          // decoder once per call:
+          //
+          //   - if it needs more bits and emitted nothing yet,
+          //     report `CodecError(InsufficientBits)` so the
+          //     surrounding Decode loop pulls more input and retries
+          //   - otherwise emit `emits(log).flatMap(f)` and either
+          //     splice in a self-recursive call (NeedMore + non-empty
+          //     log) or stop (Done / DoneTryAgain).
           lazy val self: StreamDecoder[B] =
             new StreamDecoder[A](FromPure(pure)).flatMap(f)
-          Decode(
-            buffer => {
+          val pureStep: PureDecoder.DecoderStep[StreamDecoder[B]] =
+            ZPure.get[BitVector].flatMap { buffer =>
               val (log, result) = pure.run.runAll(buffer)
               result match {
                 case Left(err) =>
-                  if (log.isEmpty) Attempt.failure(err.err)
-                  else Attempt.successful(
-                    DecodeResult(
-                      StreamDecoder.emits(log).flatMap(f) ++ StreamDecoder.raiseError(err),
-                      BitVector.empty
-                    )
-                  )
+                  if (log.isEmpty)
+                    ZPure.fail(err)
+                  else
+                    ZPure.set[BitVector](BitVector.empty) *>
+                      ZPure.succeed(StreamDecoder.emits(log).flatMap(f) ++ StreamDecoder.raiseError(err))
                 case Right((leftover, status)) =>
                   status match {
                     case PureDecoder.Status.NeedMore if log.isEmpty =>
-                      Attempt.failure(Err.InsufficientBits(0L, buffer.size, Nil))
+                      ZPure.fail(CodecError(Err.InsufficientBits(0L, buffer.size, Nil)))
                     case PureDecoder.Status.NeedMore =>
-                      Attempt.successful(
-                        DecodeResult(StreamDecoder.emits(log).flatMap(f) ++ self, leftover)
-                      )
+                      ZPure.set[BitVector](leftover) *>
+                        ZPure.succeed(StreamDecoder.emits(log).flatMap(f) ++ self)
                     case _ =>
-                      Attempt.successful(
-                        DecodeResult(StreamDecoder.emits(log).flatMap(f), leftover)
-                      )
+                      ZPure.set[BitVector](leftover) *>
+                        ZPure.succeed(StreamDecoder.emits(log).flatMap(f))
                   }
               }
-            },
-            once = true,
-            failOnErr = true
-          )
+            }
+          Decode(pureStep, once = true, failOnErr = true)
       }
     )
 
@@ -159,7 +163,7 @@ object StreamDecoder {
   private[stream] case class Result[A](value: A)                   extends Step[A]
   private[stream] case class Failed(cause: Throwable)              extends Step[Nothing]
   private[stream] case class Decode[A](
-    f: BitVector => Attempt[DecodeResult[StreamDecoder[A]]],
+    step: PureDecoder.DecoderStep[StreamDecoder[A]],
     once: Boolean,
     failOnErr: Boolean
   ) extends Step[A]
@@ -193,26 +197,30 @@ object StreamDecoder {
   def emits[A](as: Iterable[A]): StreamDecoder[A] =
     as.foldLeft(empty: StreamDecoder[A])((acc, a) => acc ++ emit(a))
 
+  /**
+   * Lift a `scodec.Decoder[A]` into a `DecoderStep` that produces a
+   * `StreamDecoder[A]` (which simply emits the decoded value). This
+   * is the only place where we cross the
+   * `BitVector => Attempt[DecodeResult[…]]` boundary: every other
+   * Decode step in the system is built from a `DecoderStep`.
+   */
+  private def liftEmitting[A](decoder: Decoder[A]): PureDecoder.DecoderStep[StreamDecoder[A]] =
+    PureDecoder.fromDecoder(decoder).map(emit[A])
+
   /** Decode exactly one value with the given decoder. */
   def once[A](decoder: Decoder[A]): StreamDecoder[A] =
-    new StreamDecoder[A](
-      Decode(in => decoder.decode(in).map(_.map(emit)), once = true, failOnErr = true)
-    )
+    new StreamDecoder[A](Decode(liftEmitting(decoder), once = true, failOnErr = true))
 
   /** Repeatedly decode values with the given decoder. */
   def many[A](decoder: Decoder[A]): StreamDecoder[A] =
-    new StreamDecoder[A](
-      Decode(in => decoder.decode(in).map(_.map(emit)), once = false, failOnErr = true)
-    )
+    new StreamDecoder[A](Decode(liftEmitting(decoder), once = false, failOnErr = true))
 
   /**
    * Try to decode one value. If decoding fails, no input is consumed
    * and no value is emitted.
    */
   def tryOnce[A](decoder: Decoder[A]): StreamDecoder[A] =
-    new StreamDecoder[A](
-      Decode(in => decoder.decode(in).map(_.map(emit)), once = true, failOnErr = false)
-    )
+    new StreamDecoder[A](Decode(liftEmitting(decoder), once = true, failOnErr = false))
 
   /**
    * Repeatedly decode values until decoding fails. On failure the
@@ -220,9 +228,7 @@ object StreamDecoder {
    * emitted any successfully decoded values up to that point.
    */
   def tryMany[A](decoder: Decoder[A]): StreamDecoder[A] =
-    new StreamDecoder[A](
-      Decode(in => decoder.decode(in).map(_.map(emit)), once = false, failOnErr = false)
-    )
+    new StreamDecoder[A](Decode(liftEmitting(decoder), once = false, failOnErr = false))
 
   /** A decoder that fails immediately with the given exception. */
   def raiseError(cause: Throwable): StreamDecoder[Nothing] = new StreamDecoder(Failed(cause))
@@ -347,18 +353,20 @@ object StreamDecoder {
   /**
    * The main decode loop. Reads chunks of [[BitVector]] from upstream
    * and accumulates them in `carry` until a value can be decoded.
-   * Mirrors the structure of the original FS2 `Decode` interpreter.
+   * Drives the supplied [[PureDecoder.DecoderStep]] in pure code per
+   * iteration; the channel is only used to pull more input when the
+   * step reports `InsufficientBits`.
    */
   private def decodeLoop[A](
-    f: BitVector => Attempt[DecodeResult[StreamDecoder[A]]],
+    decodeStep: PureDecoder.DecoderStep[StreamDecoder[A]],
     once: Boolean,
     failOnErr: Boolean,
     carry: BitVector
   ): BitChannel[A] = {
 
-    def attempt(buffer: BitVector): BitChannel[A] =
-      f(buffer) match {
-        case Attempt.Successful(DecodeResult(subDecoder, remainder)) =>
+    def attemptDecode(buffer: BitVector): BitChannel[A] =
+      decodeStep.runAll(buffer) match {
+        case (_, Right((remainder, subDecoder))) =>
           // Run the sub-decoder, threading `remainder` as its initial
           // carry so that no bits are dropped if the sub-decoder does
           // not pull from upstream (e.g. when it is `emit(_)`).
@@ -366,24 +374,17 @@ object StreamDecoder {
           if (once)
             subChannel
           else
-            subChannel.flatMap(subLeftover => decodeLoop(f, once = false, failOnErr, subLeftover))
+            subChannel.flatMap(subLeftover => decodeLoop(decodeStep, once = false, failOnErr, subLeftover))
 
-        case Attempt.Failure(_: Err.InsufficientBits) =>
-          // Need more input - keep reading.
-          waitForMore(buffer)
-
-        case Attempt.Failure(comp: Err.Composite)
-            if comp.errs.exists(_.isInstanceOf[Err.InsufficientBits]) =>
-          waitForMore(buffer)
-
-        case Attempt.Failure(e) =>
-          if (failOnErr) ZChannel.fail(CodecError(e))
+        case (_, Left(CodecError(err))) =>
+          if (isInsufficient(err)) waitForMore(buffer)
+          else if (failOnErr) ZChannel.fail(CodecError(err))
           else ZChannel.succeed(buffer)
       }
 
     def waitForMore(buffer: BitVector): BitChannel[A] =
       ZChannel.readWithCause(
-        (chunk: Chunk[BitVector]) => attempt(buffer ++ concatChunk(chunk)),
+        (chunk: Chunk[BitVector]) => attemptDecode(buffer ++ concatChunk(chunk)),
         (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
         (_: Any) =>
           // Upstream is done. If there is buffered data we hand it
@@ -392,7 +393,14 @@ object StreamDecoder {
           ZChannel.succeed(buffer)
       )
 
-    if (carry.isEmpty) waitForMore(carry) else attempt(carry)
+    if (carry.isEmpty) waitForMore(carry) else attemptDecode(carry)
+  }
+
+  /** True iff `err` is (or contains) an `Err.InsufficientBits`. */
+  private[stream] def isInsufficient(err: Err): Boolean = err match {
+    case _: Err.InsufficientBits => true
+    case comp: Err.Composite     => comp.errs.exists(isInsufficient)
+    case _                       => false
   }
 
   private def concatChunk(chunk: Chunk[BitVector]): BitVector =
@@ -433,25 +441,23 @@ object StreamDecoder {
         case left                    => left
       }
 
-    case Decode(f, once, failOnErr) =>
+    case Decode(decodeStep, once, failOnErr) =>
       def loop(acc1: Chunk[A], buffer: BitVector): Either[CodecError, (Chunk[A], BitVector)] =
-        f(buffer) match {
-          case Attempt.Successful(DecodeResult(subDecoder, remainder)) =>
+        decodeStep.runAll(buffer) match {
+          case (_, Right((remainder, subDecoder))) =>
             runStrict(subDecoder.step, remainder, acc1) match {
               case Right((acc2, leftover)) =>
                 if (once) Right((acc2, leftover))
                 else loop(acc2, leftover)
               case left => left
             }
-          case Attempt.Failure(_: Err.InsufficientBits) =>
-            // No more input is coming in strict mode, so InsufficientBits
-            // means we are done - hand the unconsumed buffer back.
-            Right((acc1, buffer))
-          case Attempt.Failure(comp: Err.Composite)
-              if comp.errs.exists(_.isInstanceOf[Err.InsufficientBits]) =>
-            Right((acc1, buffer))
-          case Attempt.Failure(e) =>
-            if (failOnErr) Left(CodecError(e))
+          case (_, Left(CodecError(err))) =>
+            if (isInsufficient(err))
+              // No more input is coming in strict mode, so
+              // InsufficientBits means we are done - hand the
+              // unconsumed buffer back.
+              Right((acc1, buffer))
+            else if (failOnErr) Left(CodecError(err))
             else Right((acc1, buffer))
         }
       loop(acc, bits)
