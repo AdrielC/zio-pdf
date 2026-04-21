@@ -3,8 +3,9 @@
  *   ZPipeline[Any, Throwable, Byte, StreamingDecoded]
  *
  * Duplicate indirect objects before the first xref are suppressed
- * (same rules as [[FilterDuplicates]]), including skipping their
- * stream payloads so the bit stream stays aligned.
+ * (same rules as [[FilterDuplicates]]), using a fixed-size bit table
+ * ([[DuplicateFilterState]]) instead of an unbounded set. End-of-stream
+ * logging reports a suppression count only.
  *
  * Small content streams (length <= config.inlineMaxBytes) are
  * buffered once and emitted as [[StreamingDecoded.ContentObjStart]]
@@ -84,48 +85,37 @@ object StreamingDecode {
   private final case class SkippingStreamPayload(remaining: Long, carry: BitVector) extends State
   private final case class ConsumingTrailer(carry: BitVector) extends State
 
-  private final case class DupState(
-    nums: Set[Long],
-    duplicates: Set[Long],
-    update: Boolean
-  )
-
   private def headerToEvent(
     cfg: Config,
     event: HeaderEvent,
     remainingBits: BitVector,
-    dup: DupState
-  ): (Chunk[StreamingDecoded], State, DupState) = event match {
+    dup: DuplicateFilterState.Mutable
+  ): (Chunk[StreamingDecoded], State) = event match {
     case HeaderEvent.V(v) =>
-      (Chunk.single(StreamingDecoded.VersionT(v)), WaitingHeader(remainingBits), dup)
+      (Chunk.single(StreamingDecoded.VersionT(v)), WaitingHeader(remainingBits))
     case HeaderEvent.C(b) =>
-      (Chunk.single(StreamingDecoded.CommentT(b)), WaitingHeader(remainingBits), dup)
+      (Chunk.single(StreamingDecoded.CommentT(b)), WaitingHeader(remainingBits))
     case HeaderEvent.S(s) =>
-      val nextDup = dup.copy(update = true)
-      (Chunk.single(StreamingDecoded.StartXrefT(s)), WaitingHeader(remainingBits), nextDup)
+      DuplicateFilterState.enterUpdateMode(dup)
+      (Chunk.single(StreamingDecoded.StartXrefT(s)), WaitingHeader(remainingBits))
     case HeaderEvent.X(x) =>
-      val nextDup = dup.copy(update = true)
-      (Chunk.single(StreamingDecoded.XrefT(x)), WaitingHeader(remainingBits), nextDup)
+      DuplicateFilterState.enterUpdateMode(dup)
+      (Chunk.single(StreamingDecoded.XrefT(x)), WaitingHeader(remainingBits))
     case HeaderEvent.W(_) =>
-      (Chunk.empty, WaitingHeader(remainingBits), dup)
+      (Chunk.empty, WaitingHeader(remainingBits))
     case HeaderEvent.H(IndirectObj.IndirectObjHeader(obj, streamLen)) =>
-      val num = obj.index.number
-      val (suppress, nextDup) =
-        if (!dup.update && dup.nums.contains(num))
-          (true, dup.copy(duplicates = dup.duplicates + num))
-        else
-          (false, dup.copy(nums = dup.nums + num))
+      val suppress = DuplicateFilterState.shouldSuppress(dup, obj.index.number)
       if (suppress)
         streamLen match {
           case None =>
-            (Chunk.empty, ConsumingTrailerNoStream(remainingBits), nextDup)
+            (Chunk.empty, ConsumingTrailerNoStream(remainingBits))
           case Some(length) =>
-            (Chunk.empty, SkippingStreamPayload(length, remainingBits), nextDup)
+            (Chunk.empty, SkippingStreamPayload(length, remainingBits))
         }
       else
         streamLen match {
           case None =>
-            (Chunk.single(StreamingDecoded.DataObj(obj)), ConsumingTrailerNoStream(remainingBits), nextDup)
+            (Chunk.single(StreamingDecoded.DataObj(obj)), ConsumingTrailerNoStream(remainingBits))
           case Some(length) =>
             if (length <= cfg.inlineMaxBytes && length <= Int.MaxValue && length > 0L)
               (
@@ -136,20 +126,17 @@ object StreamingDecode {
                   filled     = 0,
                   carry      = remainingBits,
                   acc        = new Array[Byte](length.toInt)
-                ),
-                nextDup
+                )
               )
             else if (length == 0L)
               (
                 Chunk.single(StreamingDecoded.ContentObjStart(obj, 0L, Some(BitVector.empty))),
-                ConsumingTrailer(remainingBits),
-                nextDup
+                ConsumingTrailer(remainingBits)
               )
             else
               (
                 Chunk.single(StreamingDecoded.ContentObjStart(obj, length, None)),
-                ForwardingBytes(length, remainingBits),
-                nextDup
+                ForwardingBytes(length, remainingBits)
               )
         }
   }
@@ -186,15 +173,15 @@ object StreamingDecode {
   private def stepAll(
     cfg: Config,
     state: State,
-    dup: DupState,
+    dup: DuplicateFilterState.Mutable,
     in: Chunk[StreamingDecoded] = Chunk.empty
-  ): (Chunk[StreamingDecoded], State, DupState) = state match {
+  ): (Chunk[StreamingDecoded], State) = state match {
 
     case fb @ ForwardingBytes(remaining, carry) =>
       if (remaining == 0L)
         stepAll(cfg, ConsumingTrailer(carry), dup, in :+ StreamingDecoded.ContentObjEnd)
       else if (carry.isEmpty)
-        (in, fb, dup)
+        (in, fb)
       else {
         val carryBytes = carry.bytes
         val take       = math.min(remaining, carryBytes.size).toInt
@@ -215,7 +202,7 @@ object StreamingDecode {
         stepAll(cfg, ConsumingTrailer(carry), dup, in :+ ev)
       }
       else if (carry.isEmpty)
-        (in, buf, dup)
+        (in, buf)
       else {
         val carryBytes = carry.bytes
         val need       = bytesTotal - filled
@@ -233,7 +220,7 @@ object StreamingDecode {
       if (remaining == 0L)
         stepAll(cfg, ConsumingTrailer(carry), dup, in)
       else if (carry.isEmpty)
-        (in, sb, dup)
+        (in, sb)
       else {
         val carryBytes = carry.bytes
         val take       = math.min(remaining, carryBytes.size).toInt
@@ -251,7 +238,7 @@ object StreamingDecode {
           (in, ct match {
             case _: ConsumingTrailer         => ConsumingTrailer(needMore)
             case _: ConsumingTrailerNoStream => ConsumingTrailerNoStream(needMore)
-          }, dup)
+          })
         case Right(Right(rest)) => stepAll(cfg, WaitingHeader(rest), dup, in)
         case Right(Left(err))   => throw err
       }
@@ -259,19 +246,19 @@ object StreamingDecode {
     case wh @ WaitingHeader(carry) =>
       streamingHeaderDecoder.decode(carry) match {
         case Attempt.Successful(DecodeResult(event, rest)) =>
-          val (events, next, nextDup) = headerToEvent(cfg, event, rest, dup)
-          stepAll(cfg, next, nextDup, in ++ events)
+          val (events, next) = headerToEvent(cfg, event, rest, dup)
+          stepAll(cfg, next, dup, in ++ events)
         case Attempt.Failure(_) =>
-          (in, wh, dup)
+          (in, wh)
       }
   }
 
   private def feed(
     cfg: Config,
     state: State,
-    dup: DupState,
+    dup: DuplicateFilterState.Mutable,
     chunk: Chunk[Byte]
-  ): (Chunk[StreamingDecoded], State, DupState) = {
+  ): (Chunk[StreamingDecoded], State) = {
     val incoming = BitVector.view(chunk.toArray)
     val newCarry = state match {
       case WaitingHeader(c)            => c ++ incoming
@@ -295,15 +282,13 @@ object StreamingDecode {
 
   private final case class FinalState(
     state: State,
-    dup: DupState,
+    dupFilter: DuplicateFilterState.Mutable,
     xrefs: List[Xref],
     version: Option[Version]
   )
 
-  private val dupInitial: DupState = DupState(Set.empty, Set.empty, update = false)
-
   private def initial: FinalState =
-    FinalState(WaitingHeader(BitVector.empty), dupInitial, Nil, None)
+    FinalState(WaitingHeader(BitVector.empty), DuplicateFilterState.initial, Nil, None)
 
   private def updateAccumulators(fs: FinalState, ev: StreamingDecoded): FinalState = ev match {
     case StreamingDecoded.VersionT(v) => fs.copy(version = Some(v))
@@ -318,16 +303,22 @@ object StreamingDecode {
   ): ZChannel[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[StreamingDecoded], FinalState] =
     ZChannel.readWithCause[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[StreamingDecoded], FinalState](
       (chunk: Chunk[Byte]) => {
-        val (out, nextState, nextDup) = feed(cfg, fs.state, fs.dup, chunk)
-        val updatedBase                = fs.copy(state = nextState, dup = nextDup)
-        val updated                    = out.foldLeft(updatedBase)(updateAccumulators)
+        val (out, nextState) = feed(cfg, fs.state, fs.dupFilter, chunk)
+        val updatedBase      = fs.copy(state = nextState)
+        val updated          = out.foldLeft(updatedBase)(updateAccumulators)
         if (out.isEmpty) loop(cfg, log, updated)
         else ZChannel.write(out) *> loop(cfg, log, updated)
       },
       (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
       (_: Any) =>
-        if (fs.dup.duplicates.nonEmpty)
-          ZChannel.fromZIO(log.debug(s"duplicate objects in pdf: ${fs.dup.duplicates}")).as(fs)
+        if (fs.dupFilter.duplicateCount > 0)
+          ZChannel
+            .fromZIO(
+              log.debug(
+                s"duplicate indirect objects suppressed before first xref (approximate count: ${fs.dupFilter.duplicateCount})"
+              )
+            )
+            .as(fs)
         else
           ZChannel.succeed(fs)
     )
