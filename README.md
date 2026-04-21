@@ -10,16 +10,133 @@
 
 - **Scala 3.8.3** (the latest 3.8.x release).
 - **ZIO 2.1.25** with `zio-streams`, `zio-prelude` 1.0.0-RC47.
+- **Kyo 1.0-RC1** (`kyo-data`, `kyo-kernel`, `kyo-prelude`, `kyo-core`)
+  for the algebraic-effect runtime used by the Scan algebra.
 - **`zio-blocks-schema` 0.0.33** for schema-derived codecs (smoke-tested).
 - **scodec-core 2.3.3** + **scodec-bits 1.2.4**.
 - A **ZIO port of `scodec.stream.StreamDecoder`** (the file from the
   original prompt) implemented on top of `ZChannel`.
+- A **Graviton Scan algebra** under `zio.pdf.scan` -- a free symmetric
+  monoidal category over a small primitive set (`Map`, `Filter`,
+  `Take`/`Drop`, `Fold`, `Hash`, `CountBytes`, `BombGuard`, `FastCDC`,
+  `FixedChunk`), interpreted into Kyo's `Poll`/`Emit`/`Abort` triple.
+  See [Graviton Scan](#graviton-scan) below.
 - A `zio-test` suite covering the streaming-decoder semantics
   (`once`, `many`, `tryMany`, `++`, `flatMap`, `isolate`, `ignore`,
-  `emit`/`emits`, `raiseError`, `strict`, byte/bit pipelines).
+  `emit`/`emits`, `raiseError`, `strict`, byte/bit pipelines) and the
+  Scan algebra (composition, fusion, stack-safety, fanout/choice,
+  hash, count, bomb-guard, take/drop, fold).
 - The original Scala 2.13 / fs2 sources are preserved, untouched, in
   `legacy/` for reference. They are not part of the new build and
   would need a much larger port to compile against ZIO/Scala 3.
+
+## Graviton Scan
+
+A scan is a morphism `FreeScan[I, O]` in a free symmetric monoidal
+category whose primitives are `ScanPrim[I, Out]`. Each primitive carries
+its output cardinality *statically* as a subtype:
+
+- `Null`        -- zero outputs (literally `scala.Null`)
+- `One[O]`      -- exactly one output (opaque alias for `O`, no boxing)
+- `NonEmpty[O]` -- one or more outputs (opaque alias for `O | Chunk[O]`)
+
+with `One[O] <: NonEmpty[O]` so the compiler can fuse `One`-emitting
+chains into a single `I => O`. The runtime execution model is three Kyo
+effects in one row: `Poll[I]` for pulling inputs, `Emit[O]` for pushing
+outputs, and `Abort[ScanSignal]` for typed completion (`ScanDone[O, E]`)
+with leftover. State lives in `Var[S]`; resources, when needed, in
+`Scope`.
+
+```scala
+import zio.pdf.scan.*
+
+val pipeline: FreeScan[Byte, kyo.Chunk[Byte]] =
+  Scan.bombGuard(maxBytes = 1L << 30) >>>
+  Scan.fastCdc(min = 4 * 1024, avg = 16 * 1024, max = 64 * 1024)
+
+val (signal, chunks) = Scan.runDirect(pipeline, fileBytes)
+//   ^ ScanDone.Success | Stop | Failure   ^ all emitted CDC chunks
+```
+
+The same scan can be executed through Kyo's effect machinery with
+`Scan.runKyo`. The interpreter (`SinglePassInterp`) flattens left-nested
+`AndThen` spines once, fuses any pure-function chain into a single
+`I => O`, and lowers the rest to a stack-safe stepper. Kyo 1.0 supplies
+the `Poll`/`Emit`/`Abort` plumbing; the layer order is `Abort` innermost
+(catches `ScanSignal`), `Emit` middle (collects outputs), `Poll`
+outermost (drives the program from a `Chunk[I]`). The leftover from the
+abort payload is appended to what `Emit` collected -- no re-emission, no
+broken Stream/Poll symmetry.
+
+### Combinators
+
+The full Arrow / ArrowChoice surface is available as extension methods
+on `FreeScan`:
+
+| Family       | Operators |
+|---           |---        |
+| Category     | `>>>`, `<<<`, `andThen`, `compose`, `FreeScan.id` |
+| Profunctor   | `map`, `contramap`, `dimap` |
+| Strong arrow | `first`, `second`, `***`, `&&&`, `Scan.diag`, `Scan.fst`, `Scan.snd`, `Scan.swap`, `keepFirst`, `keepSecond` |
+| Choice arrow | `left`, `right`, `+++`, `\|\|\|`, `Scan.mirror`, `Scan.merge`, `Scan.injectLeft`, `Scan.injectRight`, `Scan.test` |
+| Glue         | `Scan.const`, `Scan.void`, `drainLeft`, `Scan.arr`, `Scan.lift` |
+
+Everything except the leaf primitives is derived from `arr`, `>>>`,
+`&&&` and `|||`, so `Fusion.tryFuse` automatically collapses any pure
+sub-spine -- including pure tuple shuffling like `swap`, `mirror`, `fst`
+and `snd` -- into a single `I => O` on the hot path.
+
+Code lives under [`src/main/scala/zio/pdf/scan/`](src/main/scala/zio/pdf/scan/);
+tests under [`src/test/scala/zio/pdf/scan/`](src/test/scala/zio/pdf/scan/)
+(`ScanSpec` for the primitive properties; `AdvancedCompositionSpec` for
+deep `>>>` / `&&&` / `|||` composition and the Graviton-style ingest
+patterns; `ArrowKitchenSinkSpec` for the full Arrow / ArrowChoice
+surface and a single pipeline that uses *every* combinator at once;
+`ScanPerfBench` for the in-test perf snapshot).
+
+### Performance
+
+The fused `Scan.runDirect` path beats `scodec.codecs.vector(uint8)`'s
+strict baseline by roughly 3-4x on the canonical "decode 1 MiB through a
+4-stage pure pipeline" workload, despite doing strictly more work (the
+scan also runs three arithmetic stages on each decoded byte; the scodec
+baseline just decodes them):
+
+```
+=== scan vs scodec on 1048576 bytes (lower is better, in-test bench) ===
+  [scodec.codecs.vector(uint8).decode                ]   111 ms / iter
+  [Scan.runDirect (fused, 4 maps)                    ]    24 ms / iter
+  [Scan.runDirect (unfused, 4 maps + filter)         ]   204 ms / iter
+  [Scan.runKyo  (fused, 4 maps, N=1024)              ]     7 ms / iter
+  [hand-coded while loop (reference)                 ]     2 ms / iter
+  ratio fused/scodec = 0.35x
+```
+
+JMH numbers from `bench/Jmh/run -p n=1048576 zio.pdf.scan.bench.ScanBench`
+agree:
+
+```
+Benchmark                        (n)  Mode  Cnt    Score     Error  Units
+ScanBench.handCoded          1048576  avgt    3    0.937 ±   0.672  ms/op
+ScanBench.scanFusedDirect    1048576  avgt    3   23.525 ±  35.059  ms/op
+ScanBench.scanUnfusedDirect  1048576  avgt    3  179.283 ± 119.168  ms/op
+ScanBench.scodecBaseline     1048576  avgt    3   63.310 ±  29.787  ms/op
+```
+
+The fast path is `Fusion.tryFuse` recognising that every node in the
+spine is `Arr` or `Prim(ScanPrim.Map)` and collapsing the chain to a
+single `I => O`. The runner then becomes one `builder += f(_)` per
+input byte -- no `Stepper`, no `StepEffect`, no per-stage dispatch.
+
+The unfused lane (4 maps + a `Filter`) measures the cost when fusion is
+not possible: the driver routes each byte through the per-stage stepper
+and pays one `StepEffect` allocation per element.
+
+The Kyo lane pays a fixed per-element suspension cost from
+`Poll`/`Emit`/`Abort`, which dominates trivial workloads but stays flat
+under bigger per-stage work; it's intentionally not part of the JMH
+suite (the in-test bench measures it on a smaller payload so the
+result is visible without dominating the run).
 
 ## Building & testing
 
