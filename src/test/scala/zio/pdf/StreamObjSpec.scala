@@ -37,7 +37,7 @@ object StreamObjSpec extends ZIOSpecDefault {
     2,
     Prim.dict(
       "Type"  -> Prim.Name("Pages"),
-      "Kids"  -> Prim.Array(List(Prim.Ref(3, 0))),
+      "Kids"  -> Prim.Array(Prim.Ref(3, 0)),
       "Count" -> Prim.Number(BigDecimal(1))
     )
   )
@@ -47,12 +47,11 @@ object StreamObjSpec extends ZIOSpecDefault {
       "Type"     -> Prim.Name("Page"),
       "Parent"   -> Prim.Ref(2, 0),
       "MediaBox" -> Prim.Array(
-        List(
           Prim.Number(BigDecimal(0)),
           Prim.Number(BigDecimal(0)),
           Prim.Number(BigDecimal(612)),
           Prim.Number(BigDecimal(792))
-        )
+        
       ),
       "Contents" -> Prim.Ref(4, 0)
     )

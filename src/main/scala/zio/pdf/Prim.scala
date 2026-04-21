@@ -13,13 +13,36 @@ package zio.pdf
 import scala.util.Try
 
 import zio.pdf.codec.{Codecs, Many, Text, Whitespace}
+import zio.pdf.schema.given
 import _root_.scodec.{Attempt, Codec, DecodeResult, Decoder, Encoder, Err}
 import _root_.scodec.bits.{BitVector, ByteVector}
 import _root_.scodec.codecs.*
+import zio.blocks.chunk.{Chunk as BlocksChunk, ChunkMap}
+import zio.blocks.schema.Schema
 
 sealed trait Prim
 
 object Prim extends PrimCodec {
+
+  /** Schema derivation for the entire `Prim` ADT.
+    *
+    * Covers the nine constructors (Null / Ref / Bool / Number / Name /
+    * Str / HexStr / Array / Dict), threading through
+    * `Schema[ByteVector]` (for `Str` / `HexStr`) and recursive
+    * `Schema[List[Prim]]` / `Schema[Map[String, Prim]]` (for `Array` /
+    * `Dict`). The `zio.blocks.schema.Schema.derived` macro handles the
+    * recursion via its internal `Lazy` wrapper.
+    *
+    * Once this lands, every downstream facility becomes available
+    * without extra code:
+    *   - JSON / CBOR / Avro / Protobuf codecs (via `Schema.getInstance`);
+    *   - Optics (`Schema#lens`, `Schema#prism`, `Schema#traversal`)
+    *     for court-grade policy expressions;
+    *   - `DynamicValue` for schema-less inspection;
+    *   - `Patch` / `DynamicPatch` for describing mutations with
+    *     chain-of-custody semantics.
+    */
+  given schema: Schema[Prim] = Schema.derived[Prim]
 
   case object Null extends Prim
 
@@ -39,18 +62,37 @@ object Prim extends PrimCodec {
   /** Hex string: `<deadbeef>`. */
   final case class HexStr(data: ByteVector) extends Prim
 
-  /** PDF array: `[1 2 3 (foo) /Bar]`. */
-  final case class Array(data: List[Prim]) extends Prim
+  /** PDF array: `[1 2 3 (foo) /Bar]`.
+    *
+    * Uses `zio.blocks.chunk.Chunk` so Schema derivation picks up the
+    * stock `Schema[Chunk[A]]` instance with zero bridging. `Chunk` is
+    * also what the streaming layer traffics in; we pay no conversion
+    * cost at the streaming boundary.
+    *
+    * (Not `scala.collection.immutable.List` because the main use-site
+    * is `appendOrCreate`, which is O(n) on cons-lists but O(log n) on
+    * chunks; also, `List` in a `Prim` ADT reads as if the PDF array is
+    * semantically list-shaped, which it isn't.) */
+  final case class Array(data: BlocksChunk[Prim]) extends Prim
 
   object Array {
     def refs(nums: Long*): Array =
-      Array(nums.map(refNum).toList)
+      Array(BlocksChunk.fromIterable(nums.map(refNum)))
     def nums(ns: BigDecimal*): Array =
-      Array(ns.map(Number(_)).toList)
+      Array(BlocksChunk.fromIterable(ns.map(Number(_))))
+    def apply(values: Prim*): Array =
+      new Array(BlocksChunk.fromIterable(values))
   }
 
-  /** PDF dict: `<< /Key /Value >>`. */
-  final case class Dict(data: Map[String, Prim]) extends Prim {
+  /** PDF dict: `<< /Key /Value >>`.
+    *
+    * Backed by an order-preserving `ChunkMap` so re-serialising an
+    * ingested PDF doesn't silently reorder dict keys. That matters for
+    * evidence chain-of-custody: a round-trip must not *appear* to
+    * change a document. PDF dict equality is not key-order sensitive,
+    * but byte-level reproducibility under a frozen encoding policy is
+    * what we're after, and reordering the keys would defeat that. */
+  final case class Dict(data: ChunkMap[String, Prim]) extends Prim {
     def apply(key: String): Option[Prim]              = data.get(key)
     def ++(other: Dict): Dict                          = Dict(data ++ other.data)
     def ref(key: String): Option[Ref]                  =
@@ -59,7 +101,10 @@ object Prim extends PrimCodec {
 
   object Dict {
 
-    def empty: Dict = Dict(Map.empty)
+    def empty: Dict = Dict(ChunkMap.empty)
+
+    def apply(pairs: (String, Prim)*): Dict =
+      Dict(ChunkMap.from(pairs))
 
     def attempt(key: String)(data: Prim): Attempt[Prim] =
       tryDict(key)(data) match {
@@ -86,7 +131,7 @@ object Prim extends PrimCodec {
     def number(keys: String*)(data: Prim): Attempt[BigDecimal] =
       path(keys*)(data) { case Number(d) => d }
 
-    def array(keys: String*)(data: Prim): Attempt[List[Prim]] =
+    def array(keys: String*)(data: Prim): Attempt[BlocksChunk[Prim]] =
       path(keys*)(data) { case Array(d) => d }
 
     def numbers(keys: String*)(data: Prim): Attempt[List[BigDecimal]] =
@@ -99,7 +144,7 @@ object Prim extends PrimCodec {
       }
 
     def collectRefs(keys: String*)(data: Prim): Attempt[List[Long]] =
-      array(keys*)(data).map(_.collect { case Ref(n, _) => n })
+      array(keys*)(data).map(_.collect { case Ref(n, _) => n }.toList)
 
     def updated(key: String, value: Prim)(d: Dict): Dict =
       Dict(d.data.updated(key, value))
@@ -138,13 +183,13 @@ object Prim extends PrimCodec {
 
   def appendOrCreateArray(elem: Prim): Option[Prim] => Prim = {
     case Some(Array(old))           => Array(old :+ elem)
-    case Some(old @ Ref(_, _))      => Array(List(old, elem))
-    case _                           => Array(List(elem))
+    case Some(old @ Ref(_, _))      => Array(BlocksChunk(old, elem))
+    case _                           => Array(BlocksChunk(elem))
   }
 
   def appendOrCreateDict(key: String, elem: Prim): Option[Prim] => Prim = {
     case Some(Dict(old)) => Dict(old + (key -> elem))
-    case _                => Dict(Map(key -> elem))
+    case _                => Dict(ChunkMap((key, elem)))
   }
 
   def withDict[A]: Prim => A => Option[(A, Dict)] = {
@@ -188,7 +233,7 @@ object Prim extends PrimCodec {
     def unapply(data: Prim): Option[List[Ref]] = data match {
       case Array(elems) =>
         val refsOnly = elems.collect { case r @ Ref(_, _) => r }
-        if (refsOnly.size == elems.size) Some(refsOnly) else None
+        if (refsOnly.length == elems.length) Some(refsOnly.toList) else None
       case _ => None
     }
   }
@@ -198,7 +243,7 @@ object Prim extends PrimCodec {
       .foldLeft[Option[Prim]](Some(data))((acc, key) => acc.flatMap(tryDict(key)))
       .flatMap(extract.lift)
 
-  def dictOnly: Prim => Option[Map[String, Prim]] = {
+  def dictOnly: Prim => Option[ChunkMap[String, Prim]] = {
     case Dict(d) => Some(d)
     case _       => None
   }
@@ -210,9 +255,9 @@ object Prim extends PrimCodec {
       case _                    => false
     }
 
-  def dict(values: (String, Prim)*): Dict = Dict(values.toMap)
+  def dict(values: (String, Prim)*): Dict = Dict(ChunkMap.from(values))
 
-  def array(values: Prim*): Prim = Array(values.toList)
+  def array(values: Prim*): Prim = Array(BlocksChunk.fromIterable(values))
 
   def refI(to: Obj.Index): Prim    = Ref(to.number, to.generation)
   def refNum(to: Long): Prim        = Ref(to, 0)
@@ -229,7 +274,7 @@ object Prim extends PrimCodec {
     case _       => None
   }
 
-  def isType(tpe: String)(data: Map[String, Prim]): Boolean =
+  def isType(tpe: String)(data: ChunkMap[String, Prim]): Boolean =
     data.get("Type").contains(Name(tpe))
 }
 
@@ -323,7 +368,10 @@ private[pdf] trait PrimCodec {
 
   val Codec_Array: Codec[Prim.Array] =
     (skipWs ~> Many.bracket(trim(char('[')), trim(char(']')))(lazily(trim(Codec_Prim)) <~ ws))
-      .xmap(Prim.Array(_), _.data)
+      .xmap(
+        (l: List[Prim])          => Prim.Array(zio.blocks.chunk.Chunk.fromIterable(l)),
+        (a: Prim.Array)           => a.data.toList
+      )
       .withContext("array")
 
   private val nameString: Codec[String] =
@@ -348,7 +396,10 @@ private[pdf] trait PrimCodec {
 
   val Codec_Dict: Codec[Prim.Dict] =
     Many.bracket(dictStartMarker, dictEndMarker)(dictElem)
-      .xmap[Map[String, Prim]](Map.from, _.toList)
+      .xmap[zio.blocks.chunk.ChunkMap[String, Prim]](
+        (l: List[(String, Prim)])                        => zio.blocks.chunk.ChunkMap.from(l),
+        (m: zio.blocks.chunk.ChunkMap[String, Prim])     => m.toList
+      )
       .xmap(Prim.Dict(_), _.data)
       .withContext("dict")
 

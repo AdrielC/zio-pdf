@@ -51,7 +51,9 @@ object XrefStream {
     List("W", "Index", "Filter", "Length", "Type", "Size", "Prev")
 
   def cleanTrailer(data: Prim.Dict): Prim.Dict =
-    Prim.Dict(data.data.view.filterKeys(k => !unwantedTrailerKeys.contains(k)).toMap)
+    Prim.Dict(zio.blocks.chunk.ChunkMap.from(
+      data.data.view.filterKeys(k => !unwantedTrailerKeys.contains(k))
+    ))
 
   def trailerSize(data: Prim.Dict): Option[BigDecimal] =
     Prim.Dict.path("Size")(data) { case Prim.Number(s) => s }.toOption
