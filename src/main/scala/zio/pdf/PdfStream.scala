@@ -6,7 +6,7 @@
 
 package zio.pdf
 
-import _root_.scodec.bits.{BitVector, ByteVector}
+import _root_.scodec.bits.BitVector
 import zio.Chunk
 import zio.stream.{ZPipeline, ZStream}
 
@@ -50,4 +50,37 @@ object PdfStream {
    */
   def decode(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Decoded] =
     Decode(log)
+
+  /**
+   * Decode the high-level Element layer: Page / Pages / Image /
+   * FontResource / Info / etc.
+   */
+  def elements(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Element] =
+    decode(log) >>> Elements.pipe
+
+  /**
+   * After Part-shaping by a transformation, encode back to bytes
+   * with a generated xref. The supplied `transform` should consume
+   * `Element` values and produce `Part[Trailer]` values.
+   */
+  def transformElements[S](log: Log = Log.noop)(initial: S)(
+    collect: RewriteState[S] => Element => (List[Part[Trailer]], RewriteState[S])
+  )(
+    update: RewriteUpdate[S] => Part[Trailer]
+  ): ZPipeline[Any, Throwable, Byte, _root_.scodec.bits.ByteVector] =
+    elements(log) >>> Rewrite.simpleParts(initial)(collect)(update) >>> WritePdf.parts
+
+  /** Validate a PDF byte stream and return either Unit or a
+    * non-empty list of errors. */
+  def validate(log: Log = Log.noop)(
+    bytes: zio.stream.ZStream[Any, Throwable, Byte]
+  ): zio.ZIO[Any, Throwable, zio.prelude.Validation[PdfError, Unit]] =
+    ValidatePdf.fromDecoded(bytes.via(decode(log)))
+
+  /** Compare two PDF byte streams structurally. */
+  def compare(log: Log = Log.noop)(
+    old: zio.stream.ZStream[Any, Throwable, Byte],
+    updated: zio.stream.ZStream[Any, Throwable, Byte]
+  ): zio.ZIO[Any, Throwable, zio.prelude.Validation[CompareError, Unit]] =
+    ComparePdfs.fromBytes(log)(old, updated)
 }

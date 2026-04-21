@@ -310,31 +310,55 @@ The legacy `fs2-pdf` data model (`Prim` / `Obj` / `IndirectObj` / `Xref` / `Trai
 ## What's ported from the original fs2-pdf
 
 The original `fs2-pdf` source tree (~4 700 lines, 56 files) is in
-`legacy/` for reference. The current port covers the foundational
-layer end-to-end:
+`legacy/` for reference. The full decode + transform + encode
+pipeline is now ported:
 
 | module | status |
 |---|---|
 | `zio.scodec.stream.StreamDecoder` (ZChannel) | ✅ ported, 15 tests |
-| `zio.scodec.stream.PureDecoder`   (ZPure)   | ✅ ported, 16 tests |
+| `zio.scodec.stream.PureDecoder` (ZPure) | ✅ ported, 16 tests |
+| `zio.scodec.schema.ScodecDeriver` (`Deriver[scodec.Codec]`) | ✅ ported, 5 tests |
 | `zio.pdf.codec.Newline / Whitespace / Text / Many / Codecs` | ✅ ported |
-| `zio.pdf.Comment`                            | ✅ ported |
-| `zio.pdf.Version`                            | ✅ ported |
-| `zio.pdf.StartXref`                          | ✅ ported |
-| `zio.pdf.TopLevel` (Version + Comment + StartXref) wired through `StreamDecoder.many(...)` and exposed as a `ZPipeline[Any, Throwable, Byte, TopLevel]` | ✅ ported, includes a parse of the legacy `xref-stream.pdf` fixture |
-| `Prim` (PDF primitive objects: Dict, Array, Ref, ...) | ⏳ remaining |
-| `Obj` / `IndirectObj`                        | ⏳ remaining |
-| `Xref` (textual + stream form) / `Trailer`   | ⏳ remaining |
-| Higher-level pipes (`Decode`, `Elements`, `Rewrite`, `WritePdf`) | ⏳ remaining |
+| `zio.pdf.Comment / Version / StartXref` | ✅ ported |
+| `zio.pdf.Prim` (Null/Bool/Number/Name/Str/HexStr/Ref/Array/Dict + helpers) | ✅ ported, 10 round-trip tests |
+| `zio.pdf.Obj / IndirectObj` (with `EncodedObj` + `XrefObjMeta`) | ✅ ported |
+| `zio.pdf.Trailer / Xref` (textual) | ✅ ported |
+| `zio.pdf.XrefStream` (compressed) | ✅ ported |
+| `zio.pdf.ObjectStream` (`/Type /ObjStm`) | ✅ ported |
+| `zio.pdf.FlateDecode` + `zio.pdf.image.Predictor` (Java) | ✅ ported |
+| `zio.pdf.Content` (`Uncompressed` + extractors) | ✅ ported |
+| `zio.pdf.TopLevel` (`VersionT / CommentT / StartXrefT / WhitespaceT / IndirectObjT / XrefT`) | ✅ ported |
+| `zio.pdf.Decoded` + `zio.pdf.Decode` (full decoder pipeline) | ✅ ported, 3 tests |
+| `zio.pdf.FilterDuplicates` (suppress duplicate-numbered objects) | ✅ ported |
+| `zio.pdf.Element / Elements / Page / Pages / FontResource / Image / IndirectArray / MediaBox` | ✅ ported |
+| `zio.pdf.Part / EncodeMeta / GenerateXref / WritePdf` (encoder pipeline) | ✅ ported, 2 round-trip tests |
+| `zio.pdf.Rewrite` (stateful transform + emit Part stream) | ✅ ported |
+| `zio.pdf.Pdf / AssemblePdf / ValidatedPdf / AssemblyError` | ✅ ported |
+| `zio.pdf.ValidatePdf / ComparePdfs / PdfError / CompareError` | ✅ ported, 3 tests |
+| `zio.pdf.PdfStream` (top-level façade: `bits / topLevel / decode / elements / transformElements / validate / compare`) | ✅ ported |
+| `Pdf.objectNumbers / pageNumber / streamsOfPage / dictOfPage` (read-only convenience pipes) | ⏳ remaining |
+| `WriteLinearized` / `Tiff` (specialised image emitters) | ⏳ remaining |
+| Image-test helpers (the legacy `Jar` / `ProcessJarPdf` / `WriteFile`) | ⏳ remaining |
 
-The remaining work is mechanical (replace `cats.effect.IO` →
-`zio.Task`, `fs2.Stream` → `ZStream`, `fs2.Pull` → `ZChannel`,
-`cats.data.NonEmptyList` → `zio.NonEmptyChunk`, `Validated` →
-`zio.prelude.Validation`, `shapeless.HList` → Scala 3 tuples) but
-voluminous, and should land in follow-up PRs. The new `StreamDecoder`
-+ `PureDecoder` + `zio-blocks-schema` are wired in, so the existing
-PDF ADTs can additionally get JSON / Avro / MessagePack codecs
-derived for free as they are ported.
+The remaining items are convenience helpers and specialised image
+emitters, not foundational architecture. The new layout uses ZIO's
+`ZStream` / `ZPipeline` / `ZChannel` throughout; `cats.effect.IO`,
+`fs2.Pull`, `cats.data.NonEmptyList`, `cats.data.Validated`, and
+`shapeless.HList` are completely gone from the production code.
+
+Replacements summary:
+
+| legacy | new |
+|---|---|
+| `cats.effect.IO` | `zio.Task` |
+| `fs2.Stream` | `zio.stream.ZStream` |
+| `fs2.Pipe` | `zio.stream.ZPipeline` |
+| `fs2.Pull` | `zio.stream.ZChannel` |
+| `cats.data.NonEmptyList` | `zio.NonEmptyChunk` |
+| `cats.data.Validated[NonEmptyList[E], A]` | `zio.prelude.Validation[E, A]` |
+| `shapeless.HList` | Scala 3 tuples + `Codec#xmap` |
+| `scodec.stream.StreamDecoder` (FS2) | `zio.scodec.stream.StreamDecoder` (ZChannel) |
+| (none) | `zio.scodec.schema.ScodecDeriver` for `Schema.derived[A].derive(ScodecDeriver)` |
 
 ## License
 
