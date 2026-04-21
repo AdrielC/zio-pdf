@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 
 import org.openjdk.jmh.annotations.*
 
-import kyo.{AllowUnsafe, Sync}
+import kyo.{AllowUnsafe, Emit, Sync}
 import zio.{Chunk, Runtime, Unsafe}
 import zio.stream.ZStream
 
@@ -42,12 +42,16 @@ class FastCdcBench {
 
   private var bytes: Chunk[Byte] = uninitialized
 
+  /** Same bytes as `bytes`; JMH iteration uses this for Kyo to avoid `Chunk.toArray` per run. */
+  private var rawBytes: Array[Byte] = uninitialized
+
   private val runtime = Runtime.default
 
   @Setup(Level.Trial)
   def setup(): Unit = {
     val arr = new Array[Byte](size)
     new java.util.Random(0xCAFEBABEL).nextBytes(arr)
+    rawBytes = arr
     bytes = Chunk.fromArray(arr)
   }
 
@@ -68,10 +72,13 @@ class FastCdcBench {
   @Benchmark
   def cdcThroughputKyoEmit: Long = {
     given AllowUnsafe = AllowUnsafe.embrace.danger
-    val n = Sync.Unsafe.evalOrThrow {
-      FastCdcKyo.runCollect(bytes, rechunk, FastCdc.defaultConfig).map(_.size.toLong)
+    Sync.Unsafe.evalOrThrow {
+      Emit
+        .runFold(0L)((n: Long, _: Array[Byte]) => n + 1L)(
+          FastCdcKyo.emitChunkedFromArray(rawBytes, rechunk, FastCdc.defaultConfig)
+        )
+        .map(_._1)
     }
-    n
   }
 
   @Benchmark
