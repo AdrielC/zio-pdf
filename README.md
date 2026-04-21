@@ -408,6 +408,64 @@ partStream.via(WritePdf.parts).runFold(0L)(_ + _.size)  // counts bytes; ~64 KiB
 
 **Decoder-side caveat**: the decoder still materialises an *individual content stream's* payload as a `BitVector` (because `IndirectObj.streamPayload` needs to resolve `/Length` and confirm the trailing `endstream` keyword on the underlying bytes). For pure decoding workflows on a multi-GB file this means peak memory is bounded by *the largest single object*, not by the total file size. Streaming the payload of an individual object back out of the decoder would require splitting `IndirectObj.streamPayload` into a header decoder + a payload `ZPipeline`; that's a follow-up.
 
+## Content-defined chunking (FastCDC) for storage dedup
+
+`Part.StreamObj` lets the encoder write arbitrarily large payloads without materialising them, but in many PDF authoring/storage workflows multiple documents share the same blob (an embedded font, a logo, a boilerplate attachment). Cutting those payloads at content-defined boundaries makes them **content-addressable**: identical sub-ranges produce identical chunks regardless of where they appear in the stream, so a downstream key/value store can dedup them by chunk hash.
+
+`zio.pdf.cdc.FastCdc.pipeline(cfg): ZPipeline[Any, Throwable, Byte, Chunk[Byte]]` — a memory-bounded ZIO port of FastCDC (Xia et al., USENIX ATC 2016):
+
+```scala
+import zio.pdf.cdc.FastCdc
+
+val cdc: ZPipeline[Any, Throwable, Byte, Chunk[Byte]] =
+  FastCdc.pipeline()                                  // 4 KiB / 16 KiB / 64 KiB defaults
+
+val attachment: ZStream[Any, Throwable, Byte] = ZStream.fromInputStream(...)
+val chunks: ZStream[Any, Throwable, Chunk[Byte]] = attachment.via(cdc)
+
+// Hand each chunk to a dedup store, keyed by hash:
+chunks.mapZIO { c =>
+  val h = blake3(c)        // or any cheap content hash
+  store.putIfAbsent(h, c)
+}.runDrain
+```
+
+Properties locked down by `FastCdcSpec`:
+
+- **Total bytes preserved**: the concatenation of all CDC chunks equals the input — no bytes added, dropped, or reordered.
+- **Size bounds**: every chunk except possibly the last is in `[minSize, maxSize]`; tail can be smaller.
+- **Determinism**: chunking the same bytes twice gives identical chunk hashes.
+- **Rechunking-invariance**: feeding the same input as 1 chunk vs 7 KiB chunks vs 1 byte at a time produces the **same** CDC chunks. (This is the property that makes dedup actually work — without it, upstream chunk boundaries would change the cut decisions.)
+- **Dedup property**: a 1-byte insertion early in the stream perturbs at most ~3 chunks; the rest survive intact.
+- **Disjoint-payloads property**: two completely different random payloads share ≤ 2 chunks by accident.
+- **Memory-bounded**: 10 MiB random stream chunked end-to-end without materialisation; peak buffer = `maxSize`.
+- **Graceful degradation**: highly-structured input (cyclic data) just cuts at `maxSize` instead of looping.
+
+### Throughput
+
+```
+Benchmark                   (rechunk)    (size)  Mode  Cnt   Score   Error  Units
+FastCdcBench.cdcThroughput      65536  33554432  avgt    5  72.635 ± 4.797  ms/op
+```
+
+**~440 MB/s** on the build VM (32 MiB / 72.635 ms, JDK 21). For comparison, the FastCDC paper reports ~590 MB/s in native C; the JVM port is ~75% of native throughput, well past Rabin-Karp's typical 30–50 MB/s.
+
+### Composing CDC with `Part.StreamObj`
+
+`StreamObjCdcSpec` proves the composition end-to-end:
+
+1. Two 256 KiB random payloads that differ only in a 1 KiB middle region are streamed through `FastCdc.pipeline()` independently, never materialised. The resulting CDC chunk-hash sets share **≥ 75%** of chunks; **at most 3 chunks differ**.
+2. A 1 MiB streaming PDF content object is encoded via `Part.StreamObj + WritePdf.parts` (memory-bounded) while a separate `FastCdc.pipeline` over the same payload computes the dedup manifest. Neither pipeline ever holds the full payload in memory.
+
+This is what an "embedded-file deduplication" workflow looks like: the encoder stays memory-bounded, the dedup store gets a content-addressable chunk manifest, and a small change to the source payload (e.g. a re-versioned PDF where 99% of the embedded font is identical) only invalidates the chunks that actually contain the change.
+
+### When to use what
+
+- **Want streaming I/O for big payloads, no dedup** → `Part.StreamObj` alone.
+- **Want streaming I/O *and* content-addressable storage dedup** → `Part.StreamObj` + `FastCdc.pipeline()` over the payload (in parallel, since the encoder consumes the bytes verbatim).
+- **Want fixed-size chunking** → `ZStream#rechunk(N)` is the right tool. Use it for I/O batching, not for dedup; a 1-byte insertion shifts every chunk and dedup ratio drops to zero.
+- **Want semantic chunking of *extracted PDF text*** (sentences/paragraphs/headings, for embedding in a vector DB) → that's a different domain (the Rust `text-splitter` crate is a good reference); not part of this port. The natural place to add it is downstream of a future text-extraction layer that produces `ZStream[String]` from a decoded `Page`.
+
 ## Replacements summary
 
 | legacy | new |
