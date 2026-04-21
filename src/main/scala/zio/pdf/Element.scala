@@ -88,8 +88,15 @@ object Element {
 
   sealed trait ContentKind
   object ContentKind {
-    case object General                              extends ContentKind
-    final case class Image(image: zio.pdf.Image)     extends ContentKind
+    case object General extends ContentKind
+
+    final case class Image(image: zio.pdf.Image) extends ContentKind
+
+    /**
+     * `/Type /EmbeddedFile` stream (file attachment payload). File name is typically
+     * on the surrounding file-spec dict (`/F`), not on this object.
+     */
+    final case class EmbeddedFileStream(metadata: Prim.Dict) extends ContentKind
   }
 
   final case class Content(obj: Obj, rawStream: BitVector, stream: Uncompressed, kind: ContentKind) extends Element

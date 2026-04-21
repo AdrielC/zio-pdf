@@ -47,6 +47,8 @@ private[pdf] object AnalyzeContent {
   def apply(stream: Uncompressed): Prim => Attempt[Element.ContentKind] = {
     case Prim.subtype("Image", data @ SupportedCodec(codec)) =>
       Attempt.successful(Element.ContentKind.Image(Image(data, stream, codec)))
+    case Prim.tpe("EmbeddedFile", data) =>
+      Attempt.successful(Element.ContentKind.EmbeddedFileStream(data))
     case _ =>
       Attempt.successful(Element.ContentKind.General)
   }
