@@ -93,6 +93,10 @@ object FastCdc {
    *
    * If the buffer is shorter than `minSize`, returns `buffer.length`.
    */
+  /** Public cut helper for non-ZStream consumers (e.g. Graviton byte scans). */
+  def nextCut(buffer: Array[Byte], minSize: Int, avgSize: Int, maxSize: Int): Int =
+    cutOffset(buffer, Config(minSize, avgSize, maxSize))
+
   private[cdc] def cutOffset(buffer: Array[Byte], cfg: Config): Int = {
     val n = buffer.length
     if (n <= cfg.minSize) return n

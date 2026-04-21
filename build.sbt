@@ -6,6 +6,7 @@ val zioBlocksStreamsVersion    = "0.0.20"
 val zioBlocksScopeVersion      = "0.0.33"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
+val kyoVersion                 = "1.0-RC1"
 
 ThisBuild / organization      := "com.springernature"
 ThisBuild / scalaVersion      := "3.8.3"
@@ -40,6 +41,10 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
       "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
       "dev.zio"   %% "zio-blocks-scope"      % zioBlocksScopeVersion,
+      "io.getkyo" % "kyo-data_3"            % kyoVersion,
+      "io.getkyo" % "kyo-kernel_3"          % kyoVersion,
+      "io.getkyo" % "kyo-prelude_3"         % kyoVersion,
+      "io.getkyo" % "kyo-core_3"            % kyoVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
