@@ -59,51 +59,71 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
 
   def spec: Spec[Any, Throwable] = suite("streamingDecode (memory-bounded)")(
 
-    test("emits a Header / Bytes* / End sequence for a content object, and a final Meta") {
+    test("emits ContentObjStart (inline for small payload) and a final Meta") {
       for {
         bytes  <- buildPdf(2048)
         events <- ZStream
                     .fromChunk(Chunk.fromArray(bytes.toArray))
-                    .via(PdfStream.streamingDecode)
+                    .via(PdfStream.streamingDecode())
                     .runCollect
       } yield {
-        val headers   = events.collect { case h: StreamingDecoded.ContentObjHeader => h }
+        val headers   = events.collect { case h: StreamingDecoded.ContentObjStart => h }
         val ends      = events.collect { case StreamingDecoded.ContentObjEnd      => () }
         val data      = events.collect { case d: StreamingDecoded.DataObj          => d }
         val metas     = events.collect { case m: StreamingDecoded.Meta             => m }
         // 3 data objects + 1 streaming content object + 1 Meta.
         assertTrue(
           headers.size == 1,
-          ends.size == 1,
+          ends.size == 0,
           data.size == 3,
           metas.size == 1,
-          // The content header reports the right /Length.
+          // Small payload is inlined on start (2048 <= default inline window).
           headers(0).length == 2048L,
-          // It belongs to object 4.
-          headers(0).obj.index.number == 4L
+          headers(0).obj.index.number == 4L,
+          headers(0).inlinePayload.exists(_.size == 2048L * 8L)
         )
       }
     },
 
-    test("ContentObjBytes chunks concatenate to the original payload (byte-perfect)") {
+    test("ContentObjStart inline payload is byte-perfect for a 4 KiB stream") {
       val payloadSize = 4096
       for {
         bytes  <- buildPdf(payloadSize)
         events <- ZStream
                     .fromChunk(Chunk.fromArray(bytes.toArray))
-                    .via(PdfStream.streamingDecode)
+                    .via(PdfStream.streamingDecode())
                     .runCollect
-        payloadBytes = events.collect { case StreamingDecoded.ContentObjBytes(c) => c }.flatten
+        inline = events.collect { case s: StreamingDecoded.ContentObjStart => s.inlinePayload }.flatten.headOption
       } yield {
         val expected = (0 until payloadSize).map(i => (i & 0xff).toByte).toArray
-        var same     = payloadBytes.size == expected.length
+        val got      = inline.map(_.toByteArray).getOrElse(Array.empty[Byte])
+        var same     = got.length == expected.length
         var i        = 0
         while (same && i < expected.length) {
-          if (payloadBytes(i) != expected(i)) same = false
+          if (got(i) != expected(i)) same = false
           i += 1
         }
         assertTrue(same)
       }
+    },
+
+    test("large stream uses ContentObjBytes + End (no inline)") {
+      val payloadSize = 512 * 1024
+      for {
+        bytes  <- buildPdf(payloadSize)
+        events <- ZStream
+                    .fromChunk(Chunk.fromArray(bytes.toArray))
+                    .via(PdfStream.streamingDecode())
+                    .runCollect
+        starts = events.collect { case s: StreamingDecoded.ContentObjStart => s }
+        ends   = events.collect { case StreamingDecoded.ContentObjEnd      => () }
+        chunks = events.collect { case StreamingDecoded.ContentObjBytes(c) => c }.flatten
+      } yield assertTrue(
+        starts.size == 1,
+        starts(0).inlinePayload.isEmpty,
+        ends.size == 1,
+        chunks.size == payloadSize.toLong
+      )
     },
 
     test("decodes a 1 MiB streaming payload without materialising it (memory-bounded)") {
@@ -115,7 +135,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         stats <- ZStream
                    .fromChunk(Chunk.fromArray(bytes.toArray))
                    .rechunk(64 * 1024)
-                   .via(PdfStream.streamingDecode)
+                   .via(PdfStream.streamingDecode())
                    .runFold((0L, 0L)) { case ((n, total), ev) =>
                      ev match {
                        case StreamingDecoded.ContentObjBytes(c) => (n + 1L, total + c.size.toLong)
@@ -139,7 +159,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         stats <- ZStream
                    .fromChunk(Chunk.fromArray(bytes.toArray))
                    .rechunk(64 * 1024)
-                   .via(PdfStream.streamingDecode)
+                   .via(PdfStream.streamingDecode())
                    .runFold(0L) { (acc, ev) =>
                      ev match {
                        case StreamingDecoded.ContentObjBytes(c) => acc + c.size.toLong
@@ -150,7 +170,8 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
     } @@ TestAspect.timeout(60.seconds),
 
     test("the streamingDecode pipeline can be hashed straight to a digest (no buffering)") {
-      val payloadSize = 256 * 1024
+      // Above default inline window (256 KiB) so payload arrives as ContentObjBytes.
+      val payloadSize = 300 * 1024
       val expectedSha = {
         val md = java.security.MessageDigest.getInstance("SHA-256")
         var i  = 0
@@ -161,7 +182,7 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
         bytes  <- buildPdf(payloadSize)
         digest <- ZStream
                     .fromChunk(Chunk.fromArray(bytes.toArray))
-                    .via(PdfStream.streamingDecode)
+                    .via(PdfStream.streamingDecode())
                     .collect { case StreamingDecoded.ContentObjBytes(c) => c }
                     .runFold(java.security.MessageDigest.getInstance("SHA-256")) { (md, c) =>
                       md.update(c.toArray); md
