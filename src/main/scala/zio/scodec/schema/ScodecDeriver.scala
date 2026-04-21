@@ -44,7 +44,10 @@ import scala.reflect.ClassTag
  *   - Wrapper: encode by `unwrap`, decode by `wrap`.
  *   - Sequence: `int32` length + repeated `elementCodec`; when the element
  *     is `Byte`, the payload is a single raw byte run (`BitVector.view`)
- *     instead of N separate `byte` decodes (large win for blobs).
+ *     instead of N separate `byte` decodes (large win for blobs). For a
+ *     chunk-shaped field prefer `zio.blocks.chunk.Chunk` in the record —
+ *     `Schema.derived` treats `zio.Chunk` as `IndexedSeq` unless you wire
+ *     an explicit `Schema.chunk` / blocks chunk type.
  *   - Map: length-prefixed list of `(K, V)` pairs.
  *   - Dynamic: not implemented in this prototype - calling the
  *     derived codec for a `DynamicValue` will fail at decode time.

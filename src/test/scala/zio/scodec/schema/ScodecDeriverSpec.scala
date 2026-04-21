@@ -11,6 +11,7 @@
 package zio.scodec.schema
 
 import _root_.scodec.bits.BitVector
+import zio.blocks.chunk.Chunk as BlocksChunk
 import zio.blocks.schema.Schema
 import zio.test.*
 
@@ -45,7 +46,11 @@ object ScodecDeriverSpec extends ZIOSpecDefault {
     given Schema[Team] = Schema.derived[Team]
   }
 
-  final case class Blob(id: Int, data: Vector[Byte])
+  /**
+   * Binary payload as [[zio.blocks.chunk.Chunk]] (blocks-schema’s chunk type —
+   * `Schema.derived` maps `zio.Chunk` to `IndexedSeq` otherwise).
+   */
+  final case class Blob(id: Int, data: BlocksChunk[Byte])
   object Blob {
     given Schema[Blob] = Schema.derived[Blob]
   }
@@ -90,9 +95,9 @@ object ScodecDeriverSpec extends ZIOSpecDefault {
       assertTrue(decoded.value == t, decoded.remainder == BitVector.empty)
     },
 
-    test("Codec[Blob] round-trips Vector[Byte] with bulk byte payload (not N× byte codec)") {
+    test("Codec[Blob] round-trips BlocksChunk[Byte] with bulk byte payload (not N× byte codec)") {
       val codec = summon[Schema[Blob]].derive(ScodecDeriver)
-      val b     = Blob(42, Vector.tabulate(256)(_.toByte))
+      val b     = Blob(42, BlocksChunk.fromArray(Array.tabulate(256)(_.toByte)))
       val bits  = codec.encode(b).require
       val dec   = codec.decode(bits).require
       assertTrue(dec.value == b, dec.remainder == BitVector.empty)
