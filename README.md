@@ -68,11 +68,31 @@ outermost (drives the program from a `Chunk[I]`). The leftover from the
 abort payload is appended to what `Emit` collected -- no re-emission, no
 broken Stream/Poll symmetry.
 
+### Combinators
+
+The full Arrow / ArrowChoice surface is available as extension methods
+on `FreeScan`:
+
+| Family       | Operators |
+|---           |---        |
+| Category     | `>>>`, `<<<`, `andThen`, `compose`, `FreeScan.id` |
+| Profunctor   | `map`, `contramap`, `dimap` |
+| Strong arrow | `first`, `second`, `***`, `&&&`, `Scan.diag`, `Scan.fst`, `Scan.snd`, `Scan.swap`, `keepFirst`, `keepSecond` |
+| Choice arrow | `left`, `right`, `+++`, `\|\|\|`, `Scan.mirror`, `Scan.merge`, `Scan.injectLeft`, `Scan.injectRight`, `Scan.test` |
+| Glue         | `Scan.const`, `Scan.void`, `drainLeft`, `Scan.arr`, `Scan.lift` |
+
+Everything except the leaf primitives is derived from `arr`, `>>>`,
+`&&&` and `|||`, so `Fusion.tryFuse` automatically collapses any pure
+sub-spine -- including pure tuple shuffling like `swap`, `mirror`, `fst`
+and `snd` -- into a single `I => O` on the hot path.
+
 Code lives under [`src/main/scala/zio/pdf/scan/`](src/main/scala/zio/pdf/scan/);
 tests under [`src/test/scala/zio/pdf/scan/`](src/test/scala/zio/pdf/scan/)
-(`ScanSpec` for the primitive properties, `AdvancedCompositionSpec` for
+(`ScanSpec` for the primitive properties; `AdvancedCompositionSpec` for
 deep `>>>` / `&&&` / `|||` composition and the Graviton-style ingest
-patterns, `ScanPerfBench` for the in-test perf snapshot).
+patterns; `ArrowKitchenSinkSpec` for the full Arrow / ArrowChoice
+surface and a single pipeline that uses *every* combinator at once;
+`ScanPerfBench` for the in-test perf snapshot).
 
 ### Performance
 
