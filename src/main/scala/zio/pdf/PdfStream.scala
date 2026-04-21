@@ -10,11 +10,6 @@ import _root_.scodec.bits.BitVector
 import zio.Chunk
 import zio.stream.{ZPipeline, ZStream}
 
-/**
- * The main API for this library provides ZIO `ZPipeline`s for
- * decoding PDF streams. The encoder side (`write`, `transformElements`,
- * `validate`, `compare`) will land in a follow-up.
- */
 object PdfStream {
 
   /**
@@ -42,37 +37,28 @@ object PdfStream {
     )
 
   /**
-   * Decode the data layer: data objects (without stream), content
-   * objects (with stream and lazy uncompression), and metadata
-   * (`Decoded.Meta`) consisting of accumulated xrefs, the
-   * sanitised trailer, and the version. Equivalent to the legacy
-   * `PdfStream.decode`.
-   *
-   * Peak memory is bounded by *the largest single content stream*
-   * because each `Decoded.ContentObj` carries the full payload as
-   * a `BitVector`. For PDFs with multi-MB attachments / images /
-   * fonts use `streamingDecode` instead - that pipeline emits
-   * payloads as a sequence of `ContentObjBytes` chunks.
+   * Decode to [[Decoded]]: streaming parse (memory-bounded for large
+   * streams) plus expansion of each content stream via
+   * [[Decode.expandStreamPayload]] (ObjStm, XRef stream metadata,
+   * lazy decompression). Small streams (length <=
+   * `config.inlineMaxBytes`) are buffered once as
+   * [[StreamingDecoded.ContentObjStart]].inlinePayload; larger
+   * streams use chunked bytes on the wire before expansion.
    */
-  def decode(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Decoded] =
-    Decode(log)
+  def decode(
+    log: Log = Log.noop,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZPipeline[Any, Throwable, Byte, Decoded] =
+    StreamingDecode.pipeline(log, config) >>> DecodedFromStreaming.pipeline
 
   /**
-   * Memory-bounded SAX-style decoder. Same coverage as `decode`
-   * (version / comment / xref / startxref / data objects / content
-   * objects / accumulated Meta), but each content-stream payload
-   * is forwarded as a sequence of `ContentObjBytes` chunks instead
-   * of being materialised as a single `BitVector`. Peak memory is
-   * bounded by the upstream chunk size, regardless of how big any
-   * individual content stream is.
-   *
-   * Use this when you have multi-MB content streams (large
-   * attachments, embedded images, font subsets) that you want to
-   * forward straight to a sink (CDC chunker, S3 multipart, hash
-   * digest) without materialising in memory.
+   * Raw streaming events only (no ObjStm / XRef expansion). Prefer
+   * [[decode]] when you need [[elements]], [[validate]], or
+   * [[compare]]. For a custom log or [[StreamingDecode.Config]], use
+   * [[StreamingDecode.pipeline]].
    */
   val streamingDecode: ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    StreamingDecode.pipeline
+    StreamingDecode.pipeline()
 
   /**
    * Decode the high-level Element layer: Page / Pages / Image /
