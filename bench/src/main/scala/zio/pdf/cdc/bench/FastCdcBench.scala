@@ -14,10 +14,11 @@ import java.util.concurrent.TimeUnit
 
 import org.openjdk.jmh.annotations.*
 
+import kyo.{AllowUnsafe, Sync}
 import zio.{Chunk, Runtime, Unsafe}
 import zio.stream.ZStream
 
-import zio.pdf.cdc.FastCdc
+import zio.pdf.cdc.{FastCdc, FastCdcKyo}
 
 import scala.compiletime.uninitialized
 
@@ -63,6 +64,15 @@ class FastCdcBench {
         )
         .getOrThrow()
     }
+
+  @Benchmark
+  def cdcThroughputKyoEmit: Long = {
+    given AllowUnsafe = AllowUnsafe.embrace.danger
+    val n = Sync.Unsafe.evalOrThrow {
+      FastCdcKyo.runCollect(bytes, rechunk, FastCdc.defaultConfig).map(_.size.toLong)
+    }
+    n
+  }
 
   @Benchmark
   def cdcThroughputCount: Long = {
