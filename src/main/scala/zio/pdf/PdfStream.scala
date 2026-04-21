@@ -117,6 +117,34 @@ object PdfStream {
     decode(log) >>> Elements.pipe
 
   /**
+   * Process decoded PDF attachment payloads (and any other stream objects) in a
+   * single pass: `flatMap` runs only on [[Element.Content]]; [[Element.Data]] /
+   * [[Element.Meta]] are re-emitted unchanged.
+   *
+   * Example — hash each `/Type /EmbeddedFile` stream without materialising the
+   * whole PDF:
+   *
+   * {{{
+   *   bytes.via(PdfStream.elements()).flatMap {
+   *     case c @ Element.Content(_, _, stream, Element.ContentKind.EmbeddedFileStream(_)) =>
+   *       ZStream.fromZIO(
+   *         stream.value.map(bits => java.security.MessageDigest.getInstance("SHA-256").digest(bits.toByteArray))
+   *       ).as(c)
+   *     case other => ZStream.succeed(other)
+   *   }
+   * }}}
+   */
+  def mapContentElements[R](
+    f: Element.Content => ZStream[R, Throwable, Element]
+  ): ZPipeline[R, Throwable, Element, Element] =
+    ZPipeline.mapChunksZIO { chunk =>
+      ZIO.foreach(chunk) {
+        case c: Element.Content => f(c).runCollect
+        case e                    => ZIO.succeed(Chunk.single(e))
+      }.map(_.flatten)
+    }
+
+  /**
    * After Part-shaping by a transformation, encode back to bytes
    * with a generated xref. The supplied `transform` should consume
    * `Element` values and produce `Part[Trailer]` values.
