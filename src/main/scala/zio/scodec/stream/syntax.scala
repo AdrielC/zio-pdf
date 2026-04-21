@@ -35,25 +35,25 @@ object syntax {
   extension [A](decoder: Decoder[A]) {
 
     /** Stream-decode exactly one `A`. */
-    def streamOnce: StreamDecoder[A] = StreamDecoder.once(decoder)
+    inline def streamOnce: StreamDecoder[A] = StreamDecoder.once(decoder)
 
     /** Stream-decode `A` values until the input ends. */
-    def streamMany: StreamDecoder[A] = StreamDecoder.many(decoder)
+    inline def streamMany: StreamDecoder[A] = StreamDecoder.many(decoder)
 
     /** Stream-decode at most one `A`; on failure the bits are not consumed. */
-    def streamTryOnce: StreamDecoder[A] = StreamDecoder.tryOnce(decoder)
+    inline def streamTryOnce: StreamDecoder[A] = StreamDecoder.tryOnce(decoder)
 
     /** Stream-decode `A` values until decoding fails (no failure bubbled up). */
-    def streamTryMany: StreamDecoder[A] = StreamDecoder.tryMany(decoder)
+    inline def streamTryMany: StreamDecoder[A] = StreamDecoder.tryMany(decoder)
 
     /** Pure-decode `A` values until the input ends (uses the ZPure layer). */
-    def pureMany: PureDecoder[A] = PureDecoder.many(decoder)
+    inline def pureMany: PureDecoder[A] = PureDecoder.many(decoder)
 
     /** Pure-decode exactly one `A`. */
-    def pureOnce: PureDecoder[A] = PureDecoder.once(decoder)
+    inline def pureOnce: PureDecoder[A] = PureDecoder.once(decoder)
 
     /** Lift this `Decoder` into the canonical `DecoderStep`. */
-    def asPureStep: PureDecoder.DecoderStep[A] = PureDecoder.fromDecoder(decoder)
+    inline def asPureStep: PureDecoder.DecoderStep[A] = PureDecoder.fromDecoder(decoder)
   }
 
   // -------------------------------------------------------------------
@@ -63,7 +63,18 @@ object syntax {
   extension [A](pure: PureDecoder[A]) {
 
     /** Lift this pure decoder into the streaming pipeline. */
-    def toStream: StreamDecoder[A] = StreamDecoder.fromPure(pure)
+    inline def toStream: StreamDecoder[A] = StreamDecoder.fromPure(pure)
+  }
+
+  // -------------------------------------------------------------------
+  // Batched (chunked) PureDecoder convenience
+  // -------------------------------------------------------------------
+
+  extension [A](pure: PureDecoder[Chunk[A]]) {
+
+    /** Lift a *batched* pure decoder into the streaming pipeline,
+      * flattening the inner chunks into the downstream stream. */
+    inline def toStreamChunked: StreamDecoder[A] = StreamDecoder.fromPureChunked(pure)
   }
 
   // -------------------------------------------------------------------

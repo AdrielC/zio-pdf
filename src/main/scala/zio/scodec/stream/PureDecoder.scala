@@ -232,6 +232,63 @@ object PureDecoder {
   /** Alias for `once(decoder, failOnErr = false)`. */
   def tryOnce[A](decoder: Decoder[A]): PureDecoder[A] = once(decoder, failOnErr = false)
 
+  // -------------------------------------------------------------------
+  // Fast-path constructors
+  //
+  // The general-purpose `many(decoder)` path pays per-element cost
+  // for the `ZPure.log` call and for the `BitVector.splitAt` that
+  // happens inside `decoder.decode(buffer)`. When the codec is
+  // byte-aligned and fixed-width (the common case for binary
+  // formats - bytes, shorts, ints, packed records, etc.) we can
+  // skip both costs entirely: read the underlying byte array once,
+  // build a `Chunk[A]` directly via `Chunk.fromArray`, and ship the
+  // whole batch through the log in one step.
+  //
+  // This lets the streaming layer hit the hand-written
+  // `scodec.codecs.vector` baseline and frequently beat it (because
+  // we build a `Chunk[Int]` instead of the boxed `Vector[Int]` that
+  // `vector(uint8)` constructs).
+  // -------------------------------------------------------------------
+
+  /**
+   * The general batch fast path: each invocation drains *all* the
+   * complete bytes in the carry buffer and emits a single
+   * `Chunk[A]` per step (instead of one log entry per element).
+   * The caller supplies the per-batch decoder
+   * `Array[Byte] => Chunk[A]`.
+   *
+   * `batch` is `inline` so the JIT sees the per-batch body
+   * directly at the call site - no virtual dispatch, no method
+   * call boundary.
+   *
+   * For `uint8` this looks like:
+   * {{{
+   *   PureDecoder.manyChunked[Int] { arr =>
+   *     val out = new Array[Int](arr.length)
+   *     var i = 0
+   *     while (i < arr.length) { out(i) = arr(i) & 0xff; i += 1 }
+   *     Chunk.fromArray(out)
+   *   }
+   * }}}
+   */
+  inline def manyChunked[A](
+    inline batch: Array[Byte] => Chunk[A]
+  ): PureDecoder[Chunk[A]] = {
+    def step: ZPure[Chunk[A], BitVector, BitVector, Any, CodecError, Status] =
+      ZPure.get[BitVector].flatMap { buffer =>
+        val whole = buffer.size / 8L
+        if (whole == 0L) ZPure.succeed(Status.NeedMore)
+        else {
+          val (used, rest) = buffer.splitAt(whole * 8L)
+          val chunk        = batch(used.toByteArray)
+          ZPure.set[BitVector](rest) *>
+            ZPure.log[BitVector, Chunk[A]](chunk) *>
+            ZPure.succeed(Status.NeedMore)
+        }
+      }
+    PureDecoder(step)
+  }
+
   // -----------------------------------------------------------------
   // Core ZPure step
   // -----------------------------------------------------------------
