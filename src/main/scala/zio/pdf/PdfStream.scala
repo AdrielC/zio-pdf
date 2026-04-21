@@ -7,7 +7,7 @@
 package zio.pdf
 
 import _root_.scodec.bits.BitVector
-import zio.Chunk
+import zio.{Chunk, ZIO}
 import zio.stream.{ZPipeline, ZStream}
 
 object PdfStream {
@@ -52,13 +52,62 @@ object PdfStream {
     StreamingDecode.pipeline(log, config) >>> DecodedFromStreaming.pipeline
 
   /**
+   * One synchronous byte-chunk step for [[decode]]: same semantics as
+   * `bytes.via(decode(...))` but without building a [[ZStream]]. Intended
+   * for drivers that must keep the [[java.io.InputStream]] inside a
+   * zio-blocks-scope `$` block.
+   */
+  def decodeSyncStep(
+    config: StreamingDecode.Config
+  )(
+    decodeAcc: DecodedFromStreaming.Acc,
+    streamingFs: StreamingDecode.FinalState,
+    chunk: Chunk[Byte]
+  ): Either[Throwable, (Chunk[Decoded], DecodedFromStreaming.Acc, StreamingDecode.FinalState)] = {
+    val (evs, fs1) = StreamingDecode.stepChunk(config, streamingFs, chunk)
+    if (evs.isEmpty) Right((Chunk.empty, decodeAcc, fs1))
+    else
+      DecodedFromStreaming.foldChunk(decodeAcc, evs) match {
+        case (_, Left(err))       => Left(err)
+        case (decoded, Right(acc)) => Right((decoded, acc, fs1))
+      }
+  }
+
+  /**
+   * After the last byte chunk, append trailing [[StreamingDecoded.Meta]]
+   * through the decode bridge (same order as the [[decode]] pipeline).
+   */
+  def decodeSyncFinish(
+    log: Log
+  )(decodeAcc: DecodedFromStreaming.Acc, streamingFs: StreamingDecode.FinalState): ZIO[Any, Throwable, Chunk[Decoded]] =
+    StreamingDecode.finalizeToMeta(log, streamingFs).flatMap { metaChunk =>
+      val (d0, r0) = DecodedFromStreaming.foldChunk(decodeAcc, metaChunk)
+      r0 match {
+        case Left(err) => ZIO.fail(err)
+        case Right(acc1) =>
+          DecodedFromStreaming.finalizeAcc(acc1) match {
+            case Left(err)   => ZIO.fail(err)
+            case Right(rest) => ZIO.succeed(d0 ++ rest)
+          }
+      }
+    }
+
+  /**
    * Raw streaming events only (no ObjStm / XRef expansion). Prefer
    * [[decode]] when you need [[elements]], [[validate]], or
-   * [[compare]]. For a custom log or [[StreamingDecode.Config]], use
-   * [[StreamingDecode.pipeline]].
+   * [[compare]].
+   *
+   * Returns a **new** pipeline on each call so duplicate-filter state
+   * is not shared across streams (a shared `val` would reuse one
+   * mutable [[DuplicateFilterState]] and break subsequent runs).
+   * Call with empty parentheses: `streamingDecode()` — a bare
+   * reference eta-expands to a function type in `.via(...)`.
    */
-  val streamingDecode: ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    StreamingDecode.pipeline()
+  def streamingDecode(
+    log: Log = Log.noop,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
+    StreamingDecode.pipeline(log, config)
 
   /**
    * Decode the high-level Element layer: Page / Pages / Image /

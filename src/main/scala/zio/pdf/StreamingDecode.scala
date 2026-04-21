@@ -17,7 +17,7 @@ package zio.pdf
 
 import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
 import _root_.scodec.bits.{BitVector, ByteVector}
-import zio.{Cause, Chunk, NonEmptyChunk}
+import zio.{Cause, Chunk, NonEmptyChunk, ZIO}
 import zio.stream.{ZChannel, ZPipeline}
 
 object StreamingDecode {
@@ -72,18 +72,18 @@ object StreamingDecode {
 
   private val streamTrailer: _root_.scodec.Codec[Unit] = IndirectObj.streamTrailer
 
-  private sealed trait State
-  private final case class WaitingHeader(carry: BitVector) extends State
-  private final case class ForwardingBytes(remaining: Long, carry: BitVector) extends State
-  private final case class BufferingBytes(
+  private[pdf] sealed trait State
+  private[pdf] final case class WaitingHeader(carry: BitVector) extends State
+  private[pdf] final case class ForwardingBytes(remaining: Long, carry: BitVector) extends State
+  private[pdf] final case class BufferingBytes(
     obj: Obj,
     bytesTotal: Int,
     filled: Int,
     carry: BitVector,
     acc: Array[Byte]
   ) extends State
-  private final case class SkippingStreamPayload(remaining: Long, carry: BitVector) extends State
-  private final case class ConsumingTrailer(carry: BitVector) extends State
+  private[pdf] final case class SkippingStreamPayload(remaining: Long, carry: BitVector) extends State
+  private[pdf] final case class ConsumingTrailer(carry: BitVector) extends State
 
   private def headerToEvent(
     cfg: Config,
@@ -141,7 +141,7 @@ object StreamingDecode {
         }
   }
 
-  private final case class ConsumingTrailerNoStream(carry: BitVector) extends State
+  private[pdf] final case class ConsumingTrailerNoStream(carry: BitVector) extends State
 
   private val endobjTrailer: _root_.scodec.Codec[Unit] = IndirectObj.endobj
 
@@ -280,7 +280,8 @@ object StreamingDecode {
     catch { case _: NoSuchElementException => sys.error("unreachable") }
   }
 
-  private final case class FinalState(
+  /** Mutable parse state + xref/version accumulators (used by [[pipeline]] and sync drivers). */
+  final case class FinalState(
     state: State,
     dupFilter: DuplicateFilterState.Mutable,
     xrefs: List[Xref],
@@ -289,6 +290,41 @@ object StreamingDecode {
 
   private def initial: FinalState =
     FinalState(WaitingHeader(BitVector.empty), DuplicateFilterState.initial, Nil, None)
+
+  /** Starting state for a decode run (fresh duplicate filter, empty carry). */
+  def initialFinalState: FinalState = initial
+
+  /**
+   * Synchronous byte step: feed one chunk through the streaming state machine
+   * and refresh xref/version accumulators from emitted events.
+   */
+  def stepChunk(
+    config: Config,
+    fs: FinalState,
+    chunk: Chunk[Byte]
+  ): (Chunk[StreamingDecoded], FinalState) = {
+    val (out, nextState) = feed(config, fs.state, fs.dupFilter, chunk)
+    val updatedBase      = fs.copy(state = nextState)
+    val updated          = out.foldLeft(updatedBase)(updateAccumulators)
+    (out, updated)
+  }
+
+  /**
+   * After the last byte chunk, emit optional duplicate-debug log and the
+   * trailing [[StreamingDecoded.Meta]] (same as [[pipeline]]'s channel).
+   */
+  def finalizeToMeta(log: Log, fs: FinalState): ZIO[Any, Throwable, Chunk[StreamingDecoded]] =
+    (if (fs.dupFilter.duplicateCount > 0)
+       log.debug(
+         s"duplicate indirect objects suppressed before first xref (count: ${fs.dupFilter.duplicateCount})"
+       )
+     else ZIO.unit)
+      .as {
+        val xs        = fs.xrefs.reverse
+        val trailers  = xs.map(_.trailer)
+        val sanitised = NonEmptyChunk.fromIterableOption(trailers).map(Trailer.sanitize)
+        Chunk.single(StreamingDecoded.Meta(xs, sanitised, fs.version))
+      }
 
   private def updateAccumulators(fs: FinalState, ev: StreamingDecoded): FinalState = ev match {
     case StreamingDecoded.VersionT(v) => fs.copy(version = Some(v))
@@ -303,36 +339,23 @@ object StreamingDecode {
   ): ZChannel[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[StreamingDecoded], FinalState] =
     ZChannel.readWithCause[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[StreamingDecoded], FinalState](
       (chunk: Chunk[Byte]) => {
-        val (out, nextState) = feed(cfg, fs.state, fs.dupFilter, chunk)
-        val updatedBase      = fs.copy(state = nextState)
-        val updated          = out.foldLeft(updatedBase)(updateAccumulators)
+        val (out, updated) = stepChunk(cfg, fs, chunk)
         if (out.isEmpty) loop(cfg, log, updated)
         else ZChannel.write(out) *> loop(cfg, log, updated)
       },
       (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
-      (_: Any) =>
-        if (fs.dupFilter.duplicateCount > 0)
-          ZChannel
-            .fromZIO(
-              log.debug(
-                s"duplicate indirect objects suppressed before first xref (approximate count: ${fs.dupFilter.duplicateCount})"
-              )
-            )
-            .as(fs)
-        else
-          ZChannel.succeed(fs)
+      (_: Any) => ZChannel.succeed(fs)
     )
 
-  private def emitMeta(fs: FinalState): ZChannel[Any, Any, Any, Any, Throwable, Chunk[StreamingDecoded], Unit] = {
-    val xs        = fs.xrefs.reverse
-    val trailers  = xs.map(_.trailer)
-    val sanitised = NonEmptyChunk.fromIterableOption(trailers).map(Trailer.sanitize)
-    ZChannel.write(Chunk.single(StreamingDecoded.Meta(xs, sanitised, fs.version)))
-  }
+  private def emitMeta(
+    log: Log,
+    fs: FinalState
+  ): ZChannel[Any, Any, Any, Any, Throwable, Chunk[StreamingDecoded], Unit] =
+    ZChannel.fromZIO(finalizeToMeta(log, fs).map(ZChannel.write(_))).flatten
 
   def pipeline(
     log: Log = Log.noop,
     config: Config = Config.default
   ): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    ZPipeline.fromChannel(loop(config, log, initial).flatMap(emitMeta))
+    ZPipeline.fromChannel(loop(config, log, initial).flatMap(emitMeta(log, _)))
 }

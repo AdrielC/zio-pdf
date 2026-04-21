@@ -15,12 +15,15 @@ import zio.stream.ZPipeline
 
 object DecodedFromStreaming {
 
-  private final case class Acc(
+  /** Mutable bridge state between [[StreamingDecoded]] chunks and [[Decoded]] output. */
+  final case class Acc(
     collect: Option[(Obj, Chunk[Byte])],
     embeddedXrefs: List[Xref]
   )
 
-  private val acc0: Acc = Acc(None, Nil)
+  val accInitial: Acc = Acc(None, Nil)
+
+  private val acc0: Acc = accInitial
 
   private def fromAttempt[A](a: Attempt[A]): ZPure[Decoded, Acc, Acc, Any, Throwable, A] =
     a match {
@@ -84,6 +87,30 @@ object DecodedFromStreaming {
   private val finalize: Acc => ZPure[Decoded, Acc, Acc, Any, Throwable, Unit] = { s =>
     if (s.collect.nonEmpty) ZPure.fail(new IllegalStateException("EOF inside content stream payload"))
     else ZPure.unit
+  }
+
+  /**
+   * Synchronous fold of one [[StreamingDecoded]] chunk through the same ZPure
+   * step as [[pipeline]]; returns emitted [[Decoded]] values and next [[Acc]].
+   */
+  def foldChunk(acc: Acc, chunk: Chunk[StreamingDecoded]): (Chunk[Decoded], Either[Throwable, Acc]) = {
+    val run = chunk.foldLeft[ZPure[Decoded, Acc, Acc, Any, Throwable, Unit]](ZPure.unit) { (a, in) =>
+      a *> step(in)
+    }
+    val (log, result) = run.runAll(acc)
+    result match {
+      case Left(err)    => (log, Left(err))
+      case Right((s, _)) => (log, Right(s))
+    }
+  }
+
+  /** Validate bridge state after the last streaming event (no open content payload). */
+  def finalizeAcc(acc: Acc): Either[Throwable, Chunk[Decoded]] = {
+    val (log, result) = finalize(acc).runAll(acc)
+    result match {
+      case Left(err)     => Left(err)
+      case Right((_, _)) => Right(log)
+    }
   }
 
   val pipeline: ZPipeline[Any, Throwable, StreamingDecoded, Decoded] =
