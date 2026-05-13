@@ -113,14 +113,14 @@ baseline just decodes them):
 ```
 
 JMH numbers from `bench/Jmh/run -p n=1048576 zio.pdf.scan.bench.ScanBench`
-agree:
+agree (JDK 21, 5 iterations):
 
 ```
-Benchmark                        (n)  Mode  Cnt    Score     Error  Units
-ScanBench.handCoded          1048576  avgt    3    0.937 ±   0.672  ms/op
-ScanBench.scanFusedDirect    1048576  avgt    3   23.525 ±  35.059  ms/op
-ScanBench.scanUnfusedDirect  1048576  avgt    3  179.283 ± 119.168  ms/op
-ScanBench.scodecBaseline     1048576  avgt    3   63.310 ±  29.787  ms/op
+Benchmark                        (n)  Mode  Cnt   Score    Error  Units
+ScanBench.handCoded          1048576  avgt    5   0.801 ±  0.219  ms/op
+ScanBench.scanFusedDirect    1048576  avgt    5  22.467 ±  5.025  ms/op
+ScanBench.scanUnfusedDirect  1048576  avgt    5  167.333 ± 55.186  ms/op
+ScanBench.scodecBaseline     1048576  avgt    5  65.831 ± 25.583  ms/op
 ```
 
 The fast path is `Fusion.tryFuse` recognising that every node in the
@@ -328,14 +328,14 @@ sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*RingBufferBench.*'
 
 ```
 Benchmark                                     (chunkSize)      (n)  Mode  Cnt    Score    Error  Units
-StreamDecoderBench.chunkedFastPathStrict            65536  1048576  avgt    5    0.890 ±  0.081  ms/op   <-- ~57x baseline
-StreamDecoderBench.chunkedFastPathChannel           65536  1048576  avgt    5    1.146 ±  0.224  ms/op   <-- ~44x baseline
-StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   50.873 ±  0.751  ms/op   reference
-StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   95.215 ± 11.892  ms/op
-StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5  105.574 ±  9.118  ms/op
-StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5  106.975 ±  3.026  ms/op
-StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5  106.703 ±  7.950  ms/op
-StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5  243.897 ±  6.592  ms/op
+StreamDecoderBench.chunkedFastPathStrict            65536  1048576  avgt    5    0.864 ±  0.215  ms/op   <-- ~58x baseline
+StreamDecoderBench.chunkedFastPathChannel           65536  1048576  avgt    5    1.151 ±  0.314  ms/op   <-- ~44x baseline
+StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   50.068 ±  1.904  ms/op   reference
+StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   82.264 ±  8.094  ms/op
+StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5  107.120 ± 27.984  ms/op
+StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5  112.325 ± 41.407  ms/op
+StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5  108.035 ± 14.999  ms/op
+StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5  247.013 ± 10.969  ms/op
 ```
 
 Five takeaways:
@@ -381,27 +381,27 @@ Same `scodec.Decoder`, same in-memory bytes, same chunk size — only the stream
 
 ```
 Benchmark                                          (chunkSize)      (n)  Mode  Cnt     Score     Error  Units
-HeadToHeadBench.baseline_scodec_vector                   65536  4194304  avgt    5   223.343 ±  39.800  ms/op   reference
-HeadToHeadBench.baseline_zio_PureDecoder_runAll          65536  4194304  avgt    5   430.181 ±  32.729  ms/op
-HeadToHeadBench.fs2_StreamDecoder_many                   65536  4194304  avgt    5  2659.758 ± 427.614  ms/op   fs2 streaming
-HeadToHeadBench.zio_StreamDecoder_many                   65536  4194304  avgt    5  1031.921 ±  87.637  ms/op   ZIO ZChannel streaming    (~2.6x faster than fs2)
-HeadToHeadBench.zio_StreamDecoder_fromPureChunked        65536  4194304  avgt    5     4.232 ±   0.608  ms/op   ZIO chunked fast path     (~628x faster than fs2)
+HeadToHeadBench.baseline_scodec_vector                   65536  4194304  avgt    5   255.810 ±  64.530  ms/op   reference
+HeadToHeadBench.baseline_zio_PureDecoder_runAll          65536  4194304  avgt    5   390.969 ±  67.256  ms/op
+HeadToHeadBench.fs2_StreamDecoder_many                   65536  4194304  avgt    5  2478.106 ± 276.279  ms/op   fs2 streaming
+HeadToHeadBench.zio_StreamDecoder_many                   65536  4194304  avgt    5  1055.141 ± 108.390  ms/op   ZIO ZChannel streaming    (~2.3x faster than fs2)
+HeadToHeadBench.zio_StreamDecoder_fromPureChunked        65536  4194304  avgt    5     3.405 ±   0.578  ms/op   ZIO chunked fast path     (~728x faster than fs2)
 ```
 
 **Real PDF top-level decode (the legacy `xref-stream.pdf` fixture):**
 
 ```
 Benchmark                                                    (chunkSize)  Mode  Cnt    Score     Error  Units
-PdfDecodeHeadToHeadBench.fs2_decode_pdf_topLevel                    8192  avgt    5  366.326 ± 138.016  us/op   fs2 + scodec.choice
-PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel                    8192  avgt    5  457.112 ± 120.087  us/op   ZIO + scodec.choice
-PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_byteStream         8192  avgt    5  439.639 ±  68.776  us/op   ZIO + byte-stream pipe
+PdfDecodeHeadToHeadBench.fs2_decode_pdf_topLevel                    8192  avgt    5  376.284 ± 128.731  us/op   fs2 + scodec.choice
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel                    8192  avgt    5  441.652 ±  61.326  us/op   ZIO + scodec.choice
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_byteStream         8192  avgt    5  405.280 ± 131.155  us/op   ZIO + byte-stream pipe
 ```
 
 Honest reading:
 
-- **For high-throughput byte-aligned decoding** (one element type, many elements): ZIO's chunked fast path beats fs2 by **~628×**. This is the architectural win — `PureDecoder.manyChunked + StreamDecoder.fromPureChunked` lets the entire batch decoder live inside one inlined while-loop per upstream chunk; fs2 has no equivalent because `scodec-stream`'s `Decode` step is per-element.
-- **For the plain ZChannel path vs fs2's Pull path** on the same per-element decoder: ZIO is **~2.6× faster** on a tight `uint8` loop. Same algorithm both sides (we ported it from fs2's source), but `ZChannel` has lower per-step overhead than `Pull` for this shape.
-- **For real PDF parsing where the scodec `choice`-decoder body dominates** (~360 µs of decoding work per PDF): the two libraries are within ~25% of each other and **fs2 actually edges us by ~25%**. The streaming library overhead is in the noise once the per-element decoder body itself is expensive — what wins or loses at that point is JIT inlining of the choice arms, not channel vs pull.
+- **For high-throughput byte-aligned decoding** (one element type, many elements): ZIO's chunked fast path beats fs2 by **~728×**. This is the architectural win — `PureDecoder.manyChunked + StreamDecoder.fromPureChunked` lets the entire batch decoder live inside one inlined while-loop per upstream chunk; fs2 has no equivalent because `scodec-stream`'s `Decode` step is per-element.
+- **For the plain ZChannel path vs fs2's Pull path** on the same per-element decoder: ZIO is **~2.3× faster** on a tight `uint8` loop. Same algorithm both sides (we ported it from fs2's source), but `ZChannel` has lower per-step overhead than `Pull` for this shape.
+- **For real PDF parsing where the scodec `choice`-decoder body dominates** (~380 µs of decoding work per PDF): ZIO is within ~17% of fs2, and the byte-stream path (`zio_decode_pdf_topLevel_byteStream` at 405 µs) is within 8% of fs2. The streaming library overhead is in the noise once the per-element decoder body itself is expensive — what wins or loses at that point is JIT inlining of the choice arms, not channel vs pull.
 
 So if your workload is "stream a giant binary log of fixed-width records" the chunked fast path is a transformative win. If your workload is "parse a few KiB of nested PDF structure", any modern Scala streaming library is fine and the difference is in the noise.
 
@@ -409,8 +409,8 @@ So if your workload is "stream a giant binary log of fixed-width records" the ch
 
 ```
 Benchmark                                      (n)  Mode  Cnt    Score    Error  Units
-RingBufferBench.spscRingBufferFillDrain      16384  avgt    5   70.929 ± 13.977  us/op   ~7x faster
-RingBufferBench.arrayBlockingQueueFillDrain  16384  avgt    5  485.797 ± 33.699  us/op
+RingBufferBench.spscRingBufferFillDrain      16384  avgt    5   67.587 ±  5.541  us/op   ~7x faster
+RingBufferBench.arrayBlockingQueueFillDrain  16384  avgt    5  485.866 ± 24.279  us/op
 ```
 
 For 16 K element fill-then-drain on a single thread, `SpscRingBuffer` is ~7× faster than `ArrayBlockingQueue` per element. The win when there's a real thread boundary is bigger because `ABQ` has to acquire a lock per `offer`/`poll` while `SpscRingBuffer` only needs a single relaxed write per slot. Use it for "decoder fiber → consumer fiber" handoff when the work is CPU-bound and the queue is on the hot path.
@@ -465,10 +465,14 @@ JMH benchmark on a realistic complex type (`Order` with `Customer`, `List[OrderL
 
 ```
 Benchmark                              (n)  Mode  Cnt   Score    Error  Units
-ScodecDeriverBench.handRolledEncode  10000  avgt    5  20.962 ±  1.048  ms/op
-ScodecDeriverBench.derivedEncode     10000  avgt    5  24.793 ±  1.205  ms/op   +18%
-ScodecDeriverBench.handRolledDecode  10000  avgt    5  28.828 ± 10.173  ms/op
-ScodecDeriverBench.derivedDecode     10000  avgt    5  30.933 ±  0.454  ms/op   +7%
+ScodecDeriverBench.handRolledEncode   1000  avgt    5   1.886 ±  0.375  ms/op
+ScodecDeriverBench.derivedEncode      1000  avgt    5   2.327 ±  0.258  ms/op   +23%
+ScodecDeriverBench.handRolledDecode   1000  avgt    5   2.167 ±  0.039  ms/op
+ScodecDeriverBench.derivedDecode      1000  avgt    5   2.863 ±  0.080  ms/op   +32%
+ScodecDeriverBench.handRolledEncode  10000  avgt    5  18.558 ±  2.124  ms/op
+ScodecDeriverBench.derivedEncode     10000  avgt    5  24.176 ±  0.298  ms/op   +30%
+ScodecDeriverBench.handRolledDecode  10000  avgt    5  22.876 ±  0.168  ms/op
+ScodecDeriverBench.derivedDecode     10000  avgt    5  31.688 ±  5.015  ms/op   +38%
 ```
 
 The deriver carries one `Registers` allocation per record and looks up field positions via the `Reflect.Record`'s pre-computed register layout, but otherwise it's allocation-tight. **For complex application types the overhead is in the noise (5-20%).** Where it would actually matter — tight loops over millions of small fixed-width records — the right tool is the chunked fast path (`PureDecoder.manyChunked + StreamDecoder.fromPureChunked`), which beats hand-rolled `scodec.codecs.vector` by ~57× on `uint8`.
@@ -670,11 +674,12 @@ Properties locked down by `FastCdcSpec`:
 ### Throughput
 
 ```
-Benchmark                   (rechunk)    (size)  Mode  Cnt   Score   Error  Units
-FastCdcBench.cdcThroughput      65536  33554432  avgt    5  72.635 ± 4.797  ms/op
+Benchmark                        (rechunk)    (size)   Mode  Cnt   Score   Error  Units
+FastCdcBench.cdcThroughput           65536  33554432  thrpt    5  13.653 ± 4.898  ops/s
+FastCdcBench.cdcThroughputCount      65536  33554432  thrpt    5  14.468 ± 1.101  ops/s
 ```
 
-**~440 MB/s** on the build VM (32 MiB / 72.635 ms, JDK 21). For comparison, the FastCDC paper reports ~590 MB/s in native C; the JVM port is ~75% of native throughput, well past Rabin-Karp's typical 30–50 MB/s.
+**~450 MB/s** on the build VM (32 MiB × 13.653 ops/s, JDK 21). For comparison, the FastCDC paper reports ~590 MB/s in native C; the JVM port is ~76% of native throughput, well past Rabin-Karp's typical 30–50 MB/s.
 
 ### Composing CDC with `Part.StreamObj`
 
