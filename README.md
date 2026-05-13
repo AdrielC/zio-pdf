@@ -297,6 +297,47 @@ This is the seed of the larger compile-time machinery: the next layer
 accumulation in the `Out` type parameter, Flow-style typed builder)
 builds on the same `inline match` foundation.
 
+### Complex composition benchmarks
+
+The 4-stage toy lanes in `ScanBench` are enough to *detect* fusion and
+per-stage allocations, but they are not the workloads the register
+lane is *for*. `ComplexScanBench` exercises realistic compositions:
+
+```
+Benchmark                                   (n)  Mode  Cnt    Score    Error  Units
+ComplexScanBench.deepPureSpineDirect     262144  avgt    5   22.259 ±  1.380  ms/op
+ComplexScanBench.deepPureSpineReg        262144  avgt    5   22.144 ±  0.371  ms/op   (tied, fused both lanes)
+ComplexScanBench.deepMixedSpineDirect    262144  avgt    5  126.135 ± 17.047  ms/op
+ComplexScanBench.deepMixedSpineReg       262144  avgt    5   27.555 ±  1.452  ms/op   (~4.6x faster)
+ComplexScanBench.deepFoldSpineDirect     262144  avgt    5   27.116 ±  5.701  ms/op
+ComplexScanBench.deepFoldSpineReg        262144  avgt    5    5.451 ±  0.172  ms/op   (~5.0x faster)
+ComplexScanBench.ingest3StageDirect      262144  avgt    5   12.201 ±  2.974  ms/op
+ComplexScanBench.ingest3StageReg         262144  avgt    5    2.800 ±  0.115  ms/op   (~4.4x faster)
+ComplexScanBench.ingestFanoutDirect      262144  avgt    5   10.398 ±  0.475  ms/op
+ComplexScanBench.ingestFanoutReg         262144  avgt    5   12.157 ±  2.948  ms/op   (~17% slower, fallback)
+```
+
+Lanes:
+
+- **`deepPureSpine`** -- 32 pure maps. `Fusion.tryFuse` collapses both
+  lanes to a single `Byte => Int`; they tie within JMH noise.
+- **`deepMixedSpine`** -- 16 stages alternating `map` / `filter`. Non-
+  fusable. The register lane's advantage **scales with stage count**:
+  4 stages was ~3.4× (`ScanBench.scanUnfused*`), 16 stages is ~4.6×.
+- **`deepFoldSpine`** -- 8 chained `Fold[Byte, Long]` stages. The
+  legacy stepper allocates one closure + one `StepEffect` per stage
+  per byte; the register lane stores all 8 accumulators in adjacent
+  object slots of one `RegState`. ~5.0× faster.
+- **`ingest3Stage`** -- the canonical Graviton sequential ingest:
+  `BombGuard >>> CountBytes >>> Hash(SHA-256)`. ~4.4× faster on the
+  real-world shape.
+- **`ingestFanout`** -- `CountBytes &&& Hash(SHA-256)`. **~17%
+  slower** on the register lane today: `Fanout` / `Choice` fall back
+  to the legacy stepper, and the dispatch-through-fallback path adds
+  small overhead. Closing this gap (paired output buffers / tuple-
+  aware emit so the register lane natively handles `&&&` and `|||`)
+  is on the follow-up list.
+
 ## Building & testing
 
 ```bash

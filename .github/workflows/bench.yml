@@ -39,6 +39,13 @@ jobs:
           "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*ScanBench.*"
           2>&1 | tee bench-scan.txt
 
+      # ── Complex scan compositions (deep spines, ingest, fanout) ────────
+      - name: ComplexScanBench
+        run: >
+          sbt -batch
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*ComplexScanBench.*"
+          2>&1 | tee bench-scan-complex.txt
+
       # ── StreamDecoder / PureDecoder / chunked fast path ─────────────────
       - name: StreamDecoderBench
         run: >
