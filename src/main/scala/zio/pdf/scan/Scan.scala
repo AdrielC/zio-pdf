@@ -251,6 +251,18 @@ object Scan {
   def runDirect[I, O, E](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, E], Vector[O]) =
     SinglePassInterp.runDirect(scan, inputs)
 
+  /** Register-based synchronous driver. Same shape as `runDirect`, but
+    * non-fused spines run through `RegInterp` -- the register-allocated
+    * stepper that keeps per-stage state in a single mutable `RegState`
+    * and reuses a single `RegOutBuffer` for emissions. Falls back to
+    * `SinglePassInterp.runDirect` for shapes the register lane does not
+    * yet handle (Fanout/Choice). */
+  def runDirectReg[I, O, E](
+      scan: FreeScan[I, O],
+      inputs: Iterable[I]
+  ): (ScanDone[O, E], Vector[O]) =
+    RegInterp.runDirect(scan, inputs)
+
   /** Kyo-effect-typed runner. */
   def runKyo[I, O, E](scan: FreeScan[I, O], inputs: Seq[I])(using
       pollTag: Tag[Poll[I]],
