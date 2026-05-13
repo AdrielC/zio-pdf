@@ -27,6 +27,8 @@ import zio.blocks.schema.binding.{Binding, HasBinding, RegisterOffset, Registers
 import zio.blocks.schema.derive.{Deriver, HasInstance as SchemaHasInstance}
 import zio.blocks.typeid.TypeId
 
+import scala.reflect.ClassTag
+
 /**
  * `Deriver[Codec]` over the structural patterns from zio-blocks-schema.
  *
@@ -40,7 +42,12 @@ import zio.blocks.typeid.TypeId
  *   - Variant: write a `uint8` discriminator tag, then the matching
  *     case codec.
  *   - Wrapper: encode by `unwrap`, decode by `wrap`.
- *   - Sequence: `listOfN(int32, elementCodec)`.
+ *   - Sequence: `int32` length + repeated `elementCodec`; when the element
+ *     is `Byte`, the payload is a single raw byte run (`BitVector.view`)
+ *     instead of N separate `byte` decodes (large win for blobs). For a
+ *     chunk-shaped field prefer `zio.blocks.chunk.Chunk` in the record —
+ *     `Schema.derived` treats `zio.Chunk` as `IndexedSeq` unless you wire
+ *     an explicit `Schema.chunk` / blocks chunk type.
  *   - Map: length-prefixed list of `(K, V)` pairs.
  *   - Dynamic: not implemented in this prototype - calling the
  *     derived codec for a `DynamicValue` will fail at decode time.
@@ -206,57 +213,103 @@ object ScodecDeriver extends Deriver[Codec] {
     defaultValue: Option[C[A]],
     examples:     Seq[C[A]]
   )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[C[A]]] = {
-    val constructor = binding.constructor
+    val constructor   = binding.constructor
     val deconstructor = binding.deconstructor
-    val elemClassTag  = element.typeId.classTag.asInstanceOf[scala.reflect.ClassTag[A]]
+    val elemClassTag  = element.typeId.classTag.asInstanceOf[ClassTag[A]]
 
-    D.instance(element.metadata).map { elementCodec =>
-      new Codec[C[A]] {
-        def sizeBound: SizeBound = SizeBound.unknown
+    /** `Seq[C]` / `List[C]` of `Byte`: one `int32` length + raw bytes (not N× `byte` codec). */
+    if (isByteElement(elemClassTag)) {
+      Lazy {
+        new Codec[C[A]] {
+          def sizeBound: SizeBound = SizeBound.unknown
 
-        def encode(value: C[A]): Attempt[BitVector] = {
-          val items = deconstructor.deconstruct(value).iterator
-          var acc   = BitVector.empty
-          var count = 0
-          // We don't know the size up-front for arbitrary C, so
-          // encode into a temporary buffer and prepend the count.
-          val buf = new java.util.ArrayList[BitVector]()
-          while (items.hasNext) {
-            elementCodec.encode(items.next()) match {
-              case Attempt.Successful(bits) => buf.add(bits); count += 1
-              case f @ Attempt.Failure(_)   => return f
-            }
+          def encode(value: C[A]): Attempt[BitVector] = {
+            val items = deconstructor.deconstruct(value).iterator
+            val buf   = new scala.collection.mutable.ArrayBuffer[Byte]()
+            while (items.hasNext) buf += items.next().asInstanceOf[Byte]
+            val bytes = buf.toArray
+            int32.encode(bytes.length).map(lenBits => lenBits ++ BitVector.view(bytes))
           }
-          int32.encode(count).map { lenBits =>
-            acc = lenBits
-            var i = 0
-            while (i < buf.size) { acc = acc ++ buf.get(i); i += 1 }
-            acc
-          }
-        }
 
-        def decode(bits: BitVector): Attempt[DecodeResult[C[A]]] = {
-          implicit val ct: scala.reflect.ClassTag[A] = elemClassTag
-          int32.decode(bits) match {
-            case Attempt.Successful(DecodeResult(n, rest0)) =>
-              val builder = constructor.newBuilder[A](n)
-              var rem     = rest0
-              var i       = 0
-              while (i < n) {
-                elementCodec.decode(rem) match {
-                  case Attempt.Successful(DecodeResult(v, r)) =>
-                    constructor.add(builder, v)
-                    rem = r
-                  case f @ Attempt.Failure(_) => return f
+          def decode(bits: BitVector): Attempt[DecodeResult[C[A]]] = {
+            implicit val ct: ClassTag[A] = elemClassTag
+            int32.decode(bits) match {
+              case Attempt.Successful(DecodeResult(n, rest0)) =>
+                if (n < 0)
+                  Attempt.failure(Err(s"ScodecDeriver: negative sequence length $n"))
+                else {
+                  val needBits = n.toLong * 8L
+                  if (rest0.size < needBits)
+                    Attempt.failure(Err.InsufficientBits(needBits, rest0.size, Nil))
+                  else {
+                    val (payload, rem) = rest0.splitAt(needBits)
+                    val bytes          = payload.toByteArray
+                    if (bytes.length != n)
+                      Attempt.failure(Err(s"ScodecDeriver: byte sequence size mismatch"))
+                    else {
+                      val builder = constructor.newBuilder[A](n)
+                      var i       = 0
+                      while (i < n) {
+                        constructor.add(builder, bytes(i).asInstanceOf[A])
+                        i += 1
+                      }
+                      Attempt.successful(DecodeResult(constructor.result(builder), rem))
+                    }
+                  }
                 }
-                i += 1
-              }
-              Attempt.successful(DecodeResult(constructor.result(builder), rem))
-            case f @ Attempt.Failure(_) => f
+              case f @ Attempt.Failure(_) => f
+            }
           }
         }
       }
-    }
+    } else
+      D.instance(element.metadata).map { elementCodec =>
+        new Codec[C[A]] {
+          def sizeBound: SizeBound = SizeBound.unknown
+
+          def encode(value: C[A]): Attempt[BitVector] = {
+            val items = deconstructor.deconstruct(value).iterator
+            var acc   = BitVector.empty
+            var count = 0
+            // We don't know the size up-front for arbitrary C, so
+            // encode into a temporary buffer and prepend the count.
+            val buf = new java.util.ArrayList[BitVector]()
+            while (items.hasNext) {
+              elementCodec.encode(items.next()) match {
+                case Attempt.Successful(b) => buf.add(b); count += 1
+                case f @ Attempt.Failure(_)   => return f
+              }
+            }
+            int32.encode(count).map { lenBits =>
+              acc = lenBits
+              var i = 0
+              while (i < buf.size) { acc = acc ++ buf.get(i); i += 1 }
+              acc
+            }
+          }
+
+          def decode(bits: BitVector): Attempt[DecodeResult[C[A]]] = {
+            implicit val ct: ClassTag[A] = elemClassTag
+            int32.decode(bits) match {
+              case Attempt.Successful(DecodeResult(n, rest0)) =>
+                val builder = constructor.newBuilder[A](n)
+                var rem     = rest0
+                var i       = 0
+                while (i < n) {
+                  elementCodec.decode(rem) match {
+                    case Attempt.Successful(DecodeResult(v, r)) =>
+                      constructor.add(builder, v)
+                      rem = r
+                    case f @ Attempt.Failure(_) => return f
+                  }
+                  i += 1
+                }
+                Attempt.successful(DecodeResult(constructor.result(builder), rem))
+              case f @ Attempt.Failure(_) => f
+            }
+          }
+        }
+      }
   }
 
   // -------------------------------------------------------------------
@@ -365,6 +418,11 @@ object ScodecDeriver extends Deriver[Codec] {
   // -------------------------------------------------------------------
   // helpers
   // -------------------------------------------------------------------
+
+  private def isByteElement(ct: ClassTag[?]): Boolean = {
+    val c = ct.runtimeClass
+    c == java.lang.Byte.TYPE || c == classOf[java.lang.Byte]
+  }
 
   private def unimplemented[A](what: String): Codec[A] = new Codec[A] {
     def sizeBound: SizeBound                   = SizeBound.unknown

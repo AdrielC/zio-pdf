@@ -14,6 +14,7 @@ import java.nio.file.Files
 
 import zio.*
 import zio.blocks.scope.{Resource, Scope}
+import zio.pdf.{Log, PdfStream}
 import zio.stream.*
 import zio.test.*
 
@@ -131,6 +132,14 @@ object PdfIOSpec extends ZIOSpecDefault {
         n    <- PdfIO.zio.reader(path).runCount
         _    <- ZIO.attemptBlocking(Files.delete(path))
       } yield assertTrue(n == size.toLong)
+    },
+
+    test("PdfIO.scoped.decodeDecoded matches zio reader + PdfStream.decode on xref-stream.pdf") {
+      val path = java.nio.file.Path.of("src/test/resources/xref-stream.pdf")
+      val scopedOut = PdfIO.scoped.decodeDecoded(path)
+      for {
+        zioOut <- PdfIO.zio.reader(path).via(PdfStream.decode(Log.noop)).runCollect
+      } yield assertTrue(scopedOut == zioOut)
     },
 
     test("a real PDF round-trips through PdfIO.zio + PdfStream.decode") {
