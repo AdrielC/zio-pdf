@@ -116,12 +116,31 @@ JMH numbers from `bench/Jmh/run -p n=1048576 zio.pdf.scan.bench.ScanBench`
 agree (JDK 21, 5 iterations):
 
 ```
-Benchmark                        (n)  Mode  Cnt   Score    Error  Units
-ScanBench.handCoded          1048576  avgt    5   0.801 ±  0.219  ms/op
-ScanBench.scanFusedDirect    1048576  avgt    5  22.467 ±  5.025  ms/op
-ScanBench.scanUnfusedDirect  1048576  avgt    5  167.333 ± 55.186  ms/op
-ScanBench.scodecBaseline     1048576  avgt    5  65.831 ± 25.583  ms/op
+Benchmark                        (n)  Mode  Cnt    Score    Error  Units
+ScanBench.handCoded          1048576  avgt    5    0.914 ±  0.089  ms/op
+ScanBench.scanFusedDirect    1048576  avgt    5   22.129 ±  5.789  ms/op
+ScanBench.scanFusedReg       1048576  avgt    5   22.714 ±  3.004  ms/op
+ScanBench.scanUnfusedDirect  1048576  avgt    5  149.841 ± 27.331  ms/op
+ScanBench.scanUnfusedReg     1048576  avgt    5   44.088 ±  2.192  ms/op
+ScanBench.scodecBaseline     1048576  avgt    5   55.657 ± 10.390  ms/op
 ```
+
+Two observations:
+
+1. **The fused path is unchanged** between the legacy stepper (`scanFusedDirect`)
+   and the register lane (`scanFusedReg`) -- both short-circuit through
+   `Fusion.tryFuse` to a single `Byte => Int` and the same tight
+   `builder += f(_)` loop. Register state has nothing to do once the
+   spine fuses.
+
+2. **The non-fusable spine is ~3.4× faster** through the register lane
+   (`scanUnfusedReg`, 44 ms) than through the persistent stepper
+   (`scanUnfusedDirect`, 150 ms), and is now **faster than
+   `scodec.codecs.vector(uint8)`** on the same per-byte budget despite
+   doing strictly more work (`map → filter → +1 → ^0x55 → -1` vs
+   scodec's "decode and box into Vector[Int]"). See the
+   [Register-based interpreter](#register-based-interpreter) section
+   below for what changed.
 
 The fast path is `Fusion.tryFuse` recognising that every node in the
 spine is `Arr` or `Prim(ScanPrim.Map)` and collapsing the chain to a
@@ -137,6 +156,65 @@ The Kyo lane pays a fixed per-element suspension cost from
 under bigger per-stage work; it's intentionally not part of the JMH
 suite (the in-test bench measures it on a smaller payload so the
 result is visible without dominating the run).
+
+### Register-based interpreter
+
+The non-fused path now has a second runtime, lifted directly from the
+"zero allocation, zero boxing" pattern ZIO Blocks uses for record
+construction in ZIO Schema 2. State for the whole pipeline lives in a
+single mutable arena (`RegState`: an `Array[Long]` for primitive slots,
+an `Array[AnyRef]` for reference slots) and every stage knows its
+offset at compile time. There is no per-input closure allocation
+(`loop(s)` no longer rebuilds a `Stepper`), no per-input
+`StepEffect(Vector(o), None)` allocation, and no per-emit
+`Some(ScanDone.Success(Seq.empty))` -- the signal channel is an `Int`.
+
+Stage-to-stage handoff goes through a reusable `RegOutBuffer`, an
+`Array[AnyRef]` ring that `>>>` clears between calls, instead of a
+fresh `Vector[M]` allocated on every step.
+
+Per-primitive layouts:
+
+| Primitive            | Layout                                       |
+|----------------------|----------------------------------------------|
+| `Arr` / `Map`        | zero state                                   |
+| `Filter`             | zero state                                   |
+| `Take(n)` / `Drop(n)`| 1 long slot (remaining)                      |
+| `CountBytes`         | 1 long slot (count)                          |
+| `BombGuard(max)`     | 1 long slot (count) + 1 object slot (error)  |
+| `Fold[I, S]`         | 1 object slot (accumulator)                  |
+| `Hash(algo)`         | 1 object slot (live `MessageDigest`)         |
+| `FixedChunk(n)`      | 1 object slot (mutable `ByteArrayOutputStream`) |
+| `FastCDC(min,avg,max)` | 1 object slot (mutable `ByteArrayOutputStream`) |
+| `AndThen(l, r)`      | `l.layout + r.layout`; `r` is anchored at `off + l.layout` |
+
+Use:
+
+```scala
+import zio.pdf.scan.*
+
+// Same FreeScan; pick the runtime at the call site.
+val pipe: FreeScan[Byte, Int] =
+  Scan.map[Byte, Int](_ & 0xff) >>>
+    Scan.filter[Int](_ % 2 == 0) >>>
+    Scan.map[Int, Int](_ + 1)
+
+val (sig, out) = Scan.runDirectReg[Byte, Int, Any](pipe, bytes)
+```
+
+`Scan.runDirectReg` always:
+
+- Tries `Fusion.tryFuse` first (so the fully-fused fast path is identical
+  to `Scan.runDirect`).
+- Otherwise compiles the spine to a `RegStepper` chain (`AndThen` at
+  stacked offsets) and drives it through `RegInterp.runOnce`.
+- Falls back to the legacy `Stepper` driver for shapes the register lane
+  does not yet handle (`Fanout` / `Choice`). `RegInterpSpec` proves
+  every shape agrees output-for-output with `Scan.runDirect`.
+
+The legacy `Scan.runDirect` and the `Stepper` family stay in place
+unchanged; this is purely an additive new runtime, behind a new entry
+point.
 
 ## Building & testing
 

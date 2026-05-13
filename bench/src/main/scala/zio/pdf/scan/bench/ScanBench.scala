@@ -101,6 +101,24 @@ class ScanBench {
   def scanUnfusedDirect: Vector[Int] =
     Scan.runDirect[Byte, Int, Any](unfused, bytesSeq)._2
 
+  /** Same workload as `scanFusedDirect`, but routed through the
+    * register-based runner. Because `Fusion.tryFuse` succeeds on a
+    * pure-map spine, both lanes hit the same fast path -- this lane
+    * documents that the register runner does not regress the fully-
+    * fused case. */
+  @Benchmark
+  def scanFusedReg: Vector[Int] =
+    Scan.runDirectReg[Byte, Int, Any](fused, bytesSeq)._2
+
+  /** Same workload as `scanUnfusedDirect`, but routed through the
+    * register-based runner: state lives in a single `RegState`, each
+    * stage reads/writes its slot in place, and emissions go into a
+    * reusable `RegOutBuffer` instead of a fresh `Vector(o)` per step.
+    * This is the lane the register architecture is meant to win. */
+  @Benchmark
+  def scanUnfusedReg: Vector[Int] =
+    Scan.runDirectReg[Byte, Int, Any](unfused, bytesSeq)._2
+
   // Note: a Kyo-runner lane is intentionally not part of the JMH suite.
   // The Kyo Poll/Emit/Abort plumbing imposes a fixed per-element
   // suspension cost that dominates this trivial workload by ~30x. See
