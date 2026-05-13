@@ -116,16 +116,19 @@ JMH numbers from `bench/Jmh/run -p n=1048576 zio.pdf.scan.bench.ScanBench`
 agree (JDK 21, 5 iterations):
 
 ```
-Benchmark                        (n)  Mode  Cnt    Score    Error  Units
-ScanBench.handCoded          1048576  avgt    5    0.914 ±  0.089  ms/op
-ScanBench.scanFusedDirect    1048576  avgt    5   22.129 ±  5.789  ms/op
-ScanBench.scanFusedReg       1048576  avgt    5   22.714 ±  3.004  ms/op
-ScanBench.scanUnfusedDirect  1048576  avgt    5  149.841 ± 27.331  ms/op
-ScanBench.scanUnfusedReg     1048576  avgt    5   44.088 ±  2.192  ms/op
-ScanBench.scodecBaseline     1048576  avgt    5   55.657 ± 10.390  ms/op
+Benchmark                          (n)  Mode  Cnt    Score    Error  Units
+ScanBench.handCoded            1048576  avgt    5    0.904 ±  0.189  ms/op
+ScanBench.scanFusedDirect      1048576  avgt    5   22.642 ±  7.901  ms/op
+ScanBench.scanFusedReg         1048576  avgt    5   22.785 ±  3.766  ms/op
+ScanBench.scanLongFoldDirect   1048576  avgt    5   10.032 ±  1.067  ms/op
+ScanBench.scanLongFoldReg      1048576  avgt    5    5.327 ±  1.464  ms/op
+ScanBench.scanLongFoldUnboxed  1048576  avgt    5    4.710 ±  0.107  ms/op
+ScanBench.scanUnfusedDirect    1048576  avgt    5  172.439 ± 33.672  ms/op
+ScanBench.scanUnfusedReg       1048576  avgt    5   44.031 ±  1.535  ms/op
+ScanBench.scodecBaseline       1048576  avgt    5   56.140 ± 19.359  ms/op
 ```
 
-Two observations:
+Three observations:
 
 1. **The fused path is unchanged** between the legacy stepper (`scanFusedDirect`)
    and the register lane (`scanFusedReg`) -- both short-circuit through
@@ -133,14 +136,27 @@ Two observations:
    `builder += f(_)` loop. Register state has nothing to do once the
    spine fuses.
 
-2. **The non-fusable spine is ~3.4× faster** through the register lane
+2. **The non-fusable spine is ~3.9× faster** through the register lane
    (`scanUnfusedReg`, 44 ms) than through the persistent stepper
-   (`scanUnfusedDirect`, 150 ms), and is now **faster than
+   (`scanUnfusedDirect`, 172 ms), and is now **faster than
    `scodec.codecs.vector(uint8)`** on the same per-byte budget despite
    doing strictly more work (`map → filter → +1 → ^0x55 → -1` vs
-   scodec's "decode and box into Vector[Int]"). See the
-   [Register-based interpreter](#register-based-interpreter) section
-   below for what changed.
+   scodec's "decode and box into Vector[Int]").
+
+3. **Primitive folds run with zero boxing on the long-fold path.**
+   `scanLongFoldDirect` is the legacy `Fold[Byte, Long]` (the
+   accumulator boxes to `java.lang.Long` on every step); `scanLongFoldReg`
+   is the same fold routed through the register lane via the erased
+   `FreeScan` path (state in an object slot, no closure allocations:
+   ~1.9× faster). `scanLongFoldUnboxed` uses an `inline match` over the
+   accumulator type at the call site to pick a *specialised*
+   `FoldLong` stepper -- raw `getLong` / `setLong` on the hot path,
+   no typeclass dispatch, no boxing: **~2.1× faster than the legacy
+   fold**. The selection happens at compile time, so the runtime sees
+   a monomorphic class with direct primitive ops.
+
+See the [Register-based interpreter](#register-based-interpreter) section
+below for what changed.
 
 The fast path is `Fusion.tryFuse` recognising that every node in the
 spine is `Arr` or `Prim(ScanPrim.Map)` and collapsing the chain to a
@@ -215,6 +231,71 @@ val (sig, out) = Scan.runDirectReg[Byte, Int, Any](pipe, bytes)
 The legacy `Scan.runDirect` and the `Stepper` family stay in place
 unchanged; this is purely an additive new runtime, behind a new entry
 point.
+
+### Schema-driven layout and primitive specialisation
+
+`RegSchema[S]` is a small typeclass that mirrors `zio.blocks.schema`'s
+`Reflect[S]` + `RegisterPos[A]` shape: it carries the `RegLayout` for
+`S` and the `read` / `write` methods that round-trip an `S` through a
+`RegState` slot. Primitive instances (`Long`, `Int`, `Byte`, `Double`,
+`Boolean`, `Char`, `Short`, `Float`) declare a long-slot layout;
+reference instances declare an object-slot layout. This is the same
+"registry per type" pattern ZIO Blocks uses to describe a record's
+register layout without boxing fields.
+
+The typeclass alone is not enough on the hot path: every call to
+`rs.read(...)` / `rs.write(...)` from a polymorphic stepper goes
+through a virtual call that the JIT does not see through. So the
+specialisation happens **at the call site, at compile time**, via an
+`inline erasedValue[S] match` that picks a monomorphic class:
+
+```scala
+inline def runFoldUnboxed[I, S](seed: S, f: (S, I) => S, inputs: Iterable[I])(using
+    rs: RegSchema[S]
+): (ScanDone[S, Any], Vector[S]) = {
+  val stepper: RegStepper[I, S, Nothing] = inline erasedValue[S] match {
+    case _: Long   => new RegSteppers.FoldLong[I]  (seed.asInstanceOf[Long],   f.asInstanceOf[(Long,   I) => Long])
+                       .asInstanceOf[RegStepper[I, S, Nothing]]
+    case _: Int    => new RegSteppers.FoldInt[I]   (seed.asInstanceOf[Int],    f.asInstanceOf[(Int,    I) => Int])
+                       .asInstanceOf[RegStepper[I, S, Nothing]]
+    case _: Double => new RegSteppers.FoldDouble[I](seed.asInstanceOf[Double], f.asInstanceOf[(Double, I) => Double])
+                       .asInstanceOf[RegStepper[I, S, Nothing]]
+    case _         => RegSteppers.Fold[I, S](seed, f)(using rs)
+  }
+  runStepper[I, S, Any](stepper, inputs)
+}
+```
+
+For `S = Long`, the call site emits a `new FoldLong[I](seed, f)`
+directly; the step body is `regs.setLong(off.longs, f(regs.getLong(off.longs), i))`
+with no typeclass dispatch. The bench numbers above show this saves
+~50% over the legacy long-fold and ~12% over the register-but-erased
+lane.
+
+### Compile-time fusion seed
+
+`InlineFusion.fuse(lhs, rhs)` is an `inline def` that does an
+`inline match` over the static *shape* of its arguments:
+
+| Match | Compile-time rewrite |
+|-------|----------------------|
+| `Arr(f) >>> Arr(g)` | `Arr(g compose f)` |
+| `Arr(f) >>> rhs`    | `AndThen(Arr(f), rhs)` |
+| `lhs >>> Arr(g)`    | `AndThen(lhs, Arr(g))` |
+| default              | `AndThen(lhs, rhs)` |
+
+Two `Arr` nodes built through `InlineFusion.arrT` / `mapT`
+(`transparent inline` smart constructors that keep the narrow
+`FreeScan.Arr[I, O]` static type) collapse to a single `Arr` at the
+call site -- no runtime walk, no `tryFuse` pass, no `AndThen` node
+ever appears in the resulting value. `RegInterpSpec` proves it
+structurally: `fused.isInstanceOf[FreeScan.Arr[?, ?]]` is `true` for
+the chained case.
+
+This is the seed of the larger compile-time machinery: the next layer
+(match-type-driven `RegLayout` summation, named-leftover record
+accumulation in the `Out` type parameter, Flow-style typed builder)
+builds on the same `inline match` foundation.
 
 ## Building & testing
 

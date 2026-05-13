@@ -96,6 +96,59 @@ object RegInterpSpec extends ZIOSpecDefault {
       val right = Scan.map[Byte, Int](_ & 0x0f)
       val s     = left &&& right
       agree(s, (0 until 32).map(_.toByte))
+    },
+
+    test("RegSchema gives Long a long-slot layout (1 long, 0 objects)") {
+      val layout = RegSchema[Long].layout
+      assertTrue(layout == RegLayout(longs = 1, objects = 0))
+    },
+
+    test("RegSchema gives String an object-slot layout (0 longs, 1 object)") {
+      val layout = RegSchema[String].layout
+      assertTrue(layout == RegLayout(longs = 0, objects = 1))
+    },
+
+    test("RegInterp.runFoldUnboxed agrees with the legacy fold on Long state") {
+      val (sig, out) = RegInterp.runFoldUnboxed[Byte, Long](
+        seed = 0L,
+        f    = (n, _) => n + 1L,
+        inputs = (0 until 1024).map(_.toByte)
+      )
+      // Long-typed fold: leftover carries the final accumulator.
+      val (_, legacy) = Scan.runDirect[Byte, Long, Any](
+        Scan.fold[Byte, Long](0L)((n, _) => n + 1L),
+        (0 until 1024).map(_.toByte)
+      )
+      assertTrue(out == legacy)
+    },
+
+    test("InlineFusion.fuse collapses two Arr nodes into one Arr at compile time") {
+      // `arrT` / `mapT` keep the narrow `Arr` static type so the
+      // `inline match` inside `fuse` sees the case-class identity at
+      // the call site. With those, two `Arr`s collapse to one `Arr`.
+      val a = InlineFusion.arrT[Int, Int](_ + 1)
+      val b = InlineFusion.arrT[Int, Int](_ * 2)
+      val fused = InlineFusion.fuse(a, b)
+      val isSingleArr = fused match {
+        case _: FreeScan.Arr[?, ?] => true
+        case _                     => false
+      }
+      assertTrue(isSingleArr) &&
+        assertTrue {
+          val (_, out) = Scan.runDirect[Int, Int, Any](fused, Seq(10))
+          out == Vector((10 + 1) * 2)
+        }
+    },
+
+    test("InlineFusion.fuse falls back to AndThen for non-Arr right-hand side") {
+      val a = InlineFusion.arrT[Int, Int](_ + 1)
+      val flt: FreeScan[Int, Int] = Scan.filter[Int](_ > 0)
+      val fused = InlineFusion.fuse(a, flt)
+      val isAndThen = fused match {
+        case _: FreeScan.AndThen[?, ?, ?] => true
+        case _                            => false
+      }
+      assertTrue(isAndThen)
     }
   )
 }

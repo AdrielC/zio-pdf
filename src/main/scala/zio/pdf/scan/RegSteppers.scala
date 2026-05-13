@@ -139,24 +139,116 @@ private[scan] object RegSteppers {
 
   // ----- fold / hash --------------------------------------------------
 
-  /** Stateful fold. Emits nothing per input; the final accumulator is
-    * delivered as `leftover` of `Success`. The accumulator type `S`
-    * lives in the object slot (boxes primitive `S` but that's
-    * unavoidable for a generic fold; the closure-based version boxed
-    * the same way). */
-  final class Fold[I, S](seed: S, f: (S, I) => S) extends RegStepper[I, S, Nothing] {
-    val layout: RegLayout = RegLayout.obj
+  /** Stateful fold whose state lives in the registers via a
+    * `RegSchema[S]`. The whole point of going through `RegSchema` is
+    * that primitive `S` (e.g. `Long`, `Int`) round-trips through the
+    * long-slot array directly -- no `setObject(s.asInstanceOf[AnyRef])`
+    * per step, no `java.lang.Long` boxing, no GC pressure.
+    *
+    * Reference `S` falls back to the object-slot instance and behaves
+    * the same as the previous "always box" implementation.
+    *
+    * Matches the pattern `Reflect.Record` uses for record fields in
+    * zio-blocks-schema: the schema tells the stepper where its slot
+    * is and how to round-trip the value through it. */
+  final class Fold[I, S](seed: S, f: (S, I) => S, rs: RegSchema[S])
+      extends RegStepper[I, S, Nothing] {
+    val layout: RegLayout = rs.layout
     def init(regs: RegState, off: RegOff): Unit =
-      regs.setObject(off.objects, seed.asInstanceOf[AnyRef])
+      rs.write(regs, off, seed)
     def step(regs: RegState, off: RegOff, i: I, out: RegOutBuffer): Int = {
-      val s = regs.getObject(off.objects).asInstanceOf[S]
-      regs.setObject(off.objects, f(s, i).asInstanceOf[AnyRef])
+      val s = rs.read(regs, off)
+      rs.write(regs, off, f(s, i))
       RegSignal.Continue
     }
     def end(regs: RegState, off: RegOff, out: RegOutBuffer): Int =
       RegSignal.Success
     override def leftover(regs: RegState, off: RegOff): Seq[S] =
-      Seq(regs.getObject(off.objects).asInstanceOf[S])
+      Seq(rs.read(regs, off))
+  }
+
+  object Fold {
+    /** Default constructor: pick `RegSchema[S]` from the call site so
+      * primitive `S` is unboxed and reference `S` uses an object slot. */
+    inline def apply[I, S](seed: S, f: (S, I) => S)(using rs: RegSchema[S]): Fold[I, S] =
+      new Fold[I, S](seed, f, rs)
+
+    /** Erased-state escape hatch used by the interpreter when `S` is
+      * `Any` (the lowered primitive case). Falls back to one object
+      * slot, identical to the legacy behaviour. */
+    def erased[I, S](seed: S, f: (S, I) => S): Fold[I, S] =
+      new Fold[I, S](seed, f, RegSchema.erasedAnyInstance.asInstanceOf[RegSchema[S]])
+  }
+
+  // -------------------------------------------------------------------
+  // Specialized primitive folds.
+  //
+  // The polymorphic `Fold[I, S]` above goes through a `RegSchema[S]`
+  // dispatch on every step. The JIT does not see through that
+  // virtual call -- so even when `S = Long` and the long-slot
+  // instance is in scope, reads and writes still pay one indirect
+  // call per byte. JMH confirms: the polymorphic lane is no faster
+  // than the legacy object-slot fold.
+  //
+  // The specialized classes below are the cure: monomorphic step
+  // body, raw `regs.getLong` / `regs.setLong`, no typeclass on the
+  // hot path. They are picked at compile time by the inline factory
+  // `Fold.specialised`, which uses `inline match` over the
+  // accumulator type to emit the right specialised class at the
+  // call site. This is the same compile-time-decisioning shape ZIO
+  // Blocks gets from its `RegisterPos`-per-field layout: the layout
+  // is decided once, statically, and the running code is direct
+  // primitive operations on `regs.longs`.
+  // -------------------------------------------------------------------
+
+  final class FoldLong[I](seed: Long, f: (Long, I) => Long)
+      extends RegStepper[I, Long, Nothing] {
+    val layout: RegLayout = RegLayout.long
+    def init(regs: RegState, off: RegOff): Unit =
+      regs.setLong(off.longs, seed)
+    def step(regs: RegState, off: RegOff, i: I, out: RegOutBuffer): Int = {
+      regs.setLong(off.longs, f(regs.getLong(off.longs), i))
+      RegSignal.Continue
+    }
+    def end(regs: RegState, off: RegOff, out: RegOutBuffer): Int =
+      RegSignal.Success
+    override def leftover(regs: RegState, off: RegOff): Seq[Long] =
+      Seq(regs.getLong(off.longs))
+  }
+
+  final class FoldInt[I](seed: Int, f: (Int, I) => Int)
+      extends RegStepper[I, Int, Nothing] {
+    val layout: RegLayout = RegLayout.long
+    def init(regs: RegState, off: RegOff): Unit =
+      regs.setInt(off.longs, seed)
+    def step(regs: RegState, off: RegOff, i: I, out: RegOutBuffer): Int = {
+      regs.setInt(off.longs, f(regs.getInt(off.longs), i))
+      RegSignal.Continue
+    }
+    def end(regs: RegState, off: RegOff, out: RegOutBuffer): Int =
+      RegSignal.Success
+    override def leftover(regs: RegState, off: RegOff): Seq[Int] =
+      Seq(regs.getInt(off.longs))
+  }
+
+  final class FoldDouble[I](seed: Double, f: (Double, I) => Double)
+      extends RegStepper[I, Double, Nothing] {
+    val layout: RegLayout = RegLayout.long
+    def init(regs: RegState, off: RegOff): Unit =
+      regs.setLong(
+        off.longs,
+        java.lang.Double.doubleToRawLongBits(seed)
+      )
+    def step(regs: RegState, off: RegOff, i: I, out: RegOutBuffer): Int = {
+      val s    = java.lang.Double.longBitsToDouble(regs.getLong(off.longs))
+      val next = f(s, i)
+      regs.setLong(off.longs, java.lang.Double.doubleToRawLongBits(next))
+      RegSignal.Continue
+    }
+    def end(regs: RegState, off: RegOff, out: RegOutBuffer): Int =
+      RegSignal.Success
+    override def leftover(regs: RegState, off: RegOff): Seq[Double] =
+      Seq(java.lang.Double.longBitsToDouble(regs.getLong(off.longs)))
   }
 
   /** Bytes go into a `MessageDigest`; digest bytes are the leftover. */
