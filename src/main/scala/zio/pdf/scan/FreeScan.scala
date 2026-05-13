@@ -59,8 +59,30 @@ object FreeScan {
     // Category: identity, sequential composition
     // ===================================================================
 
-    /** Sequential composition. Read as "then". */
-    def >>>[P](right: FreeScan[O, P]): FreeScan[I, P] = AndThen(self, right)
+    /** Sequential composition. Read as "then".
+      *
+      * `inline` so the call site sees a compile-time `inline match`
+      * over the static shape of `self` and `right`: when both sides
+      * are `Arr`-shaped (which is what `Scan.map` / `Scan.arr` /
+      * `FreeScan.Arr(_)` return) the chain collapses to a single
+      * `Arr(g compose f)` at the call site. No runtime walk, no
+      * `tryFuse` pass, no `AndThen` ever in the value.
+      *
+      * For non-`Arr` operands we fall back to the runtime `AndThen`
+      * constructor exactly as before -- zero cost when the pattern
+      * doesn't match. */
+    transparent inline def >>>[P](inline right: FreeScan[O, P]): FreeScan[I, P] =
+      inline self match {
+        case lArr: FreeScan.Arr[I, O] =>
+          inline right match {
+            case rArr: FreeScan.Arr[O, P] =>
+              FreeScan.Arr[I, P]((i: I) => rArr.f(lArr.f(i)))
+            case _ =>
+              FreeScan.AndThen(self, right)
+          }
+        case _ =>
+          FreeScan.AndThen(self, right)
+      }
 
     /** Reverse sequential composition. `g <<< f === f >>> g`. */
     def <<<[H](pre: FreeScan[H, I]): FreeScan[H, O] = AndThen(pre, self)
