@@ -1,0 +1,91 @@
+# Nightly JMH benchmark run.
+#
+# Produces a bench-results artifact with raw JMH text output for each
+# suite.  The run is triggered nightly (02:00 UTC) and can also be
+# kicked off manually via workflow_dispatch.
+#
+# Results intentionally do NOT fail the build on regression — JMH
+# numbers on shared CI runners are noisy.  Use the artifact to spot
+# trends over time; pin thresholds once you have a stable baseline.
+name: Benchmarks
+
+on:
+  schedule:
+    # 02:00 UTC every day
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  jmh:
+    name: JMH benchmark suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: sbt
+
+      # ── Scan algebra (fused / unfused / scodec baseline) ────────────────
+      - name: ScanBench
+        run: >
+          sbt -batch
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*ScanBench.*"
+          2>&1 | tee bench-scan.txt
+
+      # ── StreamDecoder / PureDecoder / chunked fast path ─────────────────
+      - name: StreamDecoderBench
+        run: >
+          sbt -batch
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*StreamDecoderBench.*"
+          2>&1 | tee bench-stream-decoder.txt
+
+      # ── SPSC ring-buffer vs ArrayBlockingQueue ───────────────────────────
+      - name: RingBufferBench
+        run: >
+          sbt -batch
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*RingBufferBench.*"
+          2>&1 | tee bench-ringbuffer.txt
+
+      # ── Schema-derived scodec codec vs hand-rolled ───────────────────────
+      - name: ScodecDeriverBench
+        run: >
+          sbt -batch
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*ScodecDeriverBench.*"
+          2>&1 | tee bench-deriver.txt
+
+      # ── FastCDC throughput ───────────────────────────────────────────────
+      - name: FastCdcBench
+        run: >
+          sbt -batch
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm thrpt -tu s .*FastCdcBench.*"
+          2>&1 | tee bench-cdc.txt
+
+      # ── Head-to-head: ZIO StreamDecoder vs fs2 ───────────────────────────
+      - name: HeadToHeadBench (ZIO vs fs2 streaming)
+        run: >
+          sbt -batch
+          "benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*HeadToHeadBench.*"
+          2>&1 | tee bench-head-to-head.txt
+
+      # ── Real PDF top-level decode: ZIO vs fs2 ───────────────────────────
+      - name: PdfDecodeHeadToHeadBench
+        run: >
+          sbt -batch
+          "benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*PdfDecodeHeadToHead.*"
+          2>&1 | tee bench-pdf-head-to-head.txt
+
+      # ── Collect all results into one artifact ────────────────────────────
+      - name: Upload bench results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ github.run_id }}
+          path: bench-*.txt
+          retention-days: 90
