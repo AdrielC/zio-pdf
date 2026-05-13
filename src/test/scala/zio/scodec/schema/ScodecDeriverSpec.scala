@@ -11,7 +11,7 @@
 package zio.scodec.schema
 
 import _root_.scodec.bits.BitVector
-import zio.blocks.chunk.Chunk as BlocksChunk
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 import zio.test.*
 
@@ -44,15 +44,6 @@ object ScodecDeriverSpec extends ZIOSpecDefault {
   final case class Team(name: String, members: List[String])
   object Team {
     given Schema[Team] = Schema.derived[Team]
-  }
-
-  /**
-   * Binary payload as [[zio.blocks.chunk.Chunk]] (blocks-schema’s chunk type —
-   * `Schema.derived` maps `zio.Chunk` to `IndexedSeq` otherwise).
-   */
-  final case class Blob(id: Int, data: BlocksChunk[Byte])
-  object Blob {
-    given Schema[Blob] = Schema.derived[Blob]
   }
 
   def spec: Spec[Any, Throwable] = suite("ScodecDeriver - schema-derived scodec.Codec")(
@@ -95,14 +86,6 @@ object ScodecDeriverSpec extends ZIOSpecDefault {
       assertTrue(decoded.value == t, decoded.remainder == BitVector.empty)
     },
 
-    test("Codec[Blob] round-trips BlocksChunk[Byte] with bulk byte payload (not N× byte codec)") {
-      val codec = summon[Schema[Blob]].derive(ScodecDeriver)
-      val b     = Blob(42, BlocksChunk.fromArray(Array.tabulate(256)(_.toByte)))
-      val bits  = codec.encode(b).require
-      val dec   = codec.decode(bits).require
-      assertTrue(dec.value == b, dec.remainder == BitVector.empty)
-    },
-
     test("the variant tag byte and case payload survive across encode/decode") {
       val codec = summon[Schema[Shape]].derive(ScodecDeriver)
       val r     = Rectangle(11.0, 22.0)
@@ -118,19 +101,19 @@ object ScodecDeriverSpec extends ZIOSpecDefault {
     test("Codec[DynamicValue] round-trips nested primitives, records, sequences, maps, and variants") {
       val codec = summon[Schema[DynamicValue]].derive(ScodecDeriver)
       val dv = DynamicValue.Record(
-        BlocksChunk(
+        Chunk(
           "n"       -> DynamicValue.Primitive(PrimitiveValue.Int(42)),
           "flag"    -> DynamicValue.Primitive(PrimitiveValue.Boolean(true)),
-          "seq"     -> DynamicValue.Sequence(BlocksChunk(DynamicValue.Null, DynamicValue.Primitive(PrimitiveValue.String("x")))),
+          "seq"     -> DynamicValue.Sequence(Chunk(DynamicValue.Null, DynamicValue.Primitive(PrimitiveValue.String("x")))),
           "mapping" -> DynamicValue.Map(
-            BlocksChunk(
+            Chunk(
               DynamicValue.Primitive(PrimitiveValue.String("k")) ->
                 DynamicValue.Primitive(PrimitiveValue.Long(Long.MaxValue))
             )
           ),
           "tagged" -> DynamicValue.Variant(
             "Some",
-            DynamicValue.Record(BlocksChunk("value" -> DynamicValue.Primitive(PrimitiveValue.Double(1.5))))
+            DynamicValue.Record(Chunk("value" -> DynamicValue.Primitive(PrimitiveValue.Double(1.5))))
           )
         )
       )

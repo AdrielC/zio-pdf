@@ -4,11 +4,8 @@ val zioBlocksSchemaVersion     = "0.0.33"
 val zioBlocksRingbufferVersion = "0.0.32"
 val zioBlocksStreamsVersion    = "0.0.20"
 val zioBlocksScopeVersion      = "0.0.33"
-val zioBlocksMediatypeVersion  = "0.0.33"
-val zioHttpModelVersion        = "0.0.33"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
-/** Kyo effect system + bidirectional ZIO interop (same release line). */
 val kyoVersion                 = "1.0-RC1"
 
 ThisBuild / organization      := "com.springernature"
@@ -44,12 +41,13 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
       "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
       "dev.zio"   %% "zio-blocks-scope"      % zioBlocksScopeVersion,
-      "dev.zio"   %% "zio-blocks-mediatype"  % zioBlocksMediatypeVersion,
-      "dev.zio"   %% "zio-http-model"        % zioHttpModelVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
-      "io.getkyo" %% "kyo-core"               % kyoVersion,
-      "io.getkyo" %% "kyo-zio"                % kyoVersion,
+      "io.getkyo" %% "kyo-data"          % kyoVersion,
+      "io.getkyo" %% "kyo-kernel"        % kyoVersion,
+      "io.getkyo" %% "kyo-prelude"       % kyoVersion,
+      "io.getkyo" %% "kyo-core"          % kyoVersion,
+      "io.getkyo" %% "kyo-zio"           % kyoVersion,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt"      % zioVersion % Test
     ),
