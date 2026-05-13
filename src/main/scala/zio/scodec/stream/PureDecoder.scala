@@ -47,6 +47,10 @@ import zio.prelude.fx.ZPure
  * This means heavy stateful decoders (e.g. xref accumulation, PDF
  * trailer assembly) can be written and tested completely without a
  * `Runtime`, then dropped into the streaming pipeline at the end.
+ *
+ * For a tiny apples-to-apples feel of `ZPure` vs a raw `Attempt` decode on
+ * the same strict buffer, see `zio.pdf.ParsePerfBench` in tests (ASCII
+ * int-lines and PDF-ish `obj … R` lines).
  */
 final case class PureDecoder[+A](
   run: ZPure[A, BitVector, BitVector, Any, CodecError, PureDecoder.Status],
