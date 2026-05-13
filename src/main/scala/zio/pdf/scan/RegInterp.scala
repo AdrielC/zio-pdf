@@ -19,6 +19,17 @@
  *      different output protocol (tuple-of-outputs / Either-routing)
  *      and don't benefit from register state without a tuple-aware
  *      output buffer -- a follow-up.
+ *
+ * Schema-driven layout:
+ *
+ *   Direct callers that build a `RegSteppers.Fold[I, S]` themselves
+ *   (or use the `RegInterp.runFoldUnboxed` helper) get the layout
+ *   from `RegSchema[S]` -- primitive `S` lives in a long slot,
+ *   reference `S` in an object slot, *no boxing per step*. The
+ *   `FreeScan` AST erases `S` inside `ScanPrim.Fold`, so the lowering
+ *   path goes through the erased-object schema and matches the
+ *   legacy behaviour; the unboxed fast path is reachable from the
+ *   register API directly.
  */
 
 package zio.pdf.scan
@@ -26,6 +37,58 @@ package zio.pdf.scan
 import StepOut.StepOut
 
 object RegInterp {
+
+  /** Run a typed fold through the register lane, choosing a
+    * **specialised** stepper at compile time when the accumulator
+    * type is primitive. The selection is done by an `inline match` on
+    * `S`:
+    *
+    *   - `S = Long`   -> `RegSteppers.FoldLong[I]`   (long-slot, no box)
+    *   - `S = Int`    -> `RegSteppers.FoldInt[I]`    (long-slot, no box)
+    *   - `S = Double` -> `RegSteppers.FoldDouble[I]` (long-slot, no box)
+    *   - default      -> `RegSteppers.Fold[I, S]`    (object slot, falls
+    *                                                  back to the typeclass)
+    *
+    * This is the compile-time-decisioning entry point: the spec
+    * picks a monomorphic class for primitive `S` so the JIT sees
+    * direct `getLong`/`setLong` calls on the hot path, with no
+    * typeclass dispatch at all. */
+  inline def runFoldUnboxed[I, S](
+      seed:   S,
+      f:      (S, I) => S,
+      inputs: Iterable[I]
+  )(using rs: RegSchema[S]): (ScanDone[S, Any], Vector[S]) = {
+    import scala.compiletime.erasedValue
+    val stepper: RegStepper[I, S, Nothing] = inline erasedValue[S] match {
+      case _: Long   =>
+        new RegSteppers.FoldLong[I](
+          seed.asInstanceOf[Long],
+          f.asInstanceOf[(Long, I) => Long]
+        ).asInstanceOf[RegStepper[I, S, Nothing]]
+      case _: Int    =>
+        new RegSteppers.FoldInt[I](
+          seed.asInstanceOf[Int],
+          f.asInstanceOf[(Int, I) => Int]
+        ).asInstanceOf[RegStepper[I, S, Nothing]]
+      case _: Double =>
+        new RegSteppers.FoldDouble[I](
+          seed.asInstanceOf[Double],
+          f.asInstanceOf[(Double, I) => Double]
+        ).asInstanceOf[RegStepper[I, S, Nothing]]
+      case _         =>
+        RegSteppers.Fold[I, S](seed, f)(using rs)
+    }
+    runStepper[I, S, Any](stepper, inputs)
+  }
+
+  /** Drive an already-compiled `RegStepper` against an iterable. Public
+    * so callers that hand-roll a stepper (e.g. tests, benchmarks) can
+    * exercise the register lane without going through `FreeScan`. */
+  def runStepper[I, O, E](
+      stepper: RegStepper[I, O, E],
+      inputs:  Iterable[I]
+  ): (ScanDone[O, E], Vector[O]) =
+    runOnce[I, O, E](stepper, inputs)
 
   /** Run a `FreeScan` through the register-based stepper when possible.
     *
@@ -184,11 +247,18 @@ object RegInterp {
       Some(new RegSteppers.Drop[Any](n).asInstanceOf[RegStepper[Any, Any, Any]])
 
     case ScanPrim.Fold(seed, step) =>
+      // At this lowering boundary the static `S` has been erased, so
+      // pick the erased object-slot schema -- the legacy behaviour
+      // for a fully erased fold. Call sites that want primitive
+      // unboxing build the RegStepper directly via
+      // `RegSteppers.Fold(seed, step)` with `RegSchema[S]` in scope.
       Some(
-        new RegSteppers.Fold[Any, Any](
-          seed.asInstanceOf[Any],
-          step.asInstanceOf[(Any, Any) => Any]
-        ).asInstanceOf[RegStepper[Any, Any, Any]]
+        RegSteppers.Fold
+          .erased[Any, Any](
+            seed.asInstanceOf[Any],
+            step.asInstanceOf[(Any, Any) => Any]
+          )
+          .asInstanceOf[RegStepper[Any, Any, Any]]
       )
 
     case ScanPrim.Hash(algo) =>
