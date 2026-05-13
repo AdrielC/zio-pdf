@@ -1,27 +1,18 @@
 /*
- * Canonical PDF media type via zio-blocks [[MediaType]] and zio-http-model
- * [[ContentType]] (HTTP Content-Type header shape).
+ * Canonical PDF MIME / Content-Type strings (IANA `application/pdf`).
  *
- * `ContentType` lives in an `@experimental` module; this object is marked
- * accordingly so callers can opt in by referencing [[PdfMime]] from
- * experimental code or by enabling `-experimental` in their build.
+ * A richer integration with zio-blocks `MediaType` and zio-http `ContentType`
+ * can be added later behind explicit library dependencies once those modules
+ * are aligned on this project’s classpath.
  */
 
 package zio.pdf
 
-import scala.annotation.experimental
-
-import zio.blocks.mediatype.MediaTypes
-import zio.http.ContentType
-
-@experimental
 object PdfMime {
 
-  /** IANA type for Portable Document Format. */
-  val mediaType: zio.blocks.mediatype.MediaType =
-    MediaTypes.application.`pdf`
+  /** IANA media type for Portable Document Format. */
+  val mimeType: String = "application/pdf"
 
-  /** For headers / metadata that expect `ContentType` (media type + optional charset/boundary). */
-  val contentType: ContentType =
-    ContentType(mediaType)
+  /** Typical `Content-Type` header value for raw PDF bytes (no charset). */
+  val contentTypeHeader: String = "application/pdf"
 }
