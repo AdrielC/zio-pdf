@@ -122,33 +122,42 @@ object RegInterpSpec extends ZIOSpecDefault {
       assertTrue(out == legacy)
     },
 
-    test("InlineFusion.fuse collapses two Arr nodes into one Arr at compile time") {
-      // `arrT` / `mapT` keep the narrow `Arr` static type so the
-      // `inline match` inside `fuse` sees the case-class identity at
-      // the call site. With those, two `Arr`s collapse to one `Arr`.
-      val a = InlineFusion.arrT[Int, Int](_ + 1)
-      val b = InlineFusion.arrT[Int, Int](_ * 2)
-      val fused = InlineFusion.fuse(a, b)
+    test("Scan.map >>> Scan.map collapses to one Arr at compile time") {
+      // The default API: `Scan.map` is a `transparent inline def`
+      // returning the narrow `FreeScan.Arr` type, and `>>>` is a
+      // `transparent inline def` whose `inline match` recognises the
+      // `Arr >>> Arr` shape. Together: chained pure maps fold to one
+      // `Arr` at the call site, no `AndThen` in the result.
+      val fused = Scan.map[Int, Int](_ + 1) >>> Scan.map[Int, Int](_ * 2)
       val isSingleArr = fused match {
         case _: FreeScan.Arr[?, ?] => true
         case _                     => false
       }
       assertTrue(isSingleArr) &&
         assertTrue {
-          val (_, out) = Scan.runDirect[Int, Int, Any](fused, Seq(10))
+          val (_, out) = Scan.run[Int, Int, Any](fused, Seq(10))
           out == Vector((10 + 1) * 2)
         }
     },
 
-    test("InlineFusion.fuse falls back to AndThen for non-Arr right-hand side") {
-      val a = InlineFusion.arrT[Int, Int](_ + 1)
-      val flt: FreeScan[Int, Int] = Scan.filter[Int](_ > 0)
-      val fused = InlineFusion.fuse(a, flt)
+    test("Scan.map >>> non-Arr falls back to AndThen") {
+      val fused = Scan.map[Int, Int](_ + 1) >>> Scan.filter[Int](_ > 0)
       val isAndThen = fused match {
         case _: FreeScan.AndThen[?, ?, ?] => true
         case _                            => false
       }
       assertTrue(isAndThen)
+    },
+
+    test("InlineFusion.fuse is the function-position equivalent of >>>") {
+      val a = Scan.map[Int, Int](_ + 1)
+      val b = Scan.map[Int, Int](_ * 2)
+      val fused = InlineFusion.fuse(a, b)
+      val isSingleArr = fused match {
+        case _: FreeScan.Arr[?, ?] => true
+        case _                     => false
+      }
+      assertTrue(isSingleArr)
     }
   )
 }

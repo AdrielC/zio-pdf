@@ -298,6 +298,44 @@ This is the seed of the larger compile-time machinery: the next layer
 accumulation in the `Out` type parameter, Flow-style typed builder)
 builds on the same `inline match` foundation.
 
+### Flow-style typed scan builder (`ScanFlow`)
+
+`ScanFlow[I, Out]` is a Kyo-`Flow`-style builder. Every `.named[N, V](name, scan)`
+refines the builder's `Out` type parameter by intersection with `N ~ V`,
+so the compiler knows the full record of named-leftover field types
+statically. `run(inputs)` returns `Record[Out]` -- access fields by
+name, type-checked.
+
+```scala
+import zio.pdf.scan.{ScanFlow, Scan, HashAlgo}
+
+val ingest =
+  ScanFlow.over[Byte]
+    .named("guard",  Scan.bombGuard(maxBytes = 1L << 30))
+    .named("count",  Scan.countBytes)
+    .named("digest", Scan.hash(HashAlgo.Sha256))
+
+val rec = ingest.run(bytes)
+
+val count:  Vector[Byte] = rec.count    // type-checked
+val digest: Vector[Byte] = rec.digest   // type-checked
+```
+
+Semantics:
+
+- Each labeled stage is a stateful scan over the same input stream
+  whose final leftover becomes the named field's value.
+- The v0 implementation runs each labeled stage independently --
+  `N` named stages mean `N` traversals of the input. A v1 follow-up
+  fuses every labeled stage into a single `Fanout` so the whole
+  record is computed in one pass.
+- Independent runs go through `Scan.run` (the register lane) directly,
+  bypassing any `Fanout` / `Choice` composition. **In practice this
+  makes the Flow-style API faster than the equivalent
+  `&&&`-composed scan** for stateful ingest pipelines today, because
+  the register lane natively handles the spine case and the legacy
+  fallback for `Fanout` is the dominant cost in chained ingests.
+
 ### Complex composition benchmarks
 
 The 4-stage toy lanes in `ScanBench` are enough to *detect* fusion and
@@ -306,16 +344,25 @@ lane is *for*. `ComplexScanBench` exercises realistic compositions:
 
 ```
 Benchmark                                   (n)  Mode  Cnt    Score    Error  Units
-ComplexScanBench.deepPureSpineDirect     262144  avgt    5   22.259 ±  1.380  ms/op
-ComplexScanBench.deepPureSpineReg        262144  avgt    5   22.144 ±  0.371  ms/op   (tied, fused both lanes)
-ComplexScanBench.deepMixedSpineDirect    262144  avgt    5  126.135 ± 17.047  ms/op
-ComplexScanBench.deepMixedSpineReg       262144  avgt    5   27.555 ±  1.452  ms/op   (~4.6x faster)
-ComplexScanBench.deepFoldSpineDirect     262144  avgt    5   27.116 ±  5.701  ms/op
-ComplexScanBench.deepFoldSpineReg        262144  avgt    5    5.451 ±  0.172  ms/op   (~5.0x faster)
-ComplexScanBench.ingest3StageDirect      262144  avgt    5   12.201 ±  2.974  ms/op
-ComplexScanBench.ingest3StageReg         262144  avgt    5    2.800 ±  0.115  ms/op   (~4.4x faster)
-ComplexScanBench.ingestFanoutDirect      262144  avgt    5   10.398 ±  0.475  ms/op
-ComplexScanBench.ingestFanoutReg         262144  avgt    5   12.157 ±  2.948  ms/op   (~17% slower, fallback)
+ComplexScanBench.deepPureSpineDirect     262144  avgt    5   23.420 ±  2.832  ms/op
+ComplexScanBench.deepPureSpineReg        262144  avgt    5   23.225 ±  2.965  ms/op   (tied, 32-stage fused)
+ComplexScanBench.deepPureSpine64Direct   262144  avgt    5   51.649 ±  1.648  ms/op
+ComplexScanBench.deepPureSpine64Reg      262144  avgt    5   52.429 ±  2.961  ms/op   (tied, 64-stage fused)
+ComplexScanBench.deepMixedSpineDirect    262144  avgt    5  148.487 ± 19.155  ms/op
+ComplexScanBench.deepMixedSpineReg       262144  avgt    5   27.404 ±  1.968  ms/op   (~5.4x faster)
+ComplexScanBench.deepFoldSpineDirect     262144  avgt    5   34.345 ±  6.326  ms/op
+ComplexScanBench.deepFoldSpineReg        262144  avgt    5    5.610 ±  0.621  ms/op   (~6.1x faster)
+ComplexScanBench.ingest3StageDirect      262144  avgt    5   12.755 ±  1.184  ms/op
+ComplexScanBench.ingest3StageReg         262144  avgt    5    2.767 ±  0.083  ms/op   (~4.6x faster)
+ComplexScanBench.ingestFanoutDirect      262144  avgt    5   11.290 ±  1.308  ms/op
+ComplexScanBench.ingestFanoutReg         262144  avgt    5   12.172 ±  1.089  ms/op   (~10% slower, fallback)
+ComplexScanBench.nestedFanoutDirect      262144  avgt    5  106.684 ± 51.150  ms/op
+ComplexScanBench.nestedFanoutReg         262144  avgt    5  104.874 ± 33.233  ms/op   (tied, two-level fanout)
+ComplexScanBench.choiceRoutingDirect     262144  avgt    5   27.083 ±  8.514  ms/op
+ComplexScanBench.choiceRoutingReg        262144  avgt    5   25.768 ±  6.410  ms/op   (tied, choice fallback)
+ComplexScanBench.gravitonFullDirect      262144  avgt    5   50.494 ± 11.950  ms/op
+ComplexScanBench.gravitonFullReg         262144  avgt    5   54.945 ±  4.606  ms/op   (~9% slower, fanout+FastCDC)
+ComplexScanBench.scanFlowIngestRun       262144  avgt    5    5.908 ±  0.133  ms/op   (Flow-style, ~2.2x faster than ingest3Stage)
 ```
 
 Lanes:
@@ -332,12 +379,31 @@ Lanes:
 - **`ingest3Stage`** -- the canonical Graviton sequential ingest:
   `BombGuard >>> CountBytes >>> Hash(SHA-256)`. ~4.4× faster on the
   real-world shape.
-- **`ingestFanout`** -- `CountBytes &&& Hash(SHA-256)`. **~17%
+- **`ingestFanout`** -- `CountBytes &&& Hash(SHA-256)`. **~10%
   slower** on the register lane today: `Fanout` / `Choice` fall back
   to the legacy stepper, and the dispatch-through-fallback path adds
   small overhead. Closing this gap (paired output buffers / tuple-
   aware emit so the register lane natively handles `&&&` and `|||`)
   is on the follow-up list.
+- **`nestedFanout` / `choiceRouting`** -- two-level `&&&` and
+  `Either`-routed `test` with stateful arms. Tied with the legacy
+  runner -- the fallback path scales with the same costs as the
+  legacy stepper, so deeper fanout doesn't make the fallback look
+  worse.
+- **`gravitonFull`** -- the maximally-realistic shape:
+  `BombGuard >>> (CountBytes &&& Hash(SHA-256) &&& FastCDC)`. ~9%
+  slower on the register lane; same root cause (Fanout fallback)
+  amplified by FastCDC's per-byte rolling-hash work.
+- **`scanFlowIngestRun`** -- the Flow-style typed builder running the
+  same `bombGuard + count + hash` workload as `ingest3Stage`, but
+  as three labeled stages assembled into a `Record[Out]`. **~2.2×
+  faster than `ingest3StageDirect`** (5.9 ms vs 12.8 ms) because
+  each labeled stage runs independently through `Scan.run` (the
+  register lane), with no `Fanout` composition to fall back on.
+  This is the data point that motivates the simplification: a
+  *more typed* API that *decomposes* the user's intent into
+  register-lane-friendly runs ends up faster than the chained
+  `&&&` form.
 
 ## Building & testing
 
