@@ -779,13 +779,12 @@ pipeline is now ported:
 | `zio.pdf.Pdf / AssemblePdf / ValidatedPdf / AssemblyError` | ✅ ported |
 | `zio.pdf.ValidatePdf / ComparePdfs / PdfError / CompareError` | ✅ ported, 3 tests |
 | `zio.pdf.PdfStream` (top-level façade: `bits / topLevel / decode / elements / transformElements / validate / compare`) | ✅ ported |
-| `Pdf.objectNumbers / pageNumber / streamsOfPage / dictOfPage` (read-only convenience pipes) | ⏳ remaining |
-| `WriteLinearized` / `Tiff` (specialised image emitters) | ⏳ remaining |
-| Image-test helpers (the legacy `Jar` / `ProcessJarPdf` / `WriteFile`) | ⏳ remaining |
+| `zio.pdf.Pdf.objectNumbers` / `pageNumber` / `streamsOfPage` / `dictOfPage` (+ raw/stream variants) | ✅ ported (`ZStream` / `ZPipeline`) |
+| `zio.pdf.WriteLinearized` (first-page xref + linearization dict helpers) + `zio.pdf.Tiff` | ✅ ported — full linearized **file** layout: `WriteLinearized.encodeLinearizedPrefix` then `WritePdf.parts` on the tail (see `WriteLinearized` source doc) |
+| Image-test helpers: `zio.pdf.testkit.{Jar, ProcessJarPdf, WriteFile}` | ✅ ported (under `src/test`) |
 
-The remaining items are convenience helpers and specialised image
-emitters, not foundational architecture. The new layout uses ZIO's
-`ZStream` / `ZPipeline` / `ZChannel` throughout; `cats.effect.IO`,
+Those convenience helpers now sit beside the core stack. The layout
+uses ZIO's `ZStream` / `ZPipeline` / `ZChannel` throughout; `cats.effect.IO`,
 `fs2.Pull`, `cats.data.NonEmptyList`, `cats.data.Validated`, and
 `shapeless.HList` are completely gone from the production code.
 

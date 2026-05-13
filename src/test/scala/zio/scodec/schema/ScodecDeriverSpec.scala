@@ -12,7 +12,7 @@ package zio.scodec.schema
 
 import _root_.scodec.bits.BitVector
 import zio.blocks.chunk.Chunk as BlocksChunk
-import zio.blocks.schema.Schema
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 import zio.test.*
 
 object ScodecDeriverSpec extends ZIOSpecDefault {
@@ -113,6 +113,30 @@ object ScodecDeriverSpec extends ZIOSpecDefault {
         bits.size == 17L * 8L,
         codec.decode(bits).require.value == r
       )
+    },
+
+    test("Codec[DynamicValue] round-trips nested primitives, records, sequences, maps, and variants") {
+      val codec = summon[Schema[DynamicValue]].derive(ScodecDeriver)
+      val dv = DynamicValue.Record(
+        BlocksChunk(
+          "n"       -> DynamicValue.Primitive(PrimitiveValue.Int(42)),
+          "flag"    -> DynamicValue.Primitive(PrimitiveValue.Boolean(true)),
+          "seq"     -> DynamicValue.Sequence(BlocksChunk(DynamicValue.Null, DynamicValue.Primitive(PrimitiveValue.String("x")))),
+          "mapping" -> DynamicValue.Map(
+            BlocksChunk(
+              DynamicValue.Primitive(PrimitiveValue.String("k")) ->
+                DynamicValue.Primitive(PrimitiveValue.Long(Long.MaxValue))
+            )
+          ),
+          "tagged" -> DynamicValue.Variant(
+            "Some",
+            DynamicValue.Record(BlocksChunk("value" -> DynamicValue.Primitive(PrimitiveValue.Double(1.5))))
+          )
+        )
+      )
+      val bits  = codec.encode(dv).require
+      val round = codec.decode(bits).require
+      assertTrue(round.value == dv, round.remainder == BitVector.empty)
     }
   )
 }
