@@ -7,35 +7,10 @@
 package zio.pdf
 
 import _root_.scodec.bits.BitVector
-import zio.Chunk
+import zio.{Chunk, ZIO}
 import zio.stream.{ZPipeline, ZStream}
 
-/**
- * The main API for this library provides ZIO `ZPipeline`s for
- * decoding PDF streams. The encoder side (`write`, `transformElements`,
- * `validate`, `compare`) will land in a follow-up.
- */
 object PdfStream {
-
-  /**
-   * Which PDF decode pipeline to run on raw bytes. Both modes apply
-   * the same duplicate-object filtering as the legacy decoder; they
-   * differ only in how content-stream payloads are represented.
-   *
-   *  - [[DecodeMode.Materialized]] — each stream is decoded (and for
-   *    non-ObjStm objects, lazily decompressed) into [[Decoded]].
-   *    Convenient for [[elements]] and typical PDFs; peak memory is
-   *    bounded by the largest single object's payload.
-   *  - [[DecodeMode.Streaming]] — SAX-style [[StreamingDecoded]] events;
-   *    payload bytes are forwarded in chunks. Use for very large
-   *    embedded streams when you want memory bounded by upstream chunk
-   *    size.
-   */
-  sealed trait DecodeMode
-  object DecodeMode {
-    case object Materialized extends DecodeMode
-    case object Streaming extends DecodeMode
-  }
 
   /**
    * Rechunk byte input into ~10 MiB BitVector chunks. Crucial for
@@ -62,40 +37,77 @@ object PdfStream {
     )
 
   /**
-   * Decode the data layer: data objects (without stream), content
-   * objects (with stream and lazy uncompression), and metadata
-   * (`Decoded.Meta`) consisting of accumulated xrefs, the
-   * sanitised trailer, and the version. Equivalent to the legacy
-   * `PdfStream.decode`.
-   *
-   * Peak memory is bounded by *the largest single content stream*
-   * because each `Decoded.ContentObj` carries the full payload as
-   * a `BitVector`. For PDFs with multi-MB attachments / images /
-   * fonts use [[decode]] with [[DecodeMode.Streaming]] instead.
+   * Decode to [[Decoded]]: streaming parse (memory-bounded for large
+   * streams) plus expansion of each content stream via
+   * [[Decode.expandStreamPayload]] (ObjStm, XRef stream metadata,
+   * lazy decompression). Small streams (length <=
+   * `config.inlineMaxBytes`) are buffered once as
+   * [[StreamingDecoded.ContentObjStart]].inlinePayload; larger
+   * streams use chunked bytes on the wire before expansion.
    */
-  def decode(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Decoded] =
-    decode(log, DecodeMode.Materialized)
+  def decode(
+    log: Log = Log.noop,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZPipeline[Any, Throwable, Byte, Decoded] =
+    StreamingDecode.pipeline(log, config) >>> DecodedFromStreaming.pipeline
 
-  /** @see [[DecodeMode]] */
-  def decode(log: Log, mode: DecodeMode.Materialized.type): ZPipeline[Any, Throwable, Byte, Decoded] =
-    Decode(log)
+  /**
+   * One synchronous byte-chunk step for [[decode]]: same semantics as
+   * `bytes.via(decode(...))` but without building a [[ZStream]]. Intended
+   * for drivers that must keep the [[java.io.InputStream]] inside a
+   * zio-blocks-scope `$` block.
+   */
+  def decodeSyncStep(
+    config: StreamingDecode.Config
+  )(
+    decodeAcc: DecodedFromStreaming.Acc,
+    streamingFs: StreamingDecode.FinalState,
+    chunk: Chunk[Byte]
+  ): Either[Throwable, (Chunk[Decoded], DecodedFromStreaming.Acc, StreamingDecode.FinalState)] = {
+    val (evs, fs1) = StreamingDecode.stepChunk(config, streamingFs, chunk)
+    if (evs.isEmpty) Right((Chunk.empty, decodeAcc, fs1))
+    else
+      DecodedFromStreaming.foldChunk(decodeAcc, evs) match {
+        case (_, Left(err))       => Left(err)
+        case (decoded, Right(acc)) => Right((decoded, acc, fs1))
+      }
+  }
 
-  /** @see [[DecodeMode]] */
-  def decode(log: Log, mode: DecodeMode.Streaming.type): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    StreamingDecode.pipeline(log)
-
-  def decode(log: Log, mode: DecodeMode): ZPipeline[Any, Throwable, Byte, Decoded | StreamingDecoded] =
-    mode match {
-      case DecodeMode.Materialized => Decode(log)
-      case DecodeMode.Streaming    => StreamingDecode.pipeline(log)
+  /**
+   * After the last byte chunk, append trailing [[StreamingDecoded.Meta]]
+   * through the decode bridge (same order as the [[decode]] pipeline).
+   */
+  def decodeSyncFinish(
+    log: Log
+  )(decodeAcc: DecodedFromStreaming.Acc, streamingFs: StreamingDecode.FinalState): ZIO[Any, Throwable, Chunk[Decoded]] =
+    StreamingDecode.finalizeToMeta(log, streamingFs).flatMap { metaChunk =>
+      val (d0, r0) = DecodedFromStreaming.foldChunk(decodeAcc, metaChunk)
+      r0 match {
+        case Left(err) => ZIO.fail(err)
+        case Right(acc1) =>
+          DecodedFromStreaming.finalizeAcc(acc1) match {
+            case Left(err)   => ZIO.fail(err)
+            case Right(rest) => ZIO.succeed(d0 ++ rest)
+          }
+      }
     }
 
   /**
-   * Memory-bounded SAX-style decoder. Same as
-   * `decode(Log.noop, DecodeMode.Streaming)`.
+   * Raw streaming events only (no ObjStm / XRef expansion). Prefer
+   * [[decode]] when you need [[elements]], [[validate]], or
+   * [[compare]].
+   *
+   * Returns a **new** pipeline on each call so duplicate-filter state
+   * is not shared across streams (a shared `val` would reuse one
+   * mutable [[DuplicateFilterState]] and break subsequent runs).
+   * Call with empty parentheses: `streamingDecode()` — a bare
+   * reference eta-expands to a function type in `.via(...)`.
    */
-  val streamingDecode: ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    StreamingDecode.pipeline(Log.noop)
+  def streamingDecode(
+    log: Log = Log.noop,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
+    StreamingDecode.pipeline(log, config)
 
   /**
    * Decode the high-level Element layer: Page / Pages / Image /
@@ -103,6 +115,34 @@ object PdfStream {
    */
   def elements(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Element] =
     decode(log) >>> Elements.pipe
+
+  /**
+   * Process decoded PDF attachment payloads (and any other stream objects) in a
+   * single pass: `flatMap` runs only on [[Element.Content]]; [[Element.Data]] /
+   * [[Element.Meta]] are re-emitted unchanged.
+   *
+   * Example — hash each `/Type /EmbeddedFile` stream without materialising the
+   * whole PDF:
+   *
+   * {{{
+   *   bytes.via(PdfStream.elements()).flatMap {
+   *     case c @ Element.Content(_, _, stream, Element.ContentKind.EmbeddedFileStream(_)) =>
+   *       ZStream.fromZIO(
+   *         stream.value.map(bits => java.security.MessageDigest.getInstance("SHA-256").digest(bits.toByteArray))
+   *       ).as(c)
+   *     case other => ZStream.succeed(other)
+   *   }
+   * }}}
+   */
+  def mapContentElements[R](
+    f: Element.Content => ZStream[R, Throwable, Element]
+  ): ZPipeline[R, Throwable, Element, Element] =
+    ZPipeline.mapChunksZIO { chunk =>
+      ZIO.foreach(chunk) {
+        case c: Element.Content => f(c).runCollect
+        case e                    => ZIO.succeed(Chunk.single(e))
+      }.map(_.flatten)
+    }
 
   /**
    * After Part-shaping by a transformation, encode back to bytes

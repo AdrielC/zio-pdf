@@ -111,7 +111,7 @@ object PureDecoderSpec extends ZIOSpecDefault {
       test("many drains the entire buffer and signals NeedMore at the end") {
         val bits          = (0 until 5).map(i => uint8.encode(i).require).reduce(_ ++ _)
         val pd            = PureDecoder.many(uint8)
-        val (log, result) = pd.run.runAll(bits)
+        val (log, result) = pd.runAllNormalized(bits)
         assertTrue(
           log == Chunk(0, 1, 2, 3, 4),
           result == Right((BitVector.empty, PureDecoder.Status.NeedMore))

@@ -5,11 +5,21 @@
 
 package zio.pdf.cdc
 
+import kyo.{AllowUnsafe, Sync}
 import zio.*
 import zio.stream.*
 import zio.test.*
 
 object FastCdcSpec extends ZIOSpecDefault {
+
+  private def kyoChunkAll(
+    bytes: Array[Byte],
+    rechunkSize: Int,
+    cfg: FastCdc.Config = FastCdc.defaultConfig
+  ): Chunk[Chunk[Byte]] = {
+    given AllowUnsafe = AllowUnsafe.embrace.danger
+    Sync.Unsafe.evalOrThrow(FastCdcKyo.runCollect(Chunk.fromArray(bytes), rechunkSize, cfg))
+  }
 
   // ---------------------------------------------------------------
   // Helpers
@@ -115,6 +125,16 @@ object FastCdcSpec extends ZIOSpecDefault {
         whole.map(hashOf) == midSz.map(hashOf),
         whole.map(hashOf) == oneByte.map(hashOf)
       )
+    },
+
+    test("FastCdcKyo (Kyo Emit) matches ZPipeline CDC chunk hashes") {
+      val bytes = payload(10L, 1 << 18) // 256 KiB
+      for {
+        zioOut <- chunkAll(bytes, rechunkSize = 8 * 1024)
+      } yield {
+        val kyoOut = kyoChunkAll(bytes, rechunkSize = 8 * 1024)
+        assertTrue(zioOut.map(hashOf) == kyoOut.map(hashOf))
+      }
     },
 
     test("a 1-byte insertion early in the stream perturbs only a small number of CDC chunks (dedup property)") {

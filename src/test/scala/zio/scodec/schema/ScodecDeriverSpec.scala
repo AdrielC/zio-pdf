@@ -11,6 +11,7 @@
 package zio.scodec.schema
 
 import _root_.scodec.bits.BitVector
+import zio.blocks.chunk.Chunk as BlocksChunk
 import zio.blocks.schema.Schema
 import zio.test.*
 
@@ -43,6 +44,15 @@ object ScodecDeriverSpec extends ZIOSpecDefault {
   final case class Team(name: String, members: List[String])
   object Team {
     given Schema[Team] = Schema.derived[Team]
+  }
+
+  /**
+   * Binary payload as [[zio.blocks.chunk.Chunk]] (blocks-schema’s chunk type —
+   * `Schema.derived` maps `zio.Chunk` to `IndexedSeq` otherwise).
+   */
+  final case class Blob(id: Int, data: BlocksChunk[Byte])
+  object Blob {
+    given Schema[Blob] = Schema.derived[Blob]
   }
 
   def spec: Spec[Any, Throwable] = suite("ScodecDeriver - schema-derived scodec.Codec")(
@@ -83,6 +93,14 @@ object ScodecDeriverSpec extends ZIOSpecDefault {
       val encoded = codec.encode(t).require
       val decoded = codec.decode(encoded).require
       assertTrue(decoded.value == t, decoded.remainder == BitVector.empty)
+    },
+
+    test("Codec[Blob] round-trips BlocksChunk[Byte] with bulk byte payload (not N× byte codec)") {
+      val codec = summon[Schema[Blob]].derive(ScodecDeriver)
+      val b     = Blob(42, BlocksChunk.fromArray(Array.tabulate(256)(_.toByte)))
+      val bits  = codec.encode(b).require
+      val dec   = codec.decode(bits).require
+      assertTrue(dec.value == b, dec.remainder == BitVector.empty)
     },
 
     test("the variant tag byte and case payload survive across encode/decode") {

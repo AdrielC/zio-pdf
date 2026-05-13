@@ -20,7 +20,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: sbt
+
+      # GitHub-hosted runners do not include `sbt` on PATH; coursier provides it.
+      - name: Setup coursier (sbt)
+        uses: coursier/setup-action@v1
+        with:
+          apps: sbt
+
+      - name: Coursier cache
+        uses: coursier/cache-action@v6
 
       - name: Run tests
         run: sbt -batch test
