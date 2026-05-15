@@ -21,13 +21,16 @@ import _root_.scodec.{Attempt, Codec, DecodeResult, Err, SizeBound}
 import _root_.scodec.bits.BitVector
 import _root_.scodec.codecs.*
 
+import java.time.*
+import java.util.Currency
+import scala.util.{Failure, Success, Try}
+
+import zio.blocks.chunk.ChunkBuilder
 import zio.blocks.docs.Doc
-import zio.blocks.schema.{DynamicValue, Lazy, Modifier, PrimitiveType, Reflect, Term}
+import zio.blocks.schema.{DynamicValue, Lazy, Modifier, PrimitiveType, PrimitiveValue, Reflect, Term}
 import zio.blocks.schema.binding.{Binding, HasBinding, RegisterOffset, Registers}
 import zio.blocks.schema.derive.{Deriver, HasInstance as SchemaHasInstance}
 import zio.blocks.typeid.TypeId
-
-import scala.reflect.ClassTag
 
 /**
  * `Deriver[Codec]` over the structural patterns from zio-blocks-schema.
@@ -42,17 +45,323 @@ import scala.reflect.ClassTag
  *   - Variant: write a `uint8` discriminator tag, then the matching
  *     case codec.
  *   - Wrapper: encode by `unwrap`, decode by `wrap`.
- *   - Sequence: `int32` length + repeated `elementCodec`; when the element
- *     is `Byte`, the payload is a single raw byte run (`BitVector.view`)
- *     instead of N separate `byte` decodes (large win for blobs). For a
- *     chunk-shaped field prefer `zio.blocks.chunk.Chunk` in the record —
- *     `Schema.derived` treats `zio.Chunk` as `IndexedSeq` unless you wire
- *     an explicit `Schema.chunk` / blocks chunk type.
+ *   - Sequence: `listOfN(int32, elementCodec)`.
  *   - Map: length-prefixed list of `(K, V)` pairs.
- *   - Dynamic: not implemented in this prototype - calling the
- *     derived codec for a `DynamicValue` will fail at decode time.
+ *   - Dynamic: recursive wire format for [[DynamicValue]] (tagged tree
+ *     aligned with [[zio.blocks.schema.DynamicValueType]] indices, with
+ *     [[PrimitiveValue.typeIndex]] as the inner primitive discriminator).
  */
 object ScodecDeriver extends Deriver[Codec] {
+
+  private lazy val dynamicValueCodec: Codec[DynamicValue] = Codec.lazily(mkDynamicValueCodec)
+
+  private def mkDynamicValueCodec: Codec[DynamicValue] = new Codec[DynamicValue] {
+    def sizeBound: SizeBound = SizeBound.unknown
+
+    def encode(value: DynamicValue): Attempt[BitVector] =
+      uint8.encode(value.typeIndex).flatMap { tagBits =>
+        value match {
+          case DynamicValue.Null =>
+            Attempt.successful(tagBits)
+
+          case p: DynamicValue.Primitive =>
+            primitiveValueCodec.encode(p.value).map(tagBits ++ _)
+
+          case r: DynamicValue.Record =>
+            val n = r.fields.length
+            int32.encode(n).flatMap { lenBits =>
+              val init = tagBits ++ lenBits
+              r.fields.foldLeft[Attempt[BitVector]](Attempt.successful(init)) {
+                case (Attempt.Successful(acc), (k, v)) =>
+                  utf8_32.encode(k).flatMap(kb =>
+                    dynamicValueCodec.encode(v).map(acc ++ kb ++ _)
+                  )
+                case (f @ Attempt.Failure(_), _) => f
+              }
+            }
+
+          case v: DynamicValue.Variant =>
+            utf8_32.encode(v.caseNameValue).flatMap { kb =>
+              dynamicValueCodec.encode(v.value).map(tagBits ++ kb ++ _)
+            }
+
+          case s: DynamicValue.Sequence =>
+            val n = s.elements.length
+            int32.encode(n).flatMap { lenBits =>
+              val init = tagBits ++ lenBits
+              s.elements.foldLeft[Attempt[BitVector]](Attempt.successful(init)) {
+                case (Attempt.Successful(acc), elem) =>
+                  dynamicValueCodec.encode(elem).map(acc ++ _)
+                case (f @ Attempt.Failure(_), _) => f
+              }
+            }
+
+          case m: DynamicValue.Map =>
+            val n = m.entries.length
+            int32.encode(n).flatMap { lenBits =>
+              val init = tagBits ++ lenBits
+              m.entries.foldLeft[Attempt[BitVector]](Attempt.successful(init)) {
+                case (Attempt.Successful(acc), (k, v)) =>
+                  dynamicValueCodec.encode(k).flatMap(kb =>
+                    dynamicValueCodec.encode(v).map(acc ++ kb ++ _)
+                  )
+                case (f @ Attempt.Failure(_), _) => f
+              }
+            }
+        }
+      }
+
+    def decode(bits: BitVector): Attempt[DecodeResult[DynamicValue]] =
+      uint8.decode(bits) match {
+        case Attempt.Successful(DecodeResult(tag, rest0)) =>
+          tag match {
+            case 5 =>
+              Attempt.successful(DecodeResult(DynamicValue.Null, rest0))
+
+            case 0 =>
+              primitiveValueCodec.decode(rest0).map { case DecodeResult(pv, rem) =>
+                DecodeResult(DynamicValue.Primitive(pv), rem)
+              }
+
+            case 1 =>
+              int32.decode(rest0).flatMap { case DecodeResult(n, rest1) =>
+                if (n < 0)
+                  Attempt.failure(Err(s"ScodecDeriver: DynamicValue.Record negative field count $n"))
+                else {
+                  val b = ChunkBuilder.make[(String, DynamicValue)]()
+                  def loop(i: Int, rem: BitVector): Attempt[DecodeResult[DynamicValue]] =
+                    if (i == n) Attempt.successful(DecodeResult(DynamicValue.Record(b.result()), rem))
+                    else
+                      utf8_32.decode(rem).flatMap { case DecodeResult(k, r1) =>
+                        dynamicValueCodec.decode(r1).flatMap { case DecodeResult(v, r2) =>
+                          b += ((k, v))
+                          loop(i + 1, r2)
+                        }
+                      }
+                  loop(0, rest1)
+                }
+              }
+
+            case 2 =>
+              utf8_32.decode(rest0) match {
+                case Attempt.Successful(DecodeResult(name, r1)) =>
+                  dynamicValueCodec.decode(r1) match {
+                    case Attempt.Successful(DecodeResult(inner, r2)) =>
+                      Attempt.successful(DecodeResult(DynamicValue.Variant(name, inner), r2))
+                    case f @ Attempt.Failure(_) => f
+                  }
+                case f @ Attempt.Failure(_) => f
+              }
+
+            case 3 =>
+              int32.decode(rest0).flatMap { case DecodeResult(n, rest1) =>
+                if (n < 0)
+                  Attempt.failure(Err(s"ScodecDeriver: DynamicValue.Sequence negative length $n"))
+                else {
+                  val b = ChunkBuilder.make[DynamicValue]()
+                  def loop(i: Int, rem: BitVector): Attempt[DecodeResult[DynamicValue]] =
+                    if (i == n) Attempt.successful(DecodeResult(DynamicValue.Sequence(b.result()), rem))
+                    else
+                      dynamicValueCodec.decode(rem).flatMap { case DecodeResult(v, r) =>
+                        b += v
+                        loop(i + 1, r)
+                      }
+                  loop(0, rest1)
+                }
+              }
+
+            case 4 =>
+              int32.decode(rest0).flatMap { case DecodeResult(n, rest1) =>
+                if (n < 0)
+                  Attempt.failure(Err(s"ScodecDeriver: DynamicValue.Map negative entry count $n"))
+                else {
+                  val b = ChunkBuilder.make[(DynamicValue, DynamicValue)]()
+                  def loop(i: Int, rem: BitVector): Attempt[DecodeResult[DynamicValue]] =
+                    if (i == n) Attempt.successful(DecodeResult(DynamicValue.Map(b.result()), rem))
+                    else
+                      dynamicValueCodec.decode(rem).flatMap { case DecodeResult(k, r1) =>
+                        dynamicValueCodec.decode(r1).flatMap { case DecodeResult(v, r2) =>
+                          b += ((k, v))
+                          loop(i + 1, r2)
+                        }
+                      }
+                  loop(0, rest1)
+                }
+              }
+
+            case other =>
+              Attempt.failure(Err(s"ScodecDeriver: unknown DynamicValue tag $other"))
+          }
+        case f @ Attempt.Failure(_) => f
+      }
+  }
+
+  private val primitiveValueCodec: Codec[PrimitiveValue] = new Codec[PrimitiveValue] {
+    def sizeBound: SizeBound = SizeBound.unknown
+
+    def encode(pv: PrimitiveValue): Attempt[BitVector] =
+      uint8.encode(pv.typeIndex).flatMap { tagBits =>
+        val body: Attempt[BitVector] = pv match {
+          case PrimitiveValue.Unit =>
+            Attempt.successful(BitVector.empty)
+          case v: PrimitiveValue.Boolean =>
+            bool(8).encode(v.value)
+          case v: PrimitiveValue.Byte =>
+            byte.encode(v.value)
+          case v: PrimitiveValue.Short =>
+            short16.encode(v.value)
+          case v: PrimitiveValue.Int =>
+            int32.encode(v.value)
+          case v: PrimitiveValue.Long =>
+            int64.encode(v.value)
+          case v: PrimitiveValue.Float =>
+            float.encode(v.value)
+          case v: PrimitiveValue.Double =>
+            double.encode(v.value)
+          case v: PrimitiveValue.Char =>
+            uint16.encode(v.value.toInt)
+          case v: PrimitiveValue.String =>
+            utf8_32.encode(v.value)
+          case v: PrimitiveValue.BigInt =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.BigDecimal =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.DayOfWeek =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.Duration =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.Instant =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.LocalDate =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.LocalDateTime =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.LocalTime =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.Month =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.MonthDay =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.OffsetDateTime =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.OffsetTime =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.Period =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.Year =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.YearMonth =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.ZoneId =>
+            utf8_32.encode(v.value.getId)
+          case v: PrimitiveValue.ZoneOffset =>
+            utf8_32.encode(v.value.getId)
+          case v: PrimitiveValue.ZonedDateTime =>
+            utf8_32.encode(v.value.toString)
+          case v: PrimitiveValue.Currency =>
+            utf8_32.encode(v.value.getCurrencyCode)
+          case v: PrimitiveValue.UUID =>
+            uuid.encode(v.value)
+        }
+        body.map(tagBits ++ _)
+      }
+
+    def decode(bits: BitVector): Attempt[DecodeResult[PrimitiveValue]] =
+      uint8.decode(bits) match {
+        case Attempt.Successful(DecodeResult(tag, rest)) =>
+          tag match {
+            case 0 =>
+              Attempt.successful(DecodeResult(PrimitiveValue.Unit, rest))
+            case 1 =>
+              bool(8).decode(rest).map { case DecodeResult(b, r) => DecodeResult(PrimitiveValue.Boolean(b), r) }
+            case 2 =>
+              byte.decode(rest).map { case DecodeResult(b, r) => DecodeResult(PrimitiveValue.Byte(b), r) }
+            case 3 =>
+              short16.decode(rest).map { case DecodeResult(s, r) => DecodeResult(PrimitiveValue.Short(s), r) }
+            case 4 =>
+              int32.decode(rest).map { case DecodeResult(i, r) => DecodeResult(PrimitiveValue.Int(i), r) }
+            case 5 =>
+              int64.decode(rest).map { case DecodeResult(l, r) => DecodeResult(PrimitiveValue.Long(l), r) }
+            case 6 =>
+              float.decode(rest).map { case DecodeResult(f, r) => DecodeResult(PrimitiveValue.Float(f), r) }
+            case 7 =>
+              double.decode(rest).map { case DecodeResult(d, r) => DecodeResult(PrimitiveValue.Double(d), r) }
+            case 8 =>
+              uint16.decode(rest).map { case DecodeResult(n, r) => DecodeResult(PrimitiveValue.Char(n.toChar), r) }
+            case 9 =>
+              utf8_32.decode(rest).map { case DecodeResult(s, r) => DecodeResult(PrimitiveValue.String(s), r) }
+            case 10 =>
+              utf8_32.decode(rest).flatMap { case DecodeResult(s, r) =>
+                Try(BigInt(s)) match {
+                  case Success(bi) => Attempt.successful(DecodeResult(PrimitiveValue.BigInt(bi), r))
+                  case Failure(e)  => Attempt.failure(Err(s"ScodecDeriver: invalid BigInt (${e.getMessage})"))
+                }
+              }
+            case 11 =>
+              utf8_32.decode(rest).flatMap { case DecodeResult(s, r) =>
+                Try(BigDecimal(s)) match {
+                  case Success(bd) => Attempt.successful(DecodeResult(PrimitiveValue.BigDecimal(bd), r))
+                  case Failure(e)  => Attempt.failure(Err(s"ScodecDeriver: invalid BigDecimal (${e.getMessage})"))
+                }
+              }
+            case 12 =>
+              decodeIsoString(rest, "DayOfWeek")(s => DayOfWeek.valueOf(s))(PrimitiveValue.DayOfWeek(_))
+            case 13 =>
+              decodeIsoString(rest, "Duration")(Duration.parse)(PrimitiveValue.Duration(_))
+            case 14 =>
+              decodeIsoString(rest, "Instant")(Instant.parse)(PrimitiveValue.Instant(_))
+            case 15 =>
+              decodeIsoString(rest, "LocalDate")(LocalDate.parse)(PrimitiveValue.LocalDate(_))
+            case 16 =>
+              decodeIsoString(rest, "LocalDateTime")(LocalDateTime.parse)(PrimitiveValue.LocalDateTime(_))
+            case 17 =>
+              decodeIsoString(rest, "LocalTime")(LocalTime.parse)(PrimitiveValue.LocalTime(_))
+            case 18 =>
+              decodeIsoString(rest, "Month")(Month.valueOf)(PrimitiveValue.Month(_))
+            case 19 =>
+              decodeIsoString(rest, "MonthDay")(MonthDay.parse)(PrimitiveValue.MonthDay(_))
+            case 20 =>
+              decodeIsoString(rest, "OffsetDateTime")(OffsetDateTime.parse)(PrimitiveValue.OffsetDateTime(_))
+            case 21 =>
+              decodeIsoString(rest, "OffsetTime")(OffsetTime.parse)(PrimitiveValue.OffsetTime(_))
+            case 22 =>
+              decodeIsoString(rest, "Period")(Period.parse)(PrimitiveValue.Period(_))
+            case 23 =>
+              decodeIsoString(rest, "Year")(Year.parse)(PrimitiveValue.Year(_))
+            case 24 =>
+              decodeIsoString(rest, "YearMonth")(YearMonth.parse)(PrimitiveValue.YearMonth(_))
+            case 25 =>
+              decodeIsoString(rest, "ZoneId")(ZoneId.of)(PrimitiveValue.ZoneId(_))
+            case 26 =>
+              decodeIsoString(rest, "ZoneOffset")(ZoneOffset.of)(PrimitiveValue.ZoneOffset(_))
+            case 27 =>
+              decodeIsoString(rest, "ZonedDateTime")(ZonedDateTime.parse)(PrimitiveValue.ZonedDateTime(_))
+            case 28 =>
+              utf8_32.decode(rest).flatMap { case DecodeResult(code, r) =>
+                Try(Currency.getInstance(code)) match {
+                  case Success(c) => Attempt.successful(DecodeResult(PrimitiveValue.Currency(c), r))
+                  case Failure(e) => Attempt.failure(Err(s"ScodecDeriver: invalid Currency (${e.getMessage})"))
+                }
+              }
+            case 29 =>
+              uuid.decode(rest).map { case DecodeResult(u, r) => DecodeResult(PrimitiveValue.UUID(u), r) }
+            case other =>
+              Attempt.failure(Err(s"ScodecDeriver: unknown PrimitiveValue tag $other"))
+          }
+        case f @ Attempt.Failure(_) => f
+      }
+
+    private def decodeIsoString[A](
+      bits: BitVector,
+      label: String
+    )(parse: String => A)(wrap: A => PrimitiveValue): Attempt[DecodeResult[PrimitiveValue]] =
+      utf8_32.decode(bits).flatMap { case DecodeResult(s, rem) =>
+        Try(parse(s)) match {
+          case Success(a) => Attempt.successful(DecodeResult(wrap(a), rem))
+          case Failure(e) => Attempt.failure(Err(s"ScodecDeriver: invalid $label (${e.getMessage})"))
+        }
+      }
+  }
 
   // -------------------------------------------------------------------
   // Primitive
@@ -213,103 +522,57 @@ object ScodecDeriver extends Deriver[Codec] {
     defaultValue: Option[C[A]],
     examples:     Seq[C[A]]
   )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[C[A]]] = {
-    val constructor   = binding.constructor
+    val constructor = binding.constructor
     val deconstructor = binding.deconstructor
-    val elemClassTag  = element.typeId.classTag.asInstanceOf[ClassTag[A]]
+    val elemClassTag  = element.typeId.classTag.asInstanceOf[scala.reflect.ClassTag[A]]
 
-    /** `Seq[C]` / `List[C]` of `Byte`: one `int32` length + raw bytes (not N× `byte` codec). */
-    if (isByteElement(elemClassTag)) {
-      Lazy {
-        new Codec[C[A]] {
-          def sizeBound: SizeBound = SizeBound.unknown
+    D.instance(element.metadata).map { elementCodec =>
+      new Codec[C[A]] {
+        def sizeBound: SizeBound = SizeBound.unknown
 
-          def encode(value: C[A]): Attempt[BitVector] = {
-            val items = deconstructor.deconstruct(value).iterator
-            val buf   = new scala.collection.mutable.ArrayBuffer[Byte]()
-            while (items.hasNext) buf += items.next().asInstanceOf[Byte]
-            val bytes = buf.toArray
-            int32.encode(bytes.length).map(lenBits => lenBits ++ BitVector.view(bytes))
-          }
-
-          def decode(bits: BitVector): Attempt[DecodeResult[C[A]]] = {
-            implicit val ct: ClassTag[A] = elemClassTag
-            int32.decode(bits) match {
-              case Attempt.Successful(DecodeResult(n, rest0)) =>
-                if (n < 0)
-                  Attempt.failure(Err(s"ScodecDeriver: negative sequence length $n"))
-                else {
-                  val needBits = n.toLong * 8L
-                  if (rest0.size < needBits)
-                    Attempt.failure(Err.InsufficientBits(needBits, rest0.size, Nil))
-                  else {
-                    val (payload, rem) = rest0.splitAt(needBits)
-                    val bytes          = payload.toByteArray
-                    if (bytes.length != n)
-                      Attempt.failure(Err(s"ScodecDeriver: byte sequence size mismatch"))
-                    else {
-                      val builder = constructor.newBuilder[A](n)
-                      var i       = 0
-                      while (i < n) {
-                        constructor.add(builder, bytes(i).asInstanceOf[A])
-                        i += 1
-                      }
-                      Attempt.successful(DecodeResult(constructor.result(builder), rem))
-                    }
-                  }
-                }
-              case f @ Attempt.Failure(_) => f
+        def encode(value: C[A]): Attempt[BitVector] = {
+          val items = deconstructor.deconstruct(value).iterator
+          var acc   = BitVector.empty
+          var count = 0
+          // We don't know the size up-front for arbitrary C, so
+          // encode into a temporary buffer and prepend the count.
+          val buf = new java.util.ArrayList[BitVector]()
+          while (items.hasNext) {
+            elementCodec.encode(items.next()) match {
+              case Attempt.Successful(bits) => buf.add(bits); count += 1
+              case f @ Attempt.Failure(_)   => return f
             }
           }
+          int32.encode(count).map { lenBits =>
+            acc = lenBits
+            var i = 0
+            while (i < buf.size) { acc = acc ++ buf.get(i); i += 1 }
+            acc
+          }
         }
-      }
-    } else
-      D.instance(element.metadata).map { elementCodec =>
-        new Codec[C[A]] {
-          def sizeBound: SizeBound = SizeBound.unknown
 
-          def encode(value: C[A]): Attempt[BitVector] = {
-            val items = deconstructor.deconstruct(value).iterator
-            var acc   = BitVector.empty
-            var count = 0
-            // We don't know the size up-front for arbitrary C, so
-            // encode into a temporary buffer and prepend the count.
-            val buf = new java.util.ArrayList[BitVector]()
-            while (items.hasNext) {
-              elementCodec.encode(items.next()) match {
-                case Attempt.Successful(b) => buf.add(b); count += 1
-                case f @ Attempt.Failure(_)   => return f
+        def decode(bits: BitVector): Attempt[DecodeResult[C[A]]] = {
+          implicit val ct: scala.reflect.ClassTag[A] = elemClassTag
+          int32.decode(bits) match {
+            case Attempt.Successful(DecodeResult(n, rest0)) =>
+              val builder = constructor.newBuilder[A](n)
+              var rem     = rest0
+              var i       = 0
+              while (i < n) {
+                elementCodec.decode(rem) match {
+                  case Attempt.Successful(DecodeResult(v, r)) =>
+                    constructor.add(builder, v)
+                    rem = r
+                  case f @ Attempt.Failure(_) => return f
+                }
+                i += 1
               }
-            }
-            int32.encode(count).map { lenBits =>
-              acc = lenBits
-              var i = 0
-              while (i < buf.size) { acc = acc ++ buf.get(i); i += 1 }
-              acc
-            }
-          }
-
-          def decode(bits: BitVector): Attempt[DecodeResult[C[A]]] = {
-            implicit val ct: ClassTag[A] = elemClassTag
-            int32.decode(bits) match {
-              case Attempt.Successful(DecodeResult(n, rest0)) =>
-                val builder = constructor.newBuilder[A](n)
-                var rem     = rest0
-                var i       = 0
-                while (i < n) {
-                  elementCodec.decode(rem) match {
-                    case Attempt.Successful(DecodeResult(v, r)) =>
-                      constructor.add(builder, v)
-                      rem = r
-                    case f @ Attempt.Failure(_) => return f
-                  }
-                  i += 1
-                }
-                Attempt.successful(DecodeResult(constructor.result(builder), rem))
-              case f @ Attempt.Failure(_) => f
-            }
+              Attempt.successful(DecodeResult(constructor.result(builder), rem))
+            case f @ Attempt.Failure(_) => f
           }
         }
       }
+    }
   }
 
   // -------------------------------------------------------------------
@@ -403,7 +666,7 @@ object ScodecDeriver extends Deriver[Codec] {
     }
 
   // -------------------------------------------------------------------
-  // Dynamic - not supported by this prototype
+  // Dynamic (Schema[DynamicValue] → recursive binary tree codec)
   // -------------------------------------------------------------------
 
   override def deriveDynamic[F[_, _]](
@@ -413,16 +676,11 @@ object ScodecDeriver extends Deriver[Codec] {
     defaultValue: Option[DynamicValue],
     examples:     Seq[DynamicValue]
   )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[DynamicValue]] =
-    Lazy(unimplemented[DynamicValue]("DynamicValue"))
+    Lazy(dynamicValueCodec)
 
   // -------------------------------------------------------------------
   // helpers
   // -------------------------------------------------------------------
-
-  private def isByteElement(ct: ClassTag[?]): Boolean = {
-    val c = ct.runtimeClass
-    c == java.lang.Byte.TYPE || c == classOf[java.lang.Byte]
-  }
 
   private def unimplemented[A](what: String): Codec[A] = new Codec[A] {
     def sizeBound: SizeBound                   = SizeBound.unknown

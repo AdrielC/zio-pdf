@@ -120,14 +120,14 @@ final class StreamDecoder[+A] private (private[stream] val step: StreamDecoder.S
             new StreamDecoder[A](FromPure(pure)).flatMap(f)
           val pureStep: PureDecoder.DecoderStep[StreamDecoder[B]] =
             ZPure.get[BitVector].flatMap { buffer =>
-              val (log, result) = pure.runAllNormalized(buffer)
+              val (log, result) = pure.run.runAll(buffer)
               result match {
-                case Left(err) =>
+                case Left(ce) =>
                   if (log.isEmpty)
-                    ZPure.fail(err)
+                    ZPure.fail(ce)
                   else
                     ZPure.set[BitVector](BitVector.empty) *>
-                      ZPure.succeed(StreamDecoder.emits(log).flatMap(f) ++ StreamDecoder.raiseError(err))
+                      ZPure.succeed(StreamDecoder.emits(log).flatMap(f) ++ StreamDecoder.raiseError(ce))
                 case Right((leftover, status)) =>
                   status match {
                     case PureDecoder.Status.NeedMore if log.isEmpty =>
@@ -344,10 +344,10 @@ object StreamDecoder {
       else ZChannel.write(log) *> next
 
     def runOnce(buffer: BitVector): BitChannel[A] = {
-      val (log, result) = pure.runAllNormalized(buffer)
+      val (log, result) = pure.run.runAll(buffer)
       result match {
-        case Left(err) =>
-          emitLog(log, ZChannel.fail(err))
+        case Left(ce) =>
+          emitLog(log, ZChannel.fail(ce))
         case Right((leftover, status)) =>
           status match {
             case PureDecoder.Status.NeedMore     => emitLog(log, waitForMore(leftover))
@@ -561,11 +561,10 @@ object StreamDecoder {
       }
 
     case FromPure(pure) =>
-      // The pure decoder does the loop itself - just `runAll` it.
-      val (log, result) = pure.runAllNormalized(bits)
+      val (log, result) = pure.run.runAll(bits)
       result match {
-        case Left(err)              => Left(err)
-        case Right((leftover, _))   => Right((acc ++ log, leftover))
+        case Left(ce)            => Left(ce)
+        case Right((leftover, _)) => Right((acc ++ log, leftover))
       }
 
     case FromPureChunked(pure) =>

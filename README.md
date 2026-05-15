@@ -13,7 +13,6 @@
 - **Kyo 1.0-RC1** (`kyo-data`, `kyo-kernel`, `kyo-prelude`, `kyo-core`)
   for the algebraic-effect runtime used by the Scan algebra.
 - **`zio-blocks-schema` 0.0.33** for schema-derived codecs (smoke-tested).
-- **`zio-blocks-mediatype`** + **`zio-http-model`** 0.0.33 — see `zio.pdf.PdfMime` for `MediaType` / `ContentType` (`application/pdf`).
 - **scodec-core 2.3.3** + **scodec-bits 1.2.4**.
 - A **ZIO port of `scodec.stream.StreamDecoder`** (the file from the
   original prompt) implemented on top of `ZChannel`.
@@ -114,50 +113,15 @@ baseline just decodes them):
 ```
 
 JMH numbers from `bench/Jmh/run -p n=1048576 zio.pdf.scan.bench.ScanBench`
-agree (JDK 21, 5 iterations):
+agree:
 
 ```
-Benchmark                          (n)  Mode  Cnt    Score    Error  Units
-ScanBench.handCoded            1048576  avgt    5    0.904 ±  0.189  ms/op
-ScanBench.scanFusedDirect      1048576  avgt    5   22.642 ±  7.901  ms/op
-ScanBench.scanFusedReg         1048576  avgt    5   22.785 ±  3.766  ms/op
-ScanBench.scanLongFoldDirect   1048576  avgt    5   10.032 ±  1.067  ms/op
-ScanBench.scanLongFoldReg      1048576  avgt    5    5.327 ±  1.464  ms/op
-ScanBench.scanLongFoldUnboxed  1048576  avgt    5    4.710 ±  0.107  ms/op
-ScanBench.scanUnfusedDirect    1048576  avgt    5  172.439 ± 33.672  ms/op
-ScanBench.scanUnfusedReg       1048576  avgt    5   44.031 ±  1.535  ms/op
-ScanBench.scodecBaseline       1048576  avgt    5   56.140 ± 19.359  ms/op
+Benchmark                        (n)  Mode  Cnt    Score     Error  Units
+ScanBench.handCoded          1048576  avgt    3    0.937 ±   0.672  ms/op
+ScanBench.scanFusedDirect    1048576  avgt    3   23.525 ±  35.059  ms/op
+ScanBench.scanUnfusedDirect  1048576  avgt    3  179.283 ± 119.168  ms/op
+ScanBench.scodecBaseline     1048576  avgt    3   63.310 ±  29.787  ms/op
 ```
-
-Three observations:
-
-1. **The fused path is unchanged** between the legacy stepper (`scanFusedDirect`)
-   and the register lane (`scanFusedReg`) -- both short-circuit through
-   `Fusion.tryFuse` to a single `Byte => Int` and the same tight
-   `builder += f(_)` loop. Register state has nothing to do once the
-   spine fuses.
-
-2. **The non-fusable spine is ~3.9× faster** through the register lane
-   (`scanUnfusedReg`, 44 ms) than through the persistent stepper
-   (`scanUnfusedDirect`, 172 ms), and is now **faster than
-   `scodec.codecs.vector(uint8)`** on the same per-byte budget despite
-   doing strictly more work (`map → filter → +1 → ^0x55 → -1` vs
-   scodec's "decode and box into Vector[Int]").
-
-3. **Primitive folds run with zero boxing on the long-fold path.**
-   `scanLongFoldDirect` is the legacy `Fold[Byte, Long]` (the
-   accumulator boxes to `java.lang.Long` on every step); `scanLongFoldReg`
-   is the same fold routed through the register lane via the erased
-   `FreeScan` path (state in an object slot, no closure allocations:
-   ~1.9× faster). `scanLongFoldUnboxed` uses an `inline match` over the
-   accumulator type at the call site to pick a *specialised*
-   `FoldLong` stepper -- raw `getLong` / `setLong` on the hot path,
-   no typeclass dispatch, no boxing: **~2.1× faster than the legacy
-   fold**. The selection happens at compile time, so the runtime sees
-   a monomorphic class with direct primitive ops.
-
-See the [Register-based interpreter](#register-based-interpreter) section
-below for what changed.
 
 The fast path is `Fusion.tryFuse` recognising that every node in the
 spine is `Arr` or `Prim(ScanPrim.Map)` and collapsing the chain to a
@@ -174,244 +138,11 @@ under bigger per-stage work; it's intentionally not part of the JMH
 suite (the in-test bench measures it on a smaller payload so the
 result is visible without dominating the run).
 
-### Register-based interpreter
-
-The non-fused path now has a second runtime, lifted directly from the
-"zero allocation, zero boxing" pattern ZIO Blocks uses for record
-construction in ZIO Schema 2. State for the whole pipeline lives in a
-single mutable arena (`RegState`: an `Array[Long]` for primitive slots,
-an `Array[AnyRef]` for reference slots) and every stage knows its
-offset at compile time. There is no per-input closure allocation
-(`loop(s)` no longer rebuilds a `Stepper`), no per-input
-`StepEffect(Vector(o), None)` allocation, and no per-emit
-`Some(ScanDone.Success(Seq.empty))` -- the signal channel is an `Int`.
-
-Stage-to-stage handoff goes through a reusable `RegOutBuffer`, an
-`Array[AnyRef]` ring that `>>>` clears between calls, instead of a
-fresh `Vector[M]` allocated on every step.
-
-Per-primitive layouts:
-
-| Primitive            | Layout                                       |
-|----------------------|----------------------------------------------|
-| `Arr` / `Map`        | zero state                                   |
-| `Filter`             | zero state                                   |
-| `Take(n)` / `Drop(n)`| 1 long slot (remaining)                      |
-| `CountBytes`         | 1 long slot (count)                          |
-| `BombGuard(max)`     | 1 long slot (count) + 1 object slot (error)  |
-| `Fold[I, S]`         | 1 object slot (accumulator)                  |
-| `Hash(algo)`         | 1 object slot (live `MessageDigest`)         |
-| `FixedChunk(n)`      | 1 object slot (mutable `ByteArrayOutputStream`) |
-| `FastCDC(min,avg,max)` | 1 object slot (mutable `ByteArrayOutputStream`) |
-| `AndThen(l, r)`      | `l.layout + r.layout`; `r` is anchored at `off + l.layout` |
-
-Use:
-
-```scala
-import zio.pdf.scan.*
-
-// Same FreeScan; pick the runtime at the call site.
-val pipe: FreeScan[Byte, Int] =
-  Scan.map[Byte, Int](_ & 0xff) >>>
-    Scan.filter[Int](_ % 2 == 0) >>>
-    Scan.map[Int, Int](_ + 1)
-
-val (sig, out) = Scan.runDirectReg[Byte, Int, Any](pipe, bytes)
-```
-
-`Scan.runDirectReg` always:
-
-- Tries `Fusion.tryFuse` first (so the fully-fused fast path is identical
-  to `Scan.runDirect`).
-- Otherwise compiles the spine to a `RegStepper` chain (`AndThen` at
-  stacked offsets) and drives it through `RegInterp.runOnce`.
-- Falls back to the legacy `Stepper` driver for shapes the register lane
-  does not yet handle (`Fanout` / `Choice`). `RegInterpSpec` proves
-  every shape agrees output-for-output with `Scan.runDirect`.
-
-The legacy `Scan.runDirect` and the `Stepper` family stay in place
-unchanged; this is purely an additive new runtime, behind a new entry
-point.
-
-### Schema-driven layout and primitive specialisation
-
-`RegSchema[S]` is a small typeclass that mirrors `zio.blocks.schema`'s
-`Reflect[S]` + `RegisterPos[A]` shape: it carries the `RegLayout` for
-`S` and the `read` / `write` methods that round-trip an `S` through a
-`RegState` slot. Primitive instances (`Long`, `Int`, `Byte`, `Double`,
-`Boolean`, `Char`, `Short`, `Float`) declare a long-slot layout;
-reference instances declare an object-slot layout. This is the same
-"registry per type" pattern ZIO Blocks uses to describe a record's
-register layout without boxing fields.
-
-The typeclass alone is not enough on the hot path: every call to
-`rs.read(...)` / `rs.write(...)` from a polymorphic stepper goes
-through a virtual call that the JIT does not see through. So the
-specialisation happens **at the call site, at compile time**, via an
-`inline erasedValue[S] match` that picks a monomorphic class:
-
-```scala
-inline def runFoldUnboxed[I, S](seed: S, f: (S, I) => S, inputs: Iterable[I])(using
-    rs: RegSchema[S]
-): (ScanDone[S, Any], Vector[S]) = {
-  val stepper: RegStepper[I, S, Nothing] = inline erasedValue[S] match {
-    case _: Long   => new RegSteppers.FoldLong[I]  (seed.asInstanceOf[Long],   f.asInstanceOf[(Long,   I) => Long])
-                       .asInstanceOf[RegStepper[I, S, Nothing]]
-    case _: Int    => new RegSteppers.FoldInt[I]   (seed.asInstanceOf[Int],    f.asInstanceOf[(Int,    I) => Int])
-                       .asInstanceOf[RegStepper[I, S, Nothing]]
-    case _: Double => new RegSteppers.FoldDouble[I](seed.asInstanceOf[Double], f.asInstanceOf[(Double, I) => Double])
-                       .asInstanceOf[RegStepper[I, S, Nothing]]
-    case _         => RegSteppers.Fold[I, S](seed, f)(using rs)
-  }
-  runStepper[I, S, Any](stepper, inputs)
-}
-```
-
-For `S = Long`, the call site emits a `new FoldLong[I](seed, f)`
-directly; the step body is `regs.setLong(off.longs, f(regs.getLong(off.longs), i))`
-with no typeclass dispatch. The bench numbers above show this saves
-~50% over the legacy long-fold and ~12% over the register-but-erased
-lane.
-
-### Compile-time fusion seed
-
-`InlineFusion.fuse(lhs, rhs)` is an `inline def` that does an
-`inline match` over the static *shape* of its arguments:
-
-| Match | Compile-time rewrite |
-|-------|----------------------|
-| `Arr(f) >>> Arr(g)` | `Arr(g compose f)` |
-| `Arr(f) >>> rhs`    | `AndThen(Arr(f), rhs)` |
-| `lhs >>> Arr(g)`    | `AndThen(lhs, Arr(g))` |
-| default              | `AndThen(lhs, rhs)` |
-
-Two `Arr` nodes built through `InlineFusion.arrT` / `mapT`
-(`transparent inline` smart constructors that keep the narrow
-`FreeScan.Arr[I, O]` static type) collapse to a single `Arr` at the
-call site -- no runtime walk, no `tryFuse` pass, no `AndThen` node
-ever appears in the resulting value. `RegInterpSpec` proves it
-structurally: `fused.isInstanceOf[FreeScan.Arr[?, ?]]` is `true` for
-the chained case.
-
-This is the seed of the larger compile-time machinery: the next layer
-(match-type-driven `RegLayout` summation, named-leftover record
-accumulation in the `Out` type parameter, Flow-style typed builder)
-builds on the same `inline match` foundation.
-
-### Flow-style typed scan builder (`ScanFlow`)
-
-`ScanFlow[I, Out]` is a Kyo-`Flow`-style builder. Every `.named[N, V](name, scan)`
-refines the builder's `Out` type parameter by intersection with `N ~ V`,
-so the compiler knows the full record of named-leftover field types
-statically. `run(inputs)` returns `Record[Out]` -- access fields by
-name, type-checked.
-
-```scala
-import zio.pdf.scan.{ScanFlow, Scan, HashAlgo}
-
-val ingest =
-  ScanFlow.over[Byte]
-    .named("guard",  Scan.bombGuard(maxBytes = 1L << 30))
-    .named("count",  Scan.countBytes)
-    .named("digest", Scan.hash(HashAlgo.Sha256))
-
-val rec = ingest.run(bytes)
-
-val count:  Vector[Byte] = rec.count    // type-checked
-val digest: Vector[Byte] = rec.digest   // type-checked
-```
-
-Semantics:
-
-- Each labeled stage is a stateful scan over the same input stream
-  whose final leftover becomes the named field's value.
-- The v0 implementation runs each labeled stage independently --
-  `N` named stages mean `N` traversals of the input. A v1 follow-up
-  fuses every labeled stage into a single `Fanout` so the whole
-  record is computed in one pass.
-- Independent runs go through `Scan.run` (the register lane) directly,
-  bypassing any `Fanout` / `Choice` composition. **In practice this
-  makes the Flow-style API faster than the equivalent
-  `&&&`-composed scan** for stateful ingest pipelines today, because
-  the register lane natively handles the spine case and the legacy
-  fallback for `Fanout` is the dominant cost in chained ingests.
-
-### Complex composition benchmarks
-
-The 4-stage toy lanes in `ScanBench` are enough to *detect* fusion and
-per-stage allocations, but they are not the workloads the register
-lane is *for*. `ComplexScanBench` exercises realistic compositions:
-
-```
-Benchmark                                   (n)  Mode  Cnt    Score    Error  Units
-ComplexScanBench.deepPureSpineDirect     262144  avgt    5   23.420 ±  2.832  ms/op
-ComplexScanBench.deepPureSpineReg        262144  avgt    5   23.225 ±  2.965  ms/op   (tied, 32-stage fused)
-ComplexScanBench.deepPureSpine64Direct   262144  avgt    5   51.649 ±  1.648  ms/op
-ComplexScanBench.deepPureSpine64Reg      262144  avgt    5   52.429 ±  2.961  ms/op   (tied, 64-stage fused)
-ComplexScanBench.deepMixedSpineDirect    262144  avgt    5  148.487 ± 19.155  ms/op
-ComplexScanBench.deepMixedSpineReg       262144  avgt    5   27.404 ±  1.968  ms/op   (~5.4x faster)
-ComplexScanBench.deepFoldSpineDirect     262144  avgt    5   34.345 ±  6.326  ms/op
-ComplexScanBench.deepFoldSpineReg        262144  avgt    5    5.610 ±  0.621  ms/op   (~6.1x faster)
-ComplexScanBench.ingest3StageDirect      262144  avgt    5   12.755 ±  1.184  ms/op
-ComplexScanBench.ingest3StageReg         262144  avgt    5    2.767 ±  0.083  ms/op   (~4.6x faster)
-ComplexScanBench.ingestFanoutDirect      262144  avgt    5   11.290 ±  1.308  ms/op
-ComplexScanBench.ingestFanoutReg         262144  avgt    5   12.172 ±  1.089  ms/op   (~10% slower, fallback)
-ComplexScanBench.nestedFanoutDirect      262144  avgt    5  106.684 ± 51.150  ms/op
-ComplexScanBench.nestedFanoutReg         262144  avgt    5  104.874 ± 33.233  ms/op   (tied, two-level fanout)
-ComplexScanBench.choiceRoutingDirect     262144  avgt    5   27.083 ±  8.514  ms/op
-ComplexScanBench.choiceRoutingReg        262144  avgt    5   25.768 ±  6.410  ms/op   (tied, choice fallback)
-ComplexScanBench.gravitonFullDirect      262144  avgt    5   50.494 ± 11.950  ms/op
-ComplexScanBench.gravitonFullReg         262144  avgt    5   54.945 ±  4.606  ms/op   (~9% slower, fanout+FastCDC)
-ComplexScanBench.scanFlowIngestRun       262144  avgt    5    5.908 ±  0.133  ms/op   (Flow-style, ~2.2x faster than ingest3Stage)
-```
-
-Lanes:
-
-- **`deepPureSpine`** -- 32 pure maps. `Fusion.tryFuse` collapses both
-  lanes to a single `Byte => Int`; they tie within JMH noise.
-- **`deepMixedSpine`** -- 16 stages alternating `map` / `filter`. Non-
-  fusable. The register lane's advantage **scales with stage count**:
-  4 stages was ~3.4× (`ScanBench.scanUnfused*`), 16 stages is ~4.6×.
-- **`deepFoldSpine`** -- 8 chained `Fold[Byte, Long]` stages. The
-  legacy stepper allocates one closure + one `StepEffect` per stage
-  per byte; the register lane stores all 8 accumulators in adjacent
-  object slots of one `RegState`. ~5.0× faster.
-- **`ingest3Stage`** -- the canonical Graviton sequential ingest:
-  `BombGuard >>> CountBytes >>> Hash(SHA-256)`. ~4.4× faster on the
-  real-world shape.
-- **`ingestFanout`** -- `CountBytes &&& Hash(SHA-256)`. **~10%
-  slower** on the register lane today: `Fanout` / `Choice` fall back
-  to the legacy stepper, and the dispatch-through-fallback path adds
-  small overhead. Closing this gap (paired output buffers / tuple-
-  aware emit so the register lane natively handles `&&&` and `|||`)
-  is on the follow-up list.
-- **`nestedFanout` / `choiceRouting`** -- two-level `&&&` and
-  `Either`-routed `test` with stateful arms. Tied with the legacy
-  runner -- the fallback path scales with the same costs as the
-  legacy stepper, so deeper fanout doesn't make the fallback look
-  worse.
-- **`gravitonFull`** -- the maximally-realistic shape:
-  `BombGuard >>> (CountBytes &&& Hash(SHA-256) &&& FastCDC)`. ~9%
-  slower on the register lane; same root cause (Fanout fallback)
-  amplified by FastCDC's per-byte rolling-hash work.
-- **`scanFlowIngestRun`** -- the Flow-style typed builder running the
-  same `bombGuard + count + hash` workload as `ingest3Stage`, but
-  as three labeled stages assembled into a `Record[Out]`. **~2.2×
-  faster than `ingest3StageDirect`** (5.9 ms vs 12.8 ms) because
-  each labeled stage runs independently through `Scan.run` (the
-  register lane), with no `Fanout` composition to fall back on.
-  This is the data point that motivates the simplification: a
-  *more typed* API that *decomposes* the user's intent into
-  register-lane-friendly runs ends up faster than the chained
-  `&&&` form.
-
 ## Building & testing
 
 ```bash
 sbt test
 ```
-
-GitHub Actions installs `sbt` via [coursier/setup-action](https://github.com/coursier/setup-action) (runners do not ship `sbt` on `PATH`).
 
 ```
 [info] + StreamDecoder
@@ -597,14 +328,14 @@ sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*RingBufferBench.*'
 
 ```
 Benchmark                                     (chunkSize)      (n)  Mode  Cnt    Score    Error  Units
-StreamDecoderBench.chunkedFastPathStrict            65536  1048576  avgt    5    0.864 ±  0.215  ms/op   <-- ~58x baseline
-StreamDecoderBench.chunkedFastPathChannel           65536  1048576  avgt    5    1.151 ±  0.314  ms/op   <-- ~44x baseline
-StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   50.068 ±  1.904  ms/op   reference
-StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   82.264 ±  8.094  ms/op
-StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5  107.120 ± 27.984  ms/op
-StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5  112.325 ± 41.407  ms/op
-StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5  108.035 ± 14.999  ms/op
-StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5  247.013 ± 10.969  ms/op
+StreamDecoderBench.chunkedFastPathStrict            65536  1048576  avgt    5    0.890 ±  0.081  ms/op   <-- ~57x baseline
+StreamDecoderBench.chunkedFastPathChannel           65536  1048576  avgt    5    1.146 ±  0.224  ms/op   <-- ~44x baseline
+StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   50.873 ±  0.751  ms/op   reference
+StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   95.215 ± 11.892  ms/op
+StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5  105.574 ±  9.118  ms/op
+StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5  106.975 ±  3.026  ms/op
+StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5  106.703 ±  7.950  ms/op
+StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5  243.897 ±  6.592  ms/op
 ```
 
 Five takeaways:
@@ -650,27 +381,27 @@ Same `scodec.Decoder`, same in-memory bytes, same chunk size — only the stream
 
 ```
 Benchmark                                          (chunkSize)      (n)  Mode  Cnt     Score     Error  Units
-HeadToHeadBench.baseline_scodec_vector                   65536  4194304  avgt    5   255.810 ±  64.530  ms/op   reference
-HeadToHeadBench.baseline_zio_PureDecoder_runAll          65536  4194304  avgt    5   390.969 ±  67.256  ms/op
-HeadToHeadBench.fs2_StreamDecoder_many                   65536  4194304  avgt    5  2478.106 ± 276.279  ms/op   fs2 streaming
-HeadToHeadBench.zio_StreamDecoder_many                   65536  4194304  avgt    5  1055.141 ± 108.390  ms/op   ZIO ZChannel streaming    (~2.3x faster than fs2)
-HeadToHeadBench.zio_StreamDecoder_fromPureChunked        65536  4194304  avgt    5     3.405 ±   0.578  ms/op   ZIO chunked fast path     (~728x faster than fs2)
+HeadToHeadBench.baseline_scodec_vector                   65536  4194304  avgt    5   223.343 ±  39.800  ms/op   reference
+HeadToHeadBench.baseline_zio_PureDecoder_runAll          65536  4194304  avgt    5   430.181 ±  32.729  ms/op
+HeadToHeadBench.fs2_StreamDecoder_many                   65536  4194304  avgt    5  2659.758 ± 427.614  ms/op   fs2 streaming
+HeadToHeadBench.zio_StreamDecoder_many                   65536  4194304  avgt    5  1031.921 ±  87.637  ms/op   ZIO ZChannel streaming    (~2.6x faster than fs2)
+HeadToHeadBench.zio_StreamDecoder_fromPureChunked        65536  4194304  avgt    5     4.232 ±   0.608  ms/op   ZIO chunked fast path     (~628x faster than fs2)
 ```
 
 **Real PDF top-level decode (the legacy `xref-stream.pdf` fixture):**
 
 ```
 Benchmark                                                    (chunkSize)  Mode  Cnt    Score     Error  Units
-PdfDecodeHeadToHeadBench.fs2_decode_pdf_topLevel                    8192  avgt    5  376.284 ± 128.731  us/op   fs2 + scodec.choice
-PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel                    8192  avgt    5  441.652 ±  61.326  us/op   ZIO + scodec.choice
-PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_byteStream         8192  avgt    5  405.280 ± 131.155  us/op   ZIO + byte-stream pipe
+PdfDecodeHeadToHeadBench.fs2_decode_pdf_topLevel                    8192  avgt    5  366.326 ± 138.016  us/op   fs2 + scodec.choice
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel                    8192  avgt    5  457.112 ± 120.087  us/op   ZIO + scodec.choice
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_byteStream         8192  avgt    5  439.639 ±  68.776  us/op   ZIO + byte-stream pipe
 ```
 
 Honest reading:
 
-- **For high-throughput byte-aligned decoding** (one element type, many elements): ZIO's chunked fast path beats fs2 by **~728×**. This is the architectural win — `PureDecoder.manyChunked + StreamDecoder.fromPureChunked` lets the entire batch decoder live inside one inlined while-loop per upstream chunk; fs2 has no equivalent because `scodec-stream`'s `Decode` step is per-element.
-- **For the plain ZChannel path vs fs2's Pull path** on the same per-element decoder: ZIO is **~2.3× faster** on a tight `uint8` loop. Same algorithm both sides (we ported it from fs2's source), but `ZChannel` has lower per-step overhead than `Pull` for this shape.
-- **For real PDF parsing where the scodec `choice`-decoder body dominates** (~380 µs of decoding work per PDF): ZIO is within ~17% of fs2, and the byte-stream path (`zio_decode_pdf_topLevel_byteStream` at 405 µs) is within 8% of fs2. The streaming library overhead is in the noise once the per-element decoder body itself is expensive — what wins or loses at that point is JIT inlining of the choice arms, not channel vs pull.
+- **For high-throughput byte-aligned decoding** (one element type, many elements): ZIO's chunked fast path beats fs2 by **~628×**. This is the architectural win — `PureDecoder.manyChunked + StreamDecoder.fromPureChunked` lets the entire batch decoder live inside one inlined while-loop per upstream chunk; fs2 has no equivalent because `scodec-stream`'s `Decode` step is per-element.
+- **For the plain ZChannel path vs fs2's Pull path** on the same per-element decoder: ZIO is **~2.6× faster** on a tight `uint8` loop. Same algorithm both sides (we ported it from fs2's source), but `ZChannel` has lower per-step overhead than `Pull` for this shape.
+- **For real PDF parsing where the scodec `choice`-decoder body dominates** (~360 µs of decoding work per PDF): the two libraries are within ~25% of each other and **fs2 actually edges us by ~25%**. The streaming library overhead is in the noise once the per-element decoder body itself is expensive — what wins or loses at that point is JIT inlining of the choice arms, not channel vs pull.
 
 So if your workload is "stream a giant binary log of fixed-width records" the chunked fast path is a transformative win. If your workload is "parse a few KiB of nested PDF structure", any modern Scala streaming library is fine and the difference is in the noise.
 
@@ -678,8 +409,8 @@ So if your workload is "stream a giant binary log of fixed-width records" the ch
 
 ```
 Benchmark                                      (n)  Mode  Cnt    Score    Error  Units
-RingBufferBench.spscRingBufferFillDrain      16384  avgt    5   67.587 ±  5.541  us/op   ~7x faster
-RingBufferBench.arrayBlockingQueueFillDrain  16384  avgt    5  485.866 ± 24.279  us/op
+RingBufferBench.spscRingBufferFillDrain      16384  avgt    5   70.929 ± 13.977  us/op   ~7x faster
+RingBufferBench.arrayBlockingQueueFillDrain  16384  avgt    5  485.797 ± 33.699  us/op
 ```
 
 For 16 K element fill-then-drain on a single thread, `SpscRingBuffer` is ~7× faster than `ArrayBlockingQueue` per element. The win when there's a real thread boundary is bigger because `ABQ` has to acquire a lock per `offer`/`poll` while `SpscRingBuffer` only needs a single relaxed write per slot. Use it for "decoder fiber → consumer fiber" handoff when the work is CPU-bound and the queue is on the hot path.
@@ -734,14 +465,10 @@ JMH benchmark on a realistic complex type (`Order` with `Customer`, `List[OrderL
 
 ```
 Benchmark                              (n)  Mode  Cnt   Score    Error  Units
-ScodecDeriverBench.handRolledEncode   1000  avgt    5   1.886 ±  0.375  ms/op
-ScodecDeriverBench.derivedEncode      1000  avgt    5   2.327 ±  0.258  ms/op   +23%
-ScodecDeriverBench.handRolledDecode   1000  avgt    5   2.167 ±  0.039  ms/op
-ScodecDeriverBench.derivedDecode      1000  avgt    5   2.863 ±  0.080  ms/op   +32%
-ScodecDeriverBench.handRolledEncode  10000  avgt    5  18.558 ±  2.124  ms/op
-ScodecDeriverBench.derivedEncode     10000  avgt    5  24.176 ±  0.298  ms/op   +30%
-ScodecDeriverBench.handRolledDecode  10000  avgt    5  22.876 ±  0.168  ms/op
-ScodecDeriverBench.derivedDecode     10000  avgt    5  31.688 ±  5.015  ms/op   +38%
+ScodecDeriverBench.handRolledEncode  10000  avgt    5  20.962 ±  1.048  ms/op
+ScodecDeriverBench.derivedEncode     10000  avgt    5  24.793 ±  1.205  ms/op   +18%
+ScodecDeriverBench.handRolledDecode  10000  avgt    5  28.828 ± 10.173  ms/op
+ScodecDeriverBench.derivedDecode     10000  avgt    5  30.933 ±  0.454  ms/op   +7%
 ```
 
 The deriver carries one `Registers` allocation per record and looks up field positions via the `Reflect.Record`'s pre-computed register layout, but otherwise it's allocation-tight. **For complex application types the overhead is in the noise (5-20%).** Where it would actually matter — tight loops over millions of small fixed-width records — the right tool is the chunked fast path (`PureDecoder.manyChunked + StreamDecoder.fromPureChunked`), which beats hand-rolled `scodec.codecs.vector` by ~57× on `uint8`.
@@ -779,13 +506,12 @@ pipeline is now ported:
 | `zio.pdf.Pdf / AssemblePdf / ValidatedPdf / AssemblyError` | ✅ ported |
 | `zio.pdf.ValidatePdf / ComparePdfs / PdfError / CompareError` | ✅ ported, 3 tests |
 | `zio.pdf.PdfStream` (top-level façade: `bits / topLevel / decode / elements / transformElements / validate / compare`) | ✅ ported |
-| `Pdf.objectNumbers / pageNumber / streamsOfPage / dictOfPage` (read-only convenience pipes) | ⏳ remaining |
-| `WriteLinearized` / `Tiff` (specialised image emitters) | ⏳ remaining |
-| Image-test helpers (the legacy `Jar` / `ProcessJarPdf` / `WriteFile`) | ⏳ remaining |
+| `zio.pdf.Pdf.objectNumbers` / `pageNumber` / `streamsOfPage` / `dictOfPage` (+ raw/stream variants) | ✅ ported (`ZStream` / `ZPipeline`) |
+| `zio.pdf.WriteLinearized` (first-page xref + linearization dict helpers) + `zio.pdf.Tiff` | ✅ ported — full linearized **file** layout: `WriteLinearized.encodeLinearizedPrefix` then `WritePdf.parts` on the tail (see `WriteLinearized` source doc) |
+| Image-test helpers: `zio.pdf.testkit.{Jar, ProcessJarPdf, WriteFile}` | ✅ ported (under `src/test`) |
 
-The remaining items are convenience helpers and specialised image
-emitters, not foundational architecture. The new layout uses ZIO's
-`ZStream` / `ZPipeline` / `ZChannel` throughout; `cats.effect.IO`,
+Those convenience helpers now sit beside the core stack. The layout
+uses ZIO's `ZStream` / `ZPipeline` / `ZChannel` throughout; `cats.effect.IO`,
 `fs2.Pull`, `cats.data.NonEmptyList`, `cats.data.Validated`, and
 `shapeless.HList` are completely gone from the production code.
 
@@ -835,44 +561,55 @@ partStream.via(WritePdf.parts).runFold(0L)(_ + _.size)  // counts bytes; ~64 KiB
 
 `StreamObjSpec` proves this end-to-end: it encodes a 1 MiB content stream and a 10 MiB content stream by piping a synthetic `ZStream[Byte]` through `WritePdf.parts` directly into a `runFold(0L)(_ + _.size)` byte counter — the total file bytes are never materialised. A separate test then encodes 1 MiB the same way, materialises the bytes, decodes them back, and verifies all 1 048 576 bytes of the deterministic `i & 0xff` pattern come through byte-perfect.
 
-### Unified decoder: `PdfStream.decode` + optional inline window
+### Unified decode entry point: `PdfStream.decode(log, mode)`
 
-There is **one** primary decode path on bytes:
+There is a single API with two **modes** (same duplicate-object filtering and final `Meta` in both cases):
 
-- **`PdfStream.decode(log, config)`** — runs `StreamingDecode.pipeline` then `DecodedFromStreaming`: streaming parse (duplicate suppression via `DuplicateFilterState`: a `java.util.BitSet` over object numbers, no `Set[Long]`; end-of-stream log is a **suppression count**) plus the same **stream expansion** as before (ObjStm, XRef stream metadata, lazy Flate) so `elements` / `validate` / `compare` keep working.
+```scala
+PdfStream.decode(log)                              // DecodeMode.Materialized → Decoded
+PdfStream.decode(log, PdfStream.DecodeMode.Streaming) // StreamingDecoded (SAX payloads)
+```
 
-- **`PdfStream.streamingDecode(...)`** — raw `StreamingDecoded` events only (no expansion to `Decoded`). Call per stream — each invocation returns a **fresh** pipeline (do not cache a single `ZPipeline` across PDFs).
+`PdfStream.streamingDecode` remains as shorthand for `StreamingDecode.pipeline(Log.noop)`.
 
-`StreamingDecode.Config(inlineMaxBytes)` (default **256 KiB**) controls small-stream behaviour: if `/Length <= inlineMaxBytes`, the parser buffers the raw payload once and emits **`ContentObjStart(..., inlinePayload = Some(bits))`** with **no** following `ContentObjBytes` / `ContentObjEnd`. Larger streams use **`ContentObjStart(..., None)`** then chunked **`ContentObjBytes`** and **`ContentObjEnd`**.
+**Why two output types at all?** A PDF content stream is not just opaque bytes: the materialized path runs `Content.uncompress`, detects **object streams** (`/Type /ObjStm`) and **xref streams**, and can emit many `Decoded.DataObj` values from one stream. That needs the full decompressed payload (lazy `BitVector`) in memory for that object. The streaming path deliberately forwards **raw** stream bytes in `ContentObjBytes` chunks so peak memory follows the upstream chunk size; it does **not** expand ObjStm / XRef stream payloads into nested objects (you would hash or store the bytes, or switch to materialized decode for that object).
+
+The materialized pipeline materialises each ordinary content stream's payload as a `BitVector` so it can resolve `/Length` and verify the trailing `endstream`. For PDFs with multi-MB attachments / images / fonts this means peak memory is bounded by the largest single object, not by the upstream chunk size — fine for typical text-heavy PDFs, problematic for big binary blobs.
+
+The streaming pipeline is the SAX-style alternative: same top-level coverage (version, comment, xref, startxref, data objects, content objects, accumulated `Meta`), but each content-stream payload is forwarded as a sequence of `ContentObjBytes` chunks instead of being materialised:
 
 ```scala
 sealed trait StreamingDecoded
 object StreamingDecoded {
-  case class DataObj(obj: Obj) extends StreamingDecoded
-  case class VersionT(v: Version) extends StreamingDecoded
-  case class XrefT(x: Xref) extends StreamingDecoded
-  case class StartXrefT(s: StartXref) extends StreamingDecoded
-  case class CommentT(b: ByteVector) extends StreamingDecoded
-  case class ContentObjStart(obj: Obj, length: Long, inlinePayload: Option[BitVector]) extends StreamingDecoded
-  case class ContentObjBytes(bytes: Chunk[Byte]) extends StreamingDecoded
-  case object ContentObjEnd extends StreamingDecoded
+  case class DataObj(obj: Obj)                                       extends StreamingDecoded
+  case class VersionT(v: Version)                                    extends StreamingDecoded
+  case class XrefT(x: Xref)                                          extends StreamingDecoded
+  case class StartXrefT(s: StartXref)                                extends StreamingDecoded
+  case class CommentT(b: ByteVector)                                 extends StreamingDecoded
+  // SAX events for one content stream:
+  case class ContentObjHeader(obj: Obj, length: Long)                extends StreamingDecoded
+  case class ContentObjBytes(bytes: Chunk[Byte])                     extends StreamingDecoded
+  case object ContentObjEnd                                           extends StreamingDecoded
   case class Meta(xrefs: List[Xref], trailer: Option[Trailer], version: Option[Version]) extends StreamingDecoded
 }
 ```
 
-For hashing large blobs, use **`streamingDecode`** and either collect `ContentObjBytes` or read `inlinePayload` when present. Set **`inlineMaxBytes = 0`** on `StreamingDecode.pipeline` if you want **only** chunked delivery (never inline), at the cost of an extra copy when you later call `decode` / `elements`.
+Internally the pipeline alternates between two modes:
 
-The state machine walks **WaitingHeader** (top-level events from the carry buffer via `IndirectObj.headerOnly`, which stops after `stream\n` and yields length), **BufferingBytes** (small inline window), **ForwardingBytes** (chunked raw payload), **SkippingStreamPayload** (suppressed duplicate objects), then **ConsumingTrailer** for `endstream` / `endobj`. Peak memory stays near upstream chunk size plus one header-sized carry; large payloads are not held in one buffer unless they fit the inline window.
+- **WaitingHeader**: try to decode one of `Version | Xref | StartXref | Comment | IndirectObj.headerOnly` from the carry buffer. The new `IndirectObj.headerOnly` codec stops *just after* the `stream\n` keyword and yields an `IndirectObjHeader(obj, Option[Long])`. On success, emit the matching event (and for stream-bearing objects, a `ContentObjHeader` plus a transition).
+- **ForwardingBytes(remaining)**: forward upstream bytes downstream as `ContentObjBytes` chunks, decrementing `remaining`. When it hits zero, parse `\nendstream\nendobj\n` and return to WaitingHeader.
+
+Peak memory = upstream chunk size + the carry buffer for one TopLevel-shaped header. **The actual content stream payload is forwarded chunk-by-chunk; it never lives in a single buffer.**
 
 ```scala
 import zio.pdf.{PdfStream, StreamingDecoded}
 import java.security.MessageDigest
 
-// Hash payload bytes from a large stream (use chunked events when no inline payload):
+// Hash a 256 KiB embedded blob without ever holding it in memory:
 val digest: ZIO[Any, Throwable, Array[Byte]] =
   ZStream
-    .fromInputStream(...)
-    .via(PdfStream.streamingDecode())
+    .fromInputStream(...)                              // big PDF
+    .via(PdfStream.streamingDecode)
     .collect { case StreamingDecoded.ContentObjBytes(c) => c }
     .runFold(MessageDigest.getInstance("SHA-256")) { (md, c) =>
       md.update(c.toArray); md
@@ -880,14 +617,21 @@ val digest: ZIO[Any, Throwable, Array[Byte]] =
     .map(_.digest())
 ```
 
-`StreamingDecodeSpec` covers header / bytes / end ordering, byte-perfect concatenation, large streaming payloads, and streaming hashes.
+`StreamingDecodeSpec` proves the API works:
+
+- **Header / Bytes\* / End sequence** is emitted exactly once per content object.
+- **Byte-perfect concatenation**: all `ContentObjBytes` chunks for one object concatenate to the original payload.
+- **1 MiB and 10 MiB streaming payloads** decoded end-to-end without materialisation (verified by `runFold(0L)` byte counters that never collect the chunks).
+- **Streaming SHA-256**: piping `ContentObjBytes` straight into `MessageDigest.update` produces the byte-perfect hash without buffering.
+
+When to use which mode:
 
 | Workload | Call |
 |---|---|
-| Need `Decoded` / `Element` / validate / compare (ObjStm and xref-stream expansion) | `PdfStream.decode(log)` or `decode(log, config)` |
-| Raw stream bytes only (hash, CDC, storage) | `PdfStream.streamingDecode(log, config)` |
+| Text-heavy PDFs, small content streams, need lazy decompression / ObjStm extraction | `PdfStream.decode(log)` or `decode(log, DecodeMode.Materialized)` |
+| Big embedded streams, forward raw bytes to a sink (CDC, S3, hash) without materialising | `PdfStream.decode(log, DecodeMode.Streaming)` or `streamingDecode` |
 
-This closes the loop with the encoder: **`Part.StreamObj`** writes huge attachments without materialisation; the decoder can consume them chunk-by-chunk when they exceed the inline window.
+This finally closes the loop: **both encoder and decoder are now memory-bounded.** `Part.StreamObj` lets the encoder write multi-GB attachments without materialisation; `PdfStream.streamingDecode` lets the decoder read them the same way.
 
 ## Content-defined chunking (FastCDC) for storage dedup
 
@@ -925,12 +669,11 @@ Properties locked down by `FastCdcSpec`:
 ### Throughput
 
 ```
-Benchmark                        (rechunk)    (size)   Mode  Cnt   Score   Error  Units
-FastCdcBench.cdcThroughput           65536  33554432  thrpt    5  13.653 ± 4.898  ops/s
-FastCdcBench.cdcThroughputCount      65536  33554432  thrpt    5  14.468 ± 1.101  ops/s
+Benchmark                   (rechunk)    (size)  Mode  Cnt   Score   Error  Units
+FastCdcBench.cdcThroughput      65536  33554432  avgt    5  72.635 ± 4.797  ms/op
 ```
 
-**~450 MB/s** on the build VM (32 MiB × 13.653 ops/s, JDK 21). For comparison, the FastCDC paper reports ~590 MB/s in native C; the JVM port is ~76% of native throughput, well past Rabin-Karp's typical 30–50 MB/s.
+**~440 MB/s** on the build VM (32 MiB / 72.635 ms, JDK 21). For comparison, the FastCDC paper reports ~590 MB/s in native C; the JVM port is ~75% of native throughput, well past Rabin-Karp's typical 30–50 MB/s.
 
 ### Composing CDC with `Part.StreamObj`
 
@@ -972,7 +715,6 @@ stream.via(PdfStream.decode()).runDrain      // file handle closed by ZStream's 
 When to use which:
 
 - **`PdfIO.scoped.{readAll, writeAll}`** — small/medium PDFs where you want the strongest possible "did I forget to close this?" guarantee. The `$` macro forbids the file handle from escaping the scoped block, so the InputStream/OutputStream is forced to be consumed inline. Returns pure data (`Chunk[Byte]`, `Long`); side effect is the file I/O.
-- **`PdfIO.scoped.{decodeStreamingDecoded, decodeDecoded, validate, comparePaths}`** — same `Scope` + `Resource` ownership: the file is read with **only** `stream.read(...)` as the receiver inside the `$` block (required by the macro). Bytes are fed chunk-by-chunk through the same decoders as `ZStream.via(PdfStream.*)` (no full-file `ByteArrayOutputStream` copy). The **returned** `Chunk[Decoded]` / validation still aggregates the full decode like `runCollect` would; for lazy `ZStream` composition past the function boundary, use **`PdfIO.zio.reader`**.
 - **`PdfIO.zio.{reader, writer}`** — large files, async workflows, and anything that wants `ZStream` composition past the function boundary. Standard `ZIO.scoped` lifetime; the stream value flows freely through ZIO-shaped code.
 
 `PdfIOSpec` proves both work:
@@ -982,11 +724,10 @@ When to use which:
 - `Resource.flatMap` composes two file handles, finalized in LIFO order
 - `PdfIO.zio.reader` streams a 1 MiB file without materialising it
 - A real PDF round-trips end-to-end: `PdfIO.zio.reader → PdfStream.decode → Decoded.{DataObj, ContentObj, Meta}`
-- `PdfIO.scoped.decodeDecoded` matches that decode on `xref-stream.pdf` (byte-for-byte same `Chunk[Decoded]`).
 
 ### Why both APIs
 
-The `$[A]` path-dependent type is the killer feature of `Scope` but it's also its limitation: a value tagged `scope.$[InputStream]` cannot escape the `scoped` block, which forbids building a `ZStream.fromInputStream` that captures the handle in a pull closure. The decode helpers instead run **synchronous incremental steps** (`StreamingDecode.stepChunk` + `DecodedFromStreaming.foldChunk`) inside the `$` block while calling `stream.read` on the receiver. So:
+The `$[A]` path-dependent type is the killer feature of `Scope` but it's also its limitation: a value tagged `scope.$[InputStream]` cannot escape the `scoped` block, which is **exactly** what makes a `ZStream.fromInputStream`-style wrapper impossible — that wrapper would have to capture the InputStream in a closure, and the macro forbids capture. So:
 
 - `Scope` is a great fit for synchronous, "open file → process inline → close" workflows.
 - For streaming I/O across function boundaries, `ZIO.scoped` + `ZStream.fromInputStream` is the right tool. The cost is that you give up the macro's compile-time leak prevention.
