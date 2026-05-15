@@ -12,7 +12,10 @@
 - **ZIO 2.1.25** with `zio-streams`, `zio-prelude` 1.0.0-RC47.
 - **Kyo 1.0-RC1** (`kyo-data`, `kyo-kernel`, `kyo-prelude`, `kyo-core`)
   for the algebraic-effect runtime used by the Scan algebra.
-- **`zio-blocks-schema` 0.0.33** for schema-derived codecs (smoke-tested).
+- **ZIO Blocks 0.0.38** (`schema`, `mediatype`, `ringbuffer`,
+  `streams`, `scope`) for schema derivation, typed media types,
+  hot-path buffers, pull-based pipelines, and compile-time resource
+  safety.
 - **scodec-core 2.3.3** + **scodec-bits 1.2.4**.
 - A **ZIO port of `scodec.stream.StreamDecoder`** (the file from the
   original prompt) implemented on top of `ZChannel`.
@@ -415,7 +418,78 @@ RingBufferBench.arrayBlockingQueueFillDrain  16384  avgt    5  485.797 ± 33.699
 
 For 16 K element fill-then-drain on a single thread, `SpscRingBuffer` is ~7× faster than `ArrayBlockingQueue` per element. The win when there's a real thread boundary is bigger because `ABQ` has to acquire a lock per `offer`/`poll` while `SpscRingBuffer` only needs a single relaxed write per slot. Use it for "decoder fiber → consumer fiber" handoff when the work is CPU-bound and the queue is on the hot path.
 
-**About `zio-blocks-streams`**: the project ships (`0.0.20`) but the API is still pull-based, alpha-grade, and not a drop-in replacement for `ZStream` for our purposes. The dep is wired into `build.sbt` so it's available; it'll be the natural target for a deeper refactor once it stabilises.
+### zio-blocks-streams as an effectful PDF pipeline surface
+
+`zio-blocks-streams` is now pinned with the rest of ZIO Blocks at
+`0.0.38` and used directly. Its core API is still pull-based
+(`Stream`, `Pipeline`, `Sink`), so the PDF byte parser remains on
+`ZStream` / `ZPipeline` / `ZChannel`; the bridge lives in
+`zio.pdf.blocks.BlocksRuntime`:
+
+```scala
+import zio.pdf.blocks.*
+import zio.blocks.streams.Sink
+import java.nio.file.Path
+
+val path = Path.of("filing.pdf")
+
+// Pull bytes with zio-blocks Scope/Resource and execute as a ZIO effect:
+val byteCount =
+  BlocksRuntime.runZIO(PdfBlockStreams.fromPath(path), Sink.count)
+
+// First-page text through a zio-blocks-streams Sink, lifted into ZIO:
+val firstPage =
+  PdfBlockStreams.firstPageText(path)
+```
+
+Pure zio-blocks pipelines are useful for the post-parse stages that do
+not need async I/O:
+
+```scala
+import zio.blocks.streams.Stream
+
+val captionish =
+  Stream("  ACME   LENDING LLC  ", "v.", " JANE DOE Defendant ")
+    .via(PdfBlockStreams.captionCandidateLines)
+    .runCollect
+```
+
+The bridge deliberately runs the pull-based program inside
+`ZIO.attemptBlocking`, so callers can still compose with normal ZIO
+effects while the pipeline itself stays zio-blocks-native.
+
+## First-page text and first-page slices
+
+The first-page APIs are streaming-aware and use this library's own PDF
+parser rather than PDFBox:
+
+```scala
+import zio.*
+import zio.pdf.page.FirstPage
+
+val bytes: Chunk[Byte] = ???
+
+val text =
+  FirstPage.fromBytes(bytes).map(_.text)
+
+val firstPageOnlyPdf =
+  FirstPage.sliceFromBytes(bytes).map(_.bytes)
+```
+
+`FirstPage.content` decodes the PDF into `Element` values, resolves the
+first logical page, follows its `/Contents` references, decompresses
+those content streams, and extracts visible text for common legal /
+generated filings (`Tj`, `TJ`, `'`, `"`, `Td`, `TD`, `Tm`, `T*`, literal
+strings, and straightforward hex strings). Legal-party inference is not
+part of the production API; tests demonstrate it as a downstream
+composition over the extracted first-page text.
+
+`FirstPage.sliceFromBytes` emits a one-page PDF slice containing the
+first page and its content streams. This is the rendering boundary:
+the core library does first-page selection and slicing, while any
+rasterizer (PDFBox in tests, another renderer in production) can render
+that smaller first-page-only PDF without inspecting the original
+multi-page input.
 
 ## `ScodecDeriver` — derive `scodec.Codec[A]` from `Schema[A]`
 
