@@ -23,7 +23,7 @@ final case class FirstPagePdfSlice(
 
 object FirstPage {
 
-  val content: ZPipeline[Any, Throwable, Byte, FirstPageContent] =
+  lazy val content: ZPipeline[Any, Throwable, Byte, FirstPageContent] =
     PdfStream.elements(Log.noop) >>> contentFromElements
 
   def fromBytes(bytes: Chunk[Byte]): ZIO[Any, Throwable, FirstPageContent] =
@@ -33,7 +33,7 @@ object FirstPage {
       .runHead
       .someOrFail(new NoSuchElementException("PDF has no first-page content result"))
 
-  val slice: ZPipeline[Any, Throwable, Byte, FirstPagePdfSlice] =
+  lazy val slice: ZPipeline[Any, Throwable, Byte, FirstPagePdfSlice] =
     ZPipeline.fromFunction[Any, Throwable, Byte, FirstPagePdfSlice] { bytes =>
       ZStream.fromZIO(sliceFromBytesZIO(bytes.runCollect))
     }
@@ -41,7 +41,7 @@ object FirstPage {
   def sliceFromBytes(bytes: Chunk[Byte]): ZIO[Any, Throwable, FirstPagePdfSlice] =
     sliceFromBytesZIO(ZIO.succeed(bytes))
 
-  val contentFromElements: ZPipeline[Any, Throwable, Element, FirstPageContent] =
+  lazy val contentFromElements: ZPipeline[Any, Throwable, Element, FirstPageContent] =
     StatefulPipe[Element, PageSelection.Acc, FirstPageContent](PageSelection.Acc.empty, finalize)(step)
 
   private val step: StatefulPipe.Step[Element, PageSelection.Acc, FirstPageContent] =
