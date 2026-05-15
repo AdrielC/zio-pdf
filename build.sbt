@@ -1,13 +1,10 @@
 val zioVersion                 = "2.1.25"
 val zioPreludeVersion          = "1.0.0-RC47"
-val zioBlocksSchemaVersion     = "0.0.33"
-val zioBlocksMediaTypeVersion  = "0.0.33"
-val zioBlocksRingbufferVersion = "0.0.32"
-val zioBlocksStreamsVersion    = "0.0.20"
-val zioBlocksScopeVersion      = "0.0.33"
+val zioBlocksVersion           = "0.0.38"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
 val kyoVersion                 = "1.0-RC1"
+val pdfBoxVersion              = "3.0.7"
 
 ThisBuild / organization      := "com.springernature"
 ThisBuild / scalaVersion      := "3.8.3"
@@ -38,11 +35,11 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio"               % zioVersion,
       "dev.zio"   %% "zio-streams"       % zioVersion,
       "dev.zio"   %% "zio-prelude"       % zioPreludeVersion,
-      "dev.zio"   %% "zio-blocks-schema"     % zioBlocksSchemaVersion,
-      "dev.zio"   %% "zio-blocks-mediatype"  % zioBlocksMediaTypeVersion,
-      "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
-      "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
-      "dev.zio"   %% "zio-blocks-scope"      % zioBlocksScopeVersion,
+      "dev.zio"   %% "zio-blocks-schema"     % zioBlocksVersion,
+      "dev.zio"   %% "zio-blocks-mediatype"  % zioBlocksVersion,
+      "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksVersion,
+      "dev.zio"   %% "zio-blocks-streams"    % zioBlocksVersion,
+      "dev.zio"   %% "zio-blocks-scope"      % zioBlocksVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
       "io.getkyo" %% "kyo-data"          % kyoVersion,
@@ -50,6 +47,7 @@ lazy val root = (project in file("."))
       "io.getkyo" %% "kyo-prelude"       % kyoVersion,
       "io.getkyo" %% "kyo-core"          % kyoVersion,
       "io.getkyo" %% "kyo-zio"           % kyoVersion,
+      "org.apache.pdfbox" % "pdfbox"     % pdfBoxVersion % Test,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt"      % zioVersion % Test
     ),
