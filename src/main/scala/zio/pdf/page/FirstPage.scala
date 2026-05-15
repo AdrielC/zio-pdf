@@ -26,6 +26,13 @@ object FirstPage {
   val content: ZPipeline[Any, Throwable, Byte, FirstPageContent] =
     PdfStream.elements(Log.noop) >>> contentFromElements
 
+  def fromBytes(bytes: Chunk[Byte]): ZIO[Any, Throwable, FirstPageContent] =
+    zio.stream.ZStream
+      .fromChunk(bytes)
+      .via(content)
+      .runHead
+      .someOrFail(new NoSuchElementException("PDF has no first-page content result"))
+
   val contentFromElements: ZPipeline[Any, Throwable, Element, FirstPageContent] =
     StatefulPipe[Element, PageSelection.Acc, FirstPageContent](PageSelection.Acc.empty, finalize)(step)
 
