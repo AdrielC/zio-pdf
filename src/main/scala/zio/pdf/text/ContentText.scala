@@ -192,8 +192,7 @@ object ContentText {
     var i      = start
     var depth  = 0
     var done   = false
-    var ok     = true
-    while (ok && !done && i < input.length) {
+    while (!done && i < input.length) {
       input.charAt(i) match {
         case '\\' if i + 1 < input.length =>
           val (s, next) = readEscape(input, i + 1)
@@ -215,7 +214,7 @@ object ContentText {
           i += 1
       }
     }
-    Option.when(ok && done)((out.result(), i))
+    Option.when(done)((out.result(), i))
   }
 
   private def readEscape(input: String, start: Int): (String, Int) =
