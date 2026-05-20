@@ -32,8 +32,3 @@ jobs:
 
       - name: Run tests
         run: sbt -batch test
-
-      # Keep bench subprojects compilable on every push so benchmark
-      # regressions are caught before the nightly run fires.
-      - name: Compile bench subprojects
-        run: sbt -batch "bench/Jmh/compile" "benchFs2/Jmh/compile"

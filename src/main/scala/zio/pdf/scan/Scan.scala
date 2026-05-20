@@ -212,24 +212,13 @@ object Scan {
   /** Build a single-primitive scan. */
   def lift[I, O](p: ScanPrim[I, StepOut.StepOut[O]]): FreeScan[I, O] = FreeScan.lift(p)
 
+  /** A pure-function scan. */
+  def arr[I, O](f: I => O): FreeScan[I, O] = FreeScan.arr(f)
+
   /** The identity FreeScan. */
   def id[A]: FreeScan[A, A] = FreeScan.id[A]
 
-  // -------------------------------------------------------------------
-  // Pure-function lifts.
-  //
-  // `map` / `arr` return the narrow `FreeScan.Arr[I, O]` static type
-  // via `transparent inline`. That narrowness lets `>>>` (below) and
-  // the inline fusion machinery in `InlineFusion` see the case-class
-  // identity at the call site and collapse `Arr >>> Arr` to a single
-  // `Arr` at compile time -- no runtime walk, no `tryFuse` pass.
-  // Assignments to widened types still work (subtype relationship is
-  // preserved), so this is a strict improvement, not an API break.
-  // -------------------------------------------------------------------
-  transparent inline def map[I, O](inline f: I => O): FreeScan.Arr[I, O] =
-    FreeScan.Arr[I, O](f)
-  transparent inline def arr[I, O](inline f: I => O): FreeScan.Arr[I, O] =
-    FreeScan.Arr[I, O](f)
+  def map[I, O](f: I => O): FreeScan[I, O]                   = FreeScan.lift(ScanPrim.Map(f))
   def filter[A](p: A => Boolean): FreeScan[A, A]             = FreeScan.lift(ScanPrim.Filter(p))
   def take[A](n: Int): FreeScan[A, A]                        = FreeScan.lift(ScanPrim.Take(n))
   def drop[A](n: Int): FreeScan[A, A]                        = FreeScan.lift(ScanPrim.Drop(n))
@@ -256,47 +245,11 @@ object Scan {
   def snd[A, B]: FreeScan[(A, B), B]                        = FreeScan.snd
   def void[A, B](self: FreeScan[A, B]): FreeScan[A, Unit]   = FreeScan.void(self)
 
-  // -------------------------------------------------------------------
-  // Runners
-  //
-  // `Scan.run` is the only entry point you should normally use. It:
-  //   1. Tries `Fusion.tryFuse` (fully-fused pure spines run as one
-  //      function per input -- the fast lane).
-  //   2. Otherwise routes through `RegInterp`, the register-allocated
-  //      stepper that keeps per-stage state in a single mutable
-  //      `RegState` and reuses one `RegOutBuffer` for emissions.
-  //   3. Falls back to the legacy `SinglePassInterp.Stepper` family for
-  //      shapes the register lane does not yet natively support
-  //      (Fanout/Choice with stateful arms).
-  //
-  // Step (1) and (3) match the legacy semantics exactly; step (2) is
-  // the new fast lane. Callers don't pick.
-  //
-  // `runDirect` / `runDirectReg` stay as `@deprecated` thin delegates
-  // so existing call sites keep working through one more cycle. The
-  // CI bench-results artifact tracks both lanes; the public README
-  // surface uses `Scan.run`.
-  // -------------------------------------------------------------------
+  // --- Runners: delegate to the legacy single-pass interpreter for now ---
 
-  /** Run a scan over an `Iterable` of inputs and produce `(signal,
-    * outputs)`. Picks the fastest applicable runner internally. */
-  def run[I, O, E](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, E], Vector[O]) =
-    RegInterp.runDirect(scan, inputs)
-
-  /** @deprecated Use `Scan.run`. Kept as a thin delegate so existing
-    *             call sites keep working; will be removed in a
-    *             follow-up. */
-  @deprecated("Use Scan.run; it picks the fastest runner automatically.", "0.3.0")
+  /** Pure synchronous driver. */
   def runDirect[I, O, E](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, E], Vector[O]) =
     SinglePassInterp.runDirect(scan, inputs)
-
-  /** @deprecated Use `Scan.run`. */
-  @deprecated("Use Scan.run; it routes through the register lane automatically.", "0.3.0")
-  def runDirectReg[I, O, E](
-      scan: FreeScan[I, O],
-      inputs: Iterable[I]
-  ): (ScanDone[O, E], Vector[O]) =
-    RegInterp.runDirect(scan, inputs)
 
   /** Kyo-effect-typed runner. */
   def runKyo[I, O, E](scan: FreeScan[I, O], inputs: Seq[I])(using
