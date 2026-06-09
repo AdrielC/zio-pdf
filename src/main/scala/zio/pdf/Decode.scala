@@ -112,6 +112,6 @@ object Decode {
 
   /** Full decoder pipeline `Byte -> Decoded`, including duplicate
     * filtering. */
-  def apply(log: Log = Log.noop): ZPipeline[Any, Throwable, Byte, Decoded] =
-    TopLevel.pipe >>> FilterDuplicates.pipe(log) >>> fromTopLevel
+  def apply(enableDiagnostics: Boolean = false): ZPipeline[Any, Throwable, Byte, Decoded] =
+    TopLevel.pipe >>> FilterDuplicates.pipe(enableDiagnostics) >>> fromTopLevel
 }

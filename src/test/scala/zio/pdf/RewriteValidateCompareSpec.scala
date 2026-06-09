@@ -64,14 +64,14 @@ object RewriteValidateCompareSpec extends ZIOSpecDefault {
         // Decode -> parts -> WritePdf.parts.
         roundOut <- ZStream
                       .fromChunk(Chunk.fromArray(bytes.toArray))
-                      .via(PdfStream.decode(Log.noop))
+                      .via(PdfStream.decode())
                       .via(Decoded.parts)
                       .via(WritePdf.parts)
                       .runFold(ByteVector.empty)(_ ++ _)
         // Re-decode the round-tripped bytes to confirm structural validity.
         decoded2 <- ZStream
                       .fromChunk(Chunk.fromArray(roundOut.toArray))
-                      .via(PdfStream.decode(Log.noop))
+                      .via(PdfStream.decode())
                       .runCollect
         data2     = decoded2.collect { case Decoded.DataObj(o)        => o }
         ctnt2     = decoded2.collect { case Decoded.ContentObj(o, _, _) => o }
@@ -85,14 +85,14 @@ object RewriteValidateCompareSpec extends ZIOSpecDefault {
     test("PdfStream.validate succeeds on a valid catalog -> pages -> page -> content PDF") {
       for {
         bytes <- pdfBytesZ
-        v     <- PdfStream.validate(Log.noop)(ZStream.fromChunk(Chunk.fromArray(bytes.toArray)))
+        v     <- PdfStream.validate()(ZStream.fromChunk(Chunk.fromArray(bytes.toArray)))
       } yield assertTrue(v.isSuccess)
     },
 
     test("PdfStream.compare on two identical PDFs reports no differences") {
       for {
         bytes <- pdfBytesZ
-        cmp   <- PdfStream.compare(Log.noop)(
+        cmp   <- PdfStream.compare()(
                    ZStream.fromChunk(Chunk.fromArray(bytes.toArray)),
                    ZStream.fromChunk(Chunk.fromArray(bytes.toArray))
                  )

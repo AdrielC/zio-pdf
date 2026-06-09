@@ -28,7 +28,7 @@ import zio.prelude.fx.ZPure
  *     success channel via [[PureDecoder.Status]] so callers can
  *     loop without paying for a `ZPure.fail` allocation.
  *   - **Reader** `R  = Any` because we have no environment to read
- *     for now (the legacy `Log` could plug in here later).
+ *     for now (`zio.pdf.ZPureLog` drains diagnostics at boundaries).
  *
  * `PureDecoder` is the *pure* half of the decoding story.
  * `StreamDecoder` (built on `ZChannel`) is the *I/O* half. They

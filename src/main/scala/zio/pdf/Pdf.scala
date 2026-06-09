@@ -39,9 +39,9 @@ object Pdf {
     }
 
   /** Fully decode PDF bytes and select objects by number (materialised stream payload when present). */
-  def objectNumbers(log: Log, numbers: List[Long]): ZPipeline[Any, Throwable, Byte, (Obj, Option[BitVector])] =
+  def objectNumbers(enableDiagnostics: Boolean, numbers: List[Long]): ZPipeline[Any, Throwable, Byte, (Obj, Option[BitVector])] =
     ZPipeline.fromFunction[Any, Throwable, Byte, (Obj, Option[BitVector])] { bytes =>
-      bytes.via(PdfStream.decode(log)).flatMap {
+      bytes.via(PdfStream.decode(enableDiagnostics)).flatMap {
         case Decoded.ContentObj(obj @ Obj(Obj.Index(n, _), _), _, stream) if numbers.contains(n) =>
           ZStream.fromZIO(
             ZIO
@@ -56,8 +56,8 @@ object Pdf {
     }
 
   /** First `/Pages` tree that lists `page` in its `/Kids` → that page's object number. */
-  def pageNumber(log: Log, page: Int): ZPipeline[Any, Throwable, Byte, Long] =
-    PdfStream.elements(log) >>> ZPipeline.mapChunks { ch =>
+  def pageNumber(enableDiagnostics: Boolean, page: Int): ZPipeline[Any, Throwable, Byte, Long] =
+    PdfStream.elements(enableDiagnostics) >>> ZPipeline.mapChunks { ch =>
       ch.flatMap {
         case Element.Data(_, Element.DataKind.Pages(Pages(_, _, kids, _))) =>
           kids.lift(page).fold[Chunk[Long]](Chunk.empty)(r => Chunk.single(r.number))
@@ -67,11 +67,11 @@ object Pdf {
     } >>> ZPipeline.take(1L)
 
   /** Resolve the page object (and optional stream) for zero-based `page`. */
-  def pageObject(log: Log, page: Int)(bytes: ZStream[Any, Throwable, Byte]): ZStream[Any, Throwable, (Obj, Option[BitVector])] =
+  def pageObject(enableDiagnostics: Boolean, page: Int)(bytes: ZStream[Any, Throwable, Byte]): ZStream[Any, Throwable, (Obj, Option[BitVector])] =
     ZStream.unwrap(
-      bytes.via(pageNumber(log, page)).runHead.map {
+      bytes.via(pageNumber(enableDiagnostics, page)).runHead.map {
         case None       => ZStream.empty
-        case Some(num) => bytes.via(objectNumbers(log, List(num)))
+        case Some(num) => bytes.via(objectNumbers(enableDiagnostics, List(num)))
       }
     )
 
@@ -81,11 +81,11 @@ object Pdf {
   def rawStreamOfObj(number: Long): ZPipeline[Any, Throwable, Byte, BitVector] =
     rawStreamOfObjs(List(number)) >>> ZPipeline.take(1L)
 
-  def streamOfObjs(log: Log, numbers: List[Long]): ZPipeline[Any, Throwable, Byte, BitVector] =
-    ZPipeline.fromFunction[Any, Throwable, Byte, BitVector](_.via(objectNumbers(log, numbers)).collect { case (_, Some(b)) => b })
+  def streamOfObjs(enableDiagnostics: Boolean, numbers: List[Long]): ZPipeline[Any, Throwable, Byte, BitVector] =
+    ZPipeline.fromFunction[Any, Throwable, Byte, BitVector](_.via(objectNumbers(enableDiagnostics, numbers)).collect { case (_, Some(b)) => b })
 
-  def streamTextOfObjs(log: Log, numbers: List[Long]): ZPipeline[Any, Throwable, Byte, String] =
-    streamOfObjs(log, numbers) >>> ZPipeline.mapZIO { (bits: BitVector) =>
+  def streamTextOfObjs(enableDiagnostics: Boolean, numbers: List[Long]): ZPipeline[Any, Throwable, Byte, String] =
+    streamOfObjs(enableDiagnostics, numbers) >>> ZPipeline.mapZIO { (bits: BitVector) =>
       ZIO.fromEither(
         utf8
           .decode(bits)
@@ -96,21 +96,21 @@ object Pdf {
       )
     }
 
-  def dictOfPage(log: Log, page: Int)(bytes: ZStream[Any, Throwable, Byte]): ZStream[Any, Throwable, Prim.Dict] =
-    pageObject(log, page)(bytes).collect { case (Obj(_, d: Prim.Dict), _) => d }
+  def dictOfPage(enableDiagnostics: Boolean, page: Int)(bytes: ZStream[Any, Throwable, Byte]): ZStream[Any, Throwable, Prim.Dict] =
+    pageObject(enableDiagnostics, page)(bytes).collect { case (Obj(_, d: Prim.Dict), _) => d }
 
-  def streamsOfPage(log: Log, page: Int)(bytes: ZStream[Any, Throwable, Byte]): ZStream[Any, Throwable, String] =
-    dictOfPage(log, page)(bytes).flatMap { pageDict =>
+  def streamsOfPage(enableDiagnostics: Boolean, page: Int)(bytes: ZStream[Any, Throwable, Byte]): ZStream[Any, Throwable, String] =
+    dictOfPage(enableDiagnostics, page)(bytes).flatMap { pageDict =>
       Prim.Dict.collectRefs("Contents")(pageDict) match {
         case Attempt.Successful(nums) if nums.nonEmpty =>
-          ZStream.fromIterable(nums).flatMap(n => bytes.via(streamTextOfObjs(log, List(n))))
+          ZStream.fromIterable(nums).flatMap(n => bytes.via(streamTextOfObjs(enableDiagnostics, List(n))))
         case _ =>
           ZStream.empty
       }
     }
 
-  def dictOfObj(log: Log, number: Long)(bytes: ZStream[Any, Throwable, Byte]): ZStream[Any, Throwable, Map[String, Prim]] =
-    bytes.via(objectNumbers(log, List(number))).collect {
+  def dictOfObj(enableDiagnostics: Boolean, number: Long)(bytes: ZStream[Any, Throwable, Byte]): ZStream[Any, Throwable, Map[String, Prim]] =
+    bytes.via(objectNumbers(enableDiagnostics, List(number))).collect {
       case (Obj(_, d: Prim.Dict), _) =>
         Map.from(d.data.toList)
     }
@@ -181,4 +181,8 @@ object AssemblePdf {
     decoded
       .runFold(emptyState)(step)
       .map(consPdf)
+
+  /** Assemble from an in-memory chunk (same fold as [[apply]], no [[ZStream]]). */
+  def fromChunk(decoded: Chunk[Decoded]): Validation[AssemblyError, ValidatedPdf] =
+    consPdf(decoded.foldLeft(emptyState)(step))
 }

@@ -47,6 +47,7 @@ import _root_.scodec.codecs.{uint8, vector}
 import scala.compiletime.uninitialized
 
 import zio.pdf.scan.*
+import zio.scan.*
 
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
@@ -161,6 +162,22 @@ class ScanBench {
   // suspension cost that dominates this trivial workload by ~30x. See
   // `ScanPerfBench` in the test sources for an in-test measurement that
   // exercises the Kyo lane on a smaller payload.
+
+  // -------------------------------------------------------------------
+  // zio.scan: ZPure-aligned substrate on zio.blocks.chunk.Chunk
+  // -------------------------------------------------------------------
+
+  @Benchmark
+  def bytePipelineFused: zio.blocks.chunk.Chunk[Int] =
+    BytePipeline.scanBenchFused.run(bytes)
+
+  @Benchmark
+  def zpureByteScanFast: zio.blocks.chunk.Chunk[Int] =
+    ZPureByteScan.runFast(BytePipeline.scanBenchFused, bytes)
+
+  @Benchmark
+  def zpureByteScanBatched: zio.blocks.chunk.Chunk[Int] =
+    ZPureByteScan.runBatched(BytePipeline.scanBenchFused, bytes, batchSize = 65536)
 
   @Benchmark
   def handCoded: Array[Int] = {

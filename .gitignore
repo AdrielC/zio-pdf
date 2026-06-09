@@ -31,3 +31,8 @@ project/.sbtboot/
 .cache
 .cache-main
 .cache-tests
+
+# Local tooling / bench output (never commit)
+.cursor/
+bench/jmh-result.csv
+project/metals.sbt

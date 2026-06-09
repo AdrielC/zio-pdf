@@ -6,6 +6,25 @@
 > off of `cats-effect` / `fs2` / `scodec-stream` (Scala 2.13) and onto
 > the latest **ZIO 2 / Scala 3** ecosystem.
 
+## Start here
+
+```bash
+sbt examples/run                              # decode xref-stream.pdf (scoped vs ZIO)
+sbt test                                      # full suite
+sbt "bench/Jmh/run -i 3 -wi 2 .*StreamDecoderBench.*"
+sbt "bench/Jmh/run -i 3 -wi 2 .*PdfIOBench.*"
+```
+
+| Path | What it is |
+|------|------------|
+| `zio.pdf` (`PdfStream`, `PdfIO`) | **Product** — read/decode/validate/compare PDFs |
+| `zio.scodec.stream` | **Codec engine** — `StreamDecoder`, `PureDecoder`, `ZChannel` |
+| `zio.scan` | **Fast ZPure byte substrate** — fused maps on `zio.blocks.chunk` |
+| `zio.pdf.scan` | **Scan algebra** (Kyo) — CDC, fanout, fusion experiments |
+| `legacy/` | **Reference only** — original fs2-pdf, not in the build |
+
+Diagnostics: pass `enableDiagnostics = true` on decode/IO entry points (uses `ZPureLog`, not a separate `Log` trait).
+
 ## What this branch contains
 
 - **Scala 3.8.3** (the latest 3.8.x release).
@@ -738,7 +757,7 @@ This is a feature, not a bug — `Scope` says, on the tin: "your resource cannot
 
 For this codebase, no. `ZStream` / `ZPipeline` / `ZChannel` *is* the streaming substrate; the entire decoder + encoder + pipeline layer is built on it. `Scope`/`Resource`/`Wire` solve a different problem (resource lifetime + DI graphs) and would only replace the small set of sites where we currently use `ZIO` directly:
 
-- `Log.live` (`ZIO.logDebug` / `logError`) — could move to a synchronous `Logger` trait wrapped in `Resource`.
+- `ZPureLog.drainToZio` (`ZIO.log`) — could move to a synchronous `Logger` trait wrapped in `Resource`.
 - `StatefulPipe.applyEffect`'s `onDone` hook — same, but it's optional.
 - `PdfIO.zio.{reader, writer}` — could move to `Scope` if every consumer agreed to call `scoped { ... }` synchronously, but that defeats the streaming use case.
 

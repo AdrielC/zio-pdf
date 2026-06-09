@@ -5,6 +5,7 @@ val zioBlocksMediaTypeVersion  = "0.0.33"
 val zioBlocksRingbufferVersion = "0.0.32"
 val zioBlocksStreamsVersion    = "0.0.20"
 val zioBlocksScopeVersion      = "0.0.33"
+val zioBlocksChunkVersion      = "0.0.33"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
 val kyoVersion                 = "1.0-RC1"
@@ -43,6 +44,7 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
       "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
       "dev.zio"   %% "zio-blocks-scope"      % zioBlocksScopeVersion,
+      "dev.zio"   %% "zio-blocks-chunk"      % zioBlocksChunkVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
       "io.getkyo" %% "kyo-data"          % kyoVersion,
@@ -71,7 +73,9 @@ lazy val bench = (project in file("bench"))
     name              := "zio-pdf-bench",
     publish / skip    := true,
     Jmh / version     := "1.37",
-    scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused"))
+    scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused")),
+    Compile / unmanagedResourceDirectories +=
+      (LocalRootProject / Test / resourceDirectory).value
   )
 
 /**
@@ -86,6 +90,21 @@ lazy val bench = (project in file("bench"))
  *
  *   sbt 'benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms'
  */
+/**
+ * Runnable examples. Start here if the repo feels scattered:
+ *
+ *   sbt examples/run
+ */
+lazy val examples = (project in file("examples"))
+  .dependsOn(root)
+  .settings(
+    name           := "zio-pdf-examples",
+    publish / skip := true,
+    Compile / mainClass := Some("zio.pdf.examples.ReadAndDecode"),
+    Compile / unmanagedResourceDirectories +=
+      (LocalRootProject / Test / resourceDirectory).value
+  )
+
 lazy val benchFs2 = (project in file("bench-fs2"))
   .enablePlugins(JmhPlugin)
   .dependsOn(root)
