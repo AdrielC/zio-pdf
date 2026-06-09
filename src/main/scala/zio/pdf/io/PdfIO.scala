@@ -37,7 +37,7 @@ package zio.pdf.io
 import java.io.{InputStream, OutputStream}
 import java.nio.file.{Files, Path, StandardOpenOption}
 
-import zio.{Chunk, Runtime, Unsafe, ZIO}
+import zio.{Chunk, ZIO}
 import zio.blocks.scope.{Resource, Scope, Unscoped}
 import zio.pdf.*
 import zio.prelude.Validation
@@ -91,15 +91,15 @@ object PdfIO {
       new Unscoped[Chunk[Decoded]] {}
     private given validationPdfUnscoped: Unscoped[Validation[PdfError, Unit]] =
       new Unscoped[Validation[PdfError, Unit]] {}
-    private def unsafeRun[A](zio: ZIO[Any, Throwable, A]): A =
-      Unsafe.unsafe { implicit u =>
-        Runtime.default.unsafe.run(zio).getOrThrowFiberFailure()
-      }
-
-    private def chunkFromReadBuffer(buf: Array[Byte], n: Int): Chunk[Byte] = {
-      val copy = java.util.Arrays.copyOf(buf, n)
-      Chunk.fromArray(copy)
-    }
+    private given validationCompareUnscoped: Unscoped[Validation[CompareError, Unit]] =
+      new Unscoped[Validation[CompareError, Unit]] {}
+    private given eitherThrowableChunkDecodedUnscoped: Unscoped[Either[Throwable, Chunk[Decoded]]] =
+      new Unscoped[Either[Throwable, Chunk[Decoded]]] {}
+    private given eitherThrowableValidationPdfUnscoped: Unscoped[Either[Throwable, Validation[PdfError, Unit]]] =
+      new Unscoped[Either[Throwable, Validation[PdfError, Unit]]] {}
+    private given eitherThrowableValidationCompareUnscoped
+        : Unscoped[Either[Throwable, Validation[CompareError, Unit]]] =
+      new Unscoped[Either[Throwable, Validation[CompareError, Unit]]] {}
 
     /**
      * Read `path` synchronously into a single `Chunk[Byte]`. The
@@ -112,10 +112,8 @@ object PdfIO {
       Scope.global.scoped { scope =>
         import scope.*
         val is: $[InputStream] = allocate(inputStreamResource(path))
-        // The whole read loop happens inside the `$` macro - the
-        // InputStream is only ever used as a receiver, never
-        // captured or returned.
-        val out = new java.io.ByteArrayOutputStream(math.min(chunkSize * 4, 4 * 1024 * 1024))
+        val out                = new java.io.ByteArrayOutputStream(math.min(chunkSize * 4, 4 * 1024 * 1024))
+        defer(out.close())
         $(is) { stream =>
           val buf = new Array[Byte](chunkSize)
           var n   = stream.read(buf)
@@ -152,7 +150,7 @@ object PdfIO {
     def decodeStreamingDecoded(
       path: Path,
       chunkSize: Int = 64 * 1024,
-      log: Log = Log.noop,
+      enableDiagnostics: Boolean = false,
       config: StreamingDecode.Config = StreamingDecode.Config.default
     ): Chunk[StreamingDecoded] =
       Scope.global.scoped { scope =>
@@ -164,15 +162,12 @@ object PdfIO {
           val outB = Chunk.newBuilder[StreamingDecoded]
           var n    = stream.read(buf)
           while (n > 0) {
-            val (evs, fs1) = StreamingDecode.stepChunk(config, fs, chunkFromReadBuffer(buf, n))
+            val (evs, fs1) = StreamingDecode.stepChunkBytes(config, fs, buf, 0, n)
             fs = fs1
             if (evs.nonEmpty) outB ++= evs
             n = stream.read(buf)
           }
-          if (n < 0) {
-            val meta = unsafeRun(StreamingDecode.finalizeToMeta(log, fs))
-            outB ++= meta
-          }
+          if (n < 0) outB ++= StreamingDecode.finalizeToMetaSync(enableDiagnostics, fs)
           outB.result()
         }
       }
@@ -184,33 +179,37 @@ object PdfIO {
     def decodeDecoded(
       path: Path,
       chunkSize: Int = 64 * 1024,
-      log: Log = Log.noop,
+      enableDiagnostics: Boolean = false,
       config: StreamingDecode.Config = StreamingDecode.Config.default
-    ): Chunk[Decoded] =
+    ): Either[Throwable, Chunk[Decoded]] =
       Scope.global.scoped { scope =>
         import scope.*
         val is: $[InputStream] = allocate(inputStreamResource(path))
         $(is) { stream =>
-          val buf  = new Array[Byte](chunkSize)
-          var sDec = DecodedFromStreaming.accInitial
-          var fs   = StreamingDecode.initialFinalState
-          val outB = Chunk.newBuilder[Decoded]
-          var n    = stream.read(buf)
-          while (n > 0) {
-            PdfStream.decodeSyncStep(config)(sDec, fs, chunkFromReadBuffer(buf, n)) match {
-              case Left(err) => throw err
+          val buf    = new Array[Byte](chunkSize)
+          var sDec   = DecodedFromStreaming.accInitial
+          var fs     = StreamingDecode.initialFinalState
+          val outB   = Chunk.newBuilder[Decoded]
+          var result: Either[Throwable, Chunk[Decoded]] = Right(Chunk.empty)
+          var n      = stream.read(buf)
+          while (n > 0 && result.isRight) {
+            PdfStream.decodeSyncStepBytes(config)(sDec, fs, buf, 0, n) match {
+              case Left(err) =>
+                result = Left(err)
               case Right((d, a, f)) =>
                 sDec = a
                 fs = f
                 if (d.nonEmpty) outB ++= d
             }
-            n = stream.read(buf)
+            if (result.isRight) n = stream.read(buf)
           }
-          if (n < 0) {
-            val tail = unsafeRun(PdfStream.decodeSyncFinish(log)(sDec, fs))
-            if (tail.nonEmpty) outB ++= tail
-          }
-          outB.result()
+          if (result.isLeft) result
+          else if (n < 0)
+            PdfStream.decodeSyncFinishSync(enableDiagnostics)(sDec, fs).map { tail =>
+              if (tail.nonEmpty) outB ++= tail
+              outB.result()
+            }
+          else Right(outB.result())
         }
       }
 
@@ -218,35 +217,9 @@ object PdfIO {
     def validate(
       path: Path,
       chunkSize: Int = 64 * 1024,
-      log: Log = Log.noop
-    ): Validation[PdfError, Unit] =
-      Scope.global.scoped { scope =>
-        import scope.*
-        val is: $[InputStream] = allocate(inputStreamResource(path))
-        $(is) { stream =>
-          val buf  = new Array[Byte](chunkSize)
-          var sDec = DecodedFromStreaming.accInitial
-          var fs   = StreamingDecode.initialFinalState
-          val outB = Chunk.newBuilder[Decoded]
-          var n    = stream.read(buf)
-          while (n > 0) {
-            PdfStream.decodeSyncStep(StreamingDecode.Config.default)(sDec, fs, chunkFromReadBuffer(buf, n)) match {
-              case Left(err) => throw err
-              case Right((d, a, f)) =>
-                sDec = a
-                fs = f
-                if (d.nonEmpty) outB ++= d
-            }
-            n = stream.read(buf)
-          }
-          if (n < 0) {
-            val tail = unsafeRun(PdfStream.decodeSyncFinish(log)(sDec, fs))
-            if (tail.nonEmpty) outB ++= tail
-          }
-          val decoded = outB.result()
-          unsafeRun(ValidatePdf.fromDecoded(ZStream.fromChunk(decoded)))
-        }
-      }
+      enableDiagnostics: Boolean = false
+    ): Either[Throwable, Validation[PdfError, Unit]] =
+      decodeDecoded(path, chunkSize, enableDiagnostics).map(ValidatePdf.fromChunk)
 
     /**
      * [[PdfStream.compare]] for two paths. Each file is decoded with an
@@ -257,14 +230,12 @@ object PdfIO {
       oldPath: Path,
       newPath: Path,
       chunkSize: Int = 64 * 1024,
-      log: Log = Log.noop
-    ): Validation[CompareError, Unit] = {
-      val oldDecoded = decodeDecoded(oldPath, chunkSize, log)
-      val newDecoded = decodeDecoded(newPath, chunkSize, log)
-      unsafeRun(
-        ComparePdfs.fromDecoded(ZStream.fromChunk(oldDecoded), ZStream.fromChunk(newDecoded))
-      )
-    }
+      enableDiagnostics: Boolean = false
+    ): Either[Throwable, Validation[CompareError, Unit]] =
+      for {
+        oldDecoded <- decodeDecoded(oldPath, chunkSize, enableDiagnostics)
+        newDecoded <- decodeDecoded(newPath, chunkSize, enableDiagnostics)
+      } yield ComparePdfs.fromChunks(oldDecoded, newDecoded)
   }
 
   // =================================================================

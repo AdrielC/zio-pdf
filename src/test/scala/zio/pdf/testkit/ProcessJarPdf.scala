@@ -5,16 +5,19 @@
 package zio.pdf.testkit
 
 import zio.*
-import zio.pdf.Log
 import zio.stream.*
 
 object ProcessJarPdf {
 
-  def processWith[A](doc: String)(f: Log => ZPipeline[Any, Throwable, Byte, A]): ZIO[Any, JarError, ZStream[Any, Throwable, A]] =
-    Jar.resourceStream(s"$doc.pdf").map { case (bytes, _) => bytes.via(f(Log.noop)) }
+  def processWith[A](doc: String)(
+      f: Boolean => ZPipeline[Any, Throwable, Byte, A]
+  ): ZIO[Any, JarError, ZStream[Any, Throwable, A]] =
+    Jar.resourceStream(s"$doc.pdf").map { case (bytes, _) => bytes.via(f(false)) }
 
-  def processWithIO[R, E, A](doc: String)(f: Log => ZStream[Any, Throwable, Byte] => ZIO[R, E, A]): ZIO[R, E | JarError, A] =
-    Jar.resourceStream(s"$doc.pdf").mapError(identity).flatMap { case (bytes, _) => f(Log.noop)(bytes) }
+  def processWithIO[R, E, A](doc: String)(
+      f: Boolean => ZStream[Any, Throwable, Byte] => ZIO[R, E, A]
+  ): ZIO[R, E | JarError, A] =
+    Jar.resourceStream(s"$doc.pdf").mapError(identity).flatMap { case (bytes, _) => f(false)(bytes) }
 
   def ignoreDrain[A](stream: ZIO[Any, JarError, ZStream[Any, Throwable, A]]): Task[Unit] =
     stream.foldCauseZIO(

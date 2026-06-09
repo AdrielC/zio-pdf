@@ -66,7 +66,7 @@ object WriteAndRoundtripSpec extends ZIOSpecDefault {
         // Round-trip through the decoder.
         decoded <- ZStream
                      .fromChunk(Chunk.fromArray(bytes.toArray))
-                     .via(PdfStream.decode(Log.noop))
+                     .via(PdfStream.decode())
                      .runCollect
         data    = decoded.collect { case Decoded.DataObj(o)        => o }
         ctnt    = decoded.collect { case Decoded.ContentObj(o, _, _) => o }
