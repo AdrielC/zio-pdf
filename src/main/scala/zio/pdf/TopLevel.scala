@@ -8,7 +8,8 @@ package zio.pdf
 import zio.pdf.{Comment as CommentCodec}
 import zio.scodec.stream.syntax.*
 import _root_.scodec.{Codec, Decoder, Err}
-import _root_.scodec.bits.ByteVector
+import _root_.scodec.bits.{BitVector, ByteVector}
+import zio.Chunk
 import zio.stream.ZPipeline
 
 sealed trait TopLevel
@@ -61,7 +62,20 @@ object TopLevel {
       }
     }
 
-  /** ZIO `ZPipeline` from raw bytes to `TopLevel` chunks. */
+  /**
+   * ZIO `ZPipeline` from raw bytes to `TopLevel` chunks.
+   * Rechunk before decode so tiny upstream chunks (file I/O) do not
+   * re-parse large objects on every pull.
+   */
   val pipe: ZPipeline[Any, Throwable, Byte, TopLevel] =
-    streamDecoder.streamMany.toBytePipeline
+    ZPipeline
+      .rechunk[Byte](10 * 1024 * 1024)
+      .andThen(streamDecoder.streamMany.toBytePipeline)
+
+  /**
+   * Strict in-memory decode — no `ZChannel`, no `Runtime`. Fastest when
+   * the whole PDF (or a large slice) is already in an `Array[Byte]`.
+   */
+  def decodeAll(bytes: Array[Byte]): Either[zio.scodec.stream.CodecError, Chunk[TopLevel]] =
+    BitVector.view(bytes).decodeStrict(streamDecoder.streamMany).map(_.value)
 }

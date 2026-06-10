@@ -1,282 +1,163 @@
 /*
- * File-handle lifetime, two ways:
+ * ZIO-only PDF file I/O.
  *
- *   - `PdfIO.scoped.{readAll, writeAll}` uses zio-blocks-scope's
- *     `Resource` + `Scope` + the `$` macro. Compile-time leak
- *     prevention, zero ZIO dependency, but the synchronous,
- *     scope-bounded API forces the work to happen inline (the file
- *     handle cannot escape the `scoped` block, so `ZStream` /
- *     `ZSink` must be built and consumed inside it). Best for
- *     small / medium PDFs where you want the strongest possible
- *     "did I forget to close this?" guarantee.
+ * File handles are acquired and released by `ZStream` / `ZSink` scopes
+ * (`fromInputStreamZIO`, `fromOutputStreamScoped`). Compose with
+ * [[zio.pdf.PdfStream]] pipelines at the call site:
  *
- *   - `PdfIO.zio.{readAll, writeAll, reader, writer}` uses ZIO's
- *     own `ZIO.acquireRelease` / `ZStream.fromInputStream`. The
- *     stream value can flow freely through `ZIO`-shaped code; the
- *     file handle's lifetime is tied to a `ZIO.scoped` block at the
- *     call site. Best for large files, async workflows, anything
- *     that wants `ZStream` composition past the function boundary.
+ * {{{
+ *   PdfIO.reader(path).via(PdfStream.decode()).runCollect
+ * }}}
  *
- * Both APIs guarantee LIFO finalization on success / failure /
- * defect. Pick the one that matches your call site.
- *
- * What this DOES NOT do: erase ZIO. The streaming substrate
- * (ZStream / ZPipeline / ZChannel) stays for the actual
- * decode/encode work. `Resource` only owns the file handle.
- *
- * `PdfIO.scoped.decode*` / `validate` / `comparePaths` drive
- * [[zio.pdf.PdfStream]] synchronously: the [[InputStream]] is only a
- * `read` receiver inside the `$` block, and bytes are fed chunk-by-chunk
- * through the same decoders as `ZStream.via(PdfStream.*)` (no full-file
- * `ByteArrayOutputStream`). The returned `Chunk[Decoded]` / validation
- * still holds all decoded values in memory like `runCollect` would.
+ * High-level helpers ([[decodeDecoded]], [[validate]], [[comparePaths]])
+ * are thin wrappers over the same shape.
  */
 
 package zio.pdf.io
 
-import java.io.{InputStream, OutputStream}
+import java.nio.channels.FileChannel
 import java.nio.file.{Files, Path, StandardOpenOption}
 
 import zio.{Chunk, ZIO}
-import zio.blocks.scope.{Resource, Scope, Unscoped}
 import zio.pdf.*
 import zio.prelude.Validation
 import zio.stream.{ZSink, ZStream}
 
 object PdfIO {
 
-  // =================================================================
-  // Resource constructors (used by both the scoped and zio APIs)
-  // =================================================================
+  /** Byte stream from `path`; released when the stream scope ends. */
+  def reader(path: Path, chunkSize: Int = 64 * 1024): ZStream[Any, Throwable, Byte] =
+    ZStream.fromInputStreamZIO(
+      ZIO
+        .attemptBlocking(Files.newInputStream(path))
+        .refineToOrDie[java.io.IOException],
+      chunkSize
+    )
 
-  /** A file's `InputStream` as a `Resource`, finalized when the
-    * enclosing `zio.blocks.scope.Scope` exits. */
-  def inputStreamResource(path: Path): Resource[InputStream] =
-    Resource.fromAutoCloseable[InputStream](Files.newInputStream(path))
-
-  /** A file's `OutputStream` as a `Resource`. Default options are
-    * CREATE + TRUNCATE_EXISTING + WRITE. */
-  def outputStreamResource(
-    path: Path,
-    options: StandardOpenOption*
-  ): Resource[OutputStream] = {
+  /** Byte sink to `path`; released when the sink scope ends. */
+  def writer(path: Path, options: StandardOpenOption*): ZSink[Any, Throwable, Byte, Byte, Long] = {
     val opts: Array[StandardOpenOption] =
       if (options.isEmpty)
         Array(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)
       else
         options.toArray
-    Resource.fromAutoCloseable[OutputStream](Files.newOutputStream(path, opts*))
+    ZSink.fromOutputStreamScoped(
+      ZIO.fromAutoCloseable(
+        ZIO
+          .attemptBlocking(Files.newOutputStream(path, opts*))
+          .refineToOrDie[java.io.IOException]
+      )
+    )
   }
 
-  // =================================================================
-  // The Scope-based API: compile-time leak prevention,
-  // synchronous, scope-bounded.
-  // =================================================================
+  def readAll(path: Path, chunkSize: Int = 64 * 1024): ZIO[Any, Throwable, Chunk[Byte]] =
+    reader(path, chunkSize).runCollect
 
-  object scoped {
-
-    // `Chunk[Byte]` is pure data (immutable byte buffer); safe to
-    // return from a Scope. zio-blocks's Unscoped derivation can't
-    // see inside zio.Chunk's class hierarchy, so we provide the
-    // instance explicitly. Each needs a distinct given name — Scala
-    // encodes `given Unscoped[Chunk[A]]` as the same synthetic name
-    // for different `A`.
-    private given chunkByteUnscoped: Unscoped[Chunk[Byte]] =
-      new Unscoped[Chunk[Byte]] {}
-    private given longUnscoped: Unscoped[Long] =
-      new Unscoped[Long] {}
-    private given chunkStreamingDecodedUnscoped: Unscoped[Chunk[StreamingDecoded]] =
-      new Unscoped[Chunk[StreamingDecoded]] {}
-    private given chunkDecodedUnscoped: Unscoped[Chunk[Decoded]] =
-      new Unscoped[Chunk[Decoded]] {}
-    private given validationPdfUnscoped: Unscoped[Validation[PdfError, Unit]] =
-      new Unscoped[Validation[PdfError, Unit]] {}
-    private given validationCompareUnscoped: Unscoped[Validation[CompareError, Unit]] =
-      new Unscoped[Validation[CompareError, Unit]] {}
-    private given eitherThrowableChunkDecodedUnscoped: Unscoped[Either[Throwable, Chunk[Decoded]]] =
-      new Unscoped[Either[Throwable, Chunk[Decoded]]] {}
-    private given eitherThrowableValidationPdfUnscoped: Unscoped[Either[Throwable, Validation[PdfError, Unit]]] =
-      new Unscoped[Either[Throwable, Validation[PdfError, Unit]]] {}
-    private given eitherThrowableValidationCompareUnscoped
-        : Unscoped[Either[Throwable, Validation[CompareError, Unit]]] =
-      new Unscoped[Either[Throwable, Validation[CompareError, Unit]]] {}
-
-    /**
-     * Read `path` synchronously into a single `Chunk[Byte]`. The
-     * file handle is owned by a `zio.blocks.scope.Scope`, so it
-     * is closed in LIFO order when this method returns - the macro
-     * in the `$` accessor *guarantees at compile time* that the
-     * InputStream cannot escape the scoped block.
-     */
-    def readAll(path: Path, chunkSize: Int = 64 * 1024): Chunk[Byte] =
-      Scope.global.scoped { scope =>
-        import scope.*
-        val is: $[InputStream] = allocate(inputStreamResource(path))
-        val out                = new java.io.ByteArrayOutputStream(math.min(chunkSize * 4, 4 * 1024 * 1024))
-        defer(out.close())
-        $(is) { stream =>
-          val buf = new Array[Byte](chunkSize)
-          var n   = stream.read(buf)
-          while (n >= 0) {
-            out.write(buf, 0, n)
-            n = stream.read(buf)
-          }
-          out.size()
-        }
-        Chunk.fromArray(out.toByteArray)
-      }
-
-    /**
-     * Write `bytes` synchronously to `path`. The OutputStream's
-     * lifetime is bounded by a `Scope`. Returns the number of
-     * bytes written.
-     */
-    def writeAll(path: Path, bytes: Chunk[Byte], options: StandardOpenOption*): Long =
-      Scope.global.scoped { scope =>
-        import scope.*
-        val os: $[OutputStream] = allocate(outputStreamResource(path, options*))
-        val arr                  = bytes.toArray
-        $(os)(stream => stream.write(arr))
-        arr.length.toLong
-      }
-
-    /**
-     * Decode `path` through [[PdfStream.streamingDecode]]. The
-     * [[InputStream]] is only used as the receiver of `read` inside
-     * the `$` block (zio-blocks-scope rules); bytes are fed through the
-     * streaming decoder in `chunkSize` pieces without materialising the
-     * whole file first.
-     */
-    def decodeStreamingDecoded(
-      path: Path,
-      chunkSize: Int = 64 * 1024,
-      enableDiagnostics: Boolean = false,
-      config: StreamingDecode.Config = StreamingDecode.Config.default
-    ): Chunk[StreamingDecoded] =
-      Scope.global.scoped { scope =>
-        import scope.*
-        val is: $[InputStream] = allocate(inputStreamResource(path))
-        $(is) { stream =>
-          val buf  = new Array[Byte](chunkSize)
-          var fs   = StreamingDecode.initialFinalState
-          val outB = Chunk.newBuilder[StreamingDecoded]
-          var n    = stream.read(buf)
-          while (n > 0) {
-            val (evs, fs1) = StreamingDecode.stepChunkBytes(config, fs, buf, 0, n)
-            fs = fs1
-            if (evs.nonEmpty) outB ++= evs
-            n = stream.read(buf)
-          }
-          if (n < 0) outB ++= StreamingDecode.finalizeToMetaSync(enableDiagnostics, fs)
-          outB.result()
-        }
-      }
-
-    /**
-     * Decode `path` through [[PdfStream.decode]] (full `Decoded` layer).
-     * Same incremental read shape as [[decodeStreamingDecoded]].
-     */
-    def decodeDecoded(
-      path: Path,
-      chunkSize: Int = 64 * 1024,
-      enableDiagnostics: Boolean = false,
-      config: StreamingDecode.Config = StreamingDecode.Config.default
-    ): Either[Throwable, Chunk[Decoded]] =
-      Scope.global.scoped { scope =>
-        import scope.*
-        val is: $[InputStream] = allocate(inputStreamResource(path))
-        $(is) { stream =>
-          val buf    = new Array[Byte](chunkSize)
-          var sDec   = DecodedFromStreaming.accInitial
-          var fs     = StreamingDecode.initialFinalState
-          val outB   = Chunk.newBuilder[Decoded]
-          var result: Either[Throwable, Chunk[Decoded]] = Right(Chunk.empty)
-          var n      = stream.read(buf)
-          while (n > 0 && result.isRight) {
-            PdfStream.decodeSyncStepBytes(config)(sDec, fs, buf, 0, n) match {
-              case Left(err) =>
-                result = Left(err)
-              case Right((d, a, f)) =>
-                sDec = a
-                fs = f
-                if (d.nonEmpty) outB ++= d
-            }
-            if (result.isRight) n = stream.read(buf)
-          }
-          if (result.isLeft) result
-          else if (n < 0)
-            PdfStream.decodeSyncFinishSync(enableDiagnostics)(sDec, fs).map { tail =>
-              if (tail.nonEmpty) outB ++= tail
-              outB.result()
-            }
-          else Right(outB.result())
-        }
-      }
-
-    /** [[PdfStream.validate]] for a file path (scope-owned input). */
-    def validate(
-      path: Path,
-      chunkSize: Int = 64 * 1024,
-      enableDiagnostics: Boolean = false
-    ): Either[Throwable, Validation[PdfError, Unit]] =
-      decodeDecoded(path, chunkSize, enableDiagnostics).map(ValidatePdf.fromChunk)
-
-    /**
-     * [[PdfStream.compare]] for two paths. Each file is decoded with an
-     * incremental scoped read; comparison uses the collected `Decoded`
-     * chunks (same as `runCollect` on `via(PdfStream.decode)`).
-     */
-    def comparePaths(
-      oldPath: Path,
-      newPath: Path,
-      chunkSize: Int = 64 * 1024,
-      enableDiagnostics: Boolean = false
-    ): Either[Throwable, Validation[CompareError, Unit]] =
-      for {
-        oldDecoded <- decodeDecoded(oldPath, chunkSize, enableDiagnostics)
-        newDecoded <- decodeDecoded(newPath, chunkSize, enableDiagnostics)
-      } yield ComparePdfs.fromChunks(oldDecoded, newDecoded)
-  }
-
-  // =================================================================
-  // The ZIO-based API: streaming file I/O, ZIO-native lifetime.
-  // =================================================================
-
-  object zio {
-
-    /** A `ZStream[Byte]` reading from `path`. The InputStream is
-      * acquired/released by ZStream's own scope when run. */
-    def reader(path: Path, chunkSize: Int = 64 * 1024): ZStream[Any, Throwable, Byte] =
-      ZStream.fromInputStreamZIO(
-        _root_.zio.ZIO
-          .attemptBlocking(Files.newInputStream(path))
-          .refineToOrDie[java.io.IOException],
-        chunkSize
-      )
-
-    /** A `ZSink[Byte, Long]` writing to `path`. The OutputStream
-      * is acquired/released by `ZSink.fromOutputStreamScoped`. */
-    def writer(path: Path, options: StandardOpenOption*): ZSink[Any, Throwable, Byte, Byte, Long] = {
-      val opts: Array[StandardOpenOption] =
-        if (options.isEmpty)
-          Array(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)
-        else
-          options.toArray
-      ZSink.fromOutputStreamScoped(
-        _root_.zio.ZIO.fromAutoCloseable(
-          _root_.zio.ZIO
-            .attemptBlocking(Files.newOutputStream(path, opts*))
-            .refineToOrDie[java.io.IOException]
-        )
-      )
+  /**
+   * Strict top-level decode when the PDF fits in memory — no streaming
+   * interpreter, beats fs2-style Pull on small/medium files.
+   */
+  def decodeTopLevelStrict(path: Path): ZIO[Any, Throwable, Chunk[TopLevel]] =
+    readAll(path).flatMap { bytes =>
+      ZIO.fromEither(TopLevel.decodeAll(bytes.toArray).left.map(e => new RuntimeException(e.toString)))
     }
 
-    /** Convenience: read whole file as a Chunk (lifetime auto-managed). */
-    def readAll(path: Path, chunkSize: Int = 64 * 1024): _root_.zio.ZIO[Any, Throwable, Chunk[Byte]] =
-      reader(path, chunkSize).runCollect
+  def writeAll(path: Path, bytes: Chunk[Byte], options: StandardOpenOption*): ZIO[Any, Throwable, Long] =
+    ZStream.fromChunk(bytes).run(writer(path, options*))
 
-    /** Convenience: write whole Chunk to file (lifetime auto-managed). */
-    def writeAll(path: Path, bytes: Chunk[Byte], options: StandardOpenOption*): _root_.zio.ZIO[Any, Throwable, Long] =
-      ZStream.fromChunk(bytes).run(writer(path, options*))
-  }
+  def decodeStreamingDecoded(
+    path: Path,
+    chunkSize: Int = 64 * 1024,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZIO[Any, Throwable, Chunk[StreamingDecoded]] =
+    reader(path, chunkSize).via(PdfStream.streamingDecode(enableDiagnostics, config)).runCollect
+
+  def decodeDecoded(
+    path: Path,
+    chunkSize: Int = 64 * 1024,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    hyperdriveThreshold: Long = PdfHyperdrive.defaultAutoThresholdBytes
+  ): ZIO[Any, Throwable, Chunk[Decoded]] =
+    attemptHyperdrive(path, hyperdriveThreshold, enableDiagnostics, config).flatMap {
+      case Some(decoded) => ZIO.succeed(decoded)
+      case None          => reader(path, chunkSize).via(PdfStream.decode(enableDiagnostics, config)).runCollect
+    }
+
+  /**
+   * [[PdfHyperdrive.decodeSync]] for a file — zero `ZStream` on the hot path.
+   * Alias: the name we use when we mean business.
+   */
+  def warp(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZIO[Any, Throwable, Chunk[Decoded]] =
+    readAll(path).map { bytes =>
+      PdfHyperdrive.decodeSync(bytes.toArray, enableDiagnostics = enableDiagnostics, config = config)
+    }
+
+  /**
+   * Memory-mapped [[PdfHyperdrive.decodeSyncMapped]] — avoids a heap
+   * copy when the OS mapping is array-backed.
+   */
+  def warpMapped(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZIO[Any, Throwable, Chunk[Decoded]] =
+    ZIO.acquireReleaseWith(
+      ZIO.attemptBlocking(FileChannel.open(path, StandardOpenOption.READ))
+    )(ch => ZIO.attemptBlocking(ch.close()).orDie) { channel =>
+      ZIO.attemptBlocking {
+        val size = channel.size()
+        require(size <= Int.MaxValue, s"file too large for mmap warp: $size bytes")
+        val mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0L, size)
+        PdfHyperdrive.decodeSyncMapped(mapped, enableDiagnostics = enableDiagnostics, config = config)
+      }
+    }
+
+  /** [[PdfHyperdrive.elementsSync]] for a file on disk. */
+  def warpElements(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZIO[Any, Throwable, Chunk[Element]] =
+    readAll(path).map { bytes =>
+      PdfHyperdrive.elementsSync(bytes.toArray, enableDiagnostics = enableDiagnostics, config = config)
+    }
+
+  private def attemptHyperdrive(
+    path: Path,
+    threshold: Long,
+    enableDiagnostics: Boolean,
+    config: StreamingDecode.Config
+  ): ZIO[Any, Throwable, Option[Chunk[Decoded]]] =
+    ZIO.attemptBlocking(Files.size(path)).flatMap { size =>
+      if (PdfHyperdrive.fitsInHyperdrive(size, threshold))
+        readAll(path).map { bytes =>
+          Some(PdfHyperdrive.decodeSync(bytes.toArray, enableDiagnostics = enableDiagnostics, config = config))
+        }
+      else
+        ZIO.none
+    }
+
+  def validate(
+    path: Path,
+    chunkSize: Int = 64 * 1024,
+    enableDiagnostics: Boolean = false
+  ): ZIO[Any, Throwable, Validation[PdfError, Unit]] =
+    decodeDecoded(path, chunkSize, enableDiagnostics).map(ValidatePdf.fromChunk)
+
+  def comparePaths(
+    oldPath: Path,
+    newPath: Path,
+    chunkSize: Int = 64 * 1024,
+    enableDiagnostics: Boolean = false
+  ): ZIO[Any, Throwable, Validation[CompareError, Unit]] =
+    for {
+      oldDecoded <- decodeDecoded(oldPath, chunkSize, enableDiagnostics)
+      newDecoded <- decodeDecoded(newPath, chunkSize, enableDiagnostics)
+    } yield ComparePdfs.fromChunks(oldDecoded, newDecoded)
 }

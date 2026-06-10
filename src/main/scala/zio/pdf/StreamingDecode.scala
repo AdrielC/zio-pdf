@@ -15,7 +15,7 @@
 
 package zio.pdf
 
-import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
+import _root_.scodec.{Attempt, DecodeResult, Err}
 import _root_.scodec.bits.{BitVector, ByteVector}
 import zio.{Cause, Chunk, NonEmptyChunk, ZIO}
 import zio.stream.{ZChannel, ZPipeline}
@@ -32,43 +32,8 @@ object StreamingDecode {
     val default: Config = Config(inlineMaxBytes = 256 * 1024L)
   }
 
-  private sealed trait HeaderEvent
-  private object HeaderEvent {
-    final case class V(v: Version)                      extends HeaderEvent
-    final case class C(b: ByteVector)                 extends HeaderEvent
-    final case class S(s: StartXref)                  extends HeaderEvent
-    final case class X(x: Xref)                       extends HeaderEvent
-    final case class W(b: Byte)                       extends HeaderEvent
-    final case class H(o: IndirectObj.IndirectObjHeader) extends HeaderEvent
-  }
-
-  private val headerDecoder: Decoder[HeaderEvent] =
-    Decoder.choiceDecoder(
-      Version.codec.map(HeaderEvent.V(_)),
-      summon[_root_.scodec.Codec[Xref]].map(HeaderEvent.X(_)),
-      StartXref.codec.map(HeaderEvent.S(_)),
-      IndirectObj.headerOnly.map(HeaderEvent.H(_)),
-      (Comment.start ~> Comment.line).map(HeaderEvent.C(_)),
-      Decoder { bits =>
-        if (bits.size < 8L) Attempt.failure(Err.InsufficientBits(8L, bits.size, Nil))
-        else {
-          val (head, rest) = bits.splitAt(8L)
-          val byte         = head.bytes.head
-          if (byte == ' '.toByte || byte == '\n'.toByte || byte == '\r'.toByte || byte == '\t'.toByte)
-            Attempt.successful(DecodeResult(HeaderEvent.W(byte): HeaderEvent, rest))
-          else
-            Attempt.failure(Err(s"streaming top-level: unrecognised byte ${byte.toInt & 0xff}"))
-        }
-      }
-    )
-
-  private val streamingHeaderDecoder: Decoder[HeaderEvent] =
-    Decoder { bits =>
-      headerDecoder.decode(bits) match {
-        case s @ Attempt.Successful(_) => s
-        case Attempt.Failure(e)        => Attempt.failure(Err.InsufficientBits(0, 0, e.context))
-      }
-    }
+  private type HeaderEvent = PdfByteLexer.HeaderEvent
+  import PdfByteLexer.HeaderEvent
 
   private val streamTrailer: _root_.scodec.Codec[Unit] = IndirectObj.streamTrailer
 
@@ -246,12 +211,13 @@ object StreamingDecode {
       }
 
     case wh @ WaitingHeader(carry) =>
-      streamingHeaderDecoder.decode(carry) match {
-        case Attempt.Successful(DecodeResult(event, rest)) =>
-          val (events, next) = headerToEvent(cfg, event, rest, dup)
-          stepAll(cfg, next, dup, in ++ events)
-        case Attempt.Failure(_) =>
+      PdfByteLexer.next(carry.bytes) match {
+        case PdfByteLexer.LexResult.NeedMore =>
           (in, wh)
+        case PdfByteLexer.LexResult.Ok(event, rest) =>
+          val restBits = if (rest.isEmpty) BitVector.empty else rest.bits
+          val (events, next) = headerToEvent(cfg, event, restBits, dup)
+          stepAll(cfg, next, dup, in ++ events)
       }
   }
 
@@ -261,7 +227,12 @@ object StreamingDecode {
     dup: DuplicateFilterState.Mutable,
     chunk: Chunk[Byte]
   ): (Chunk[StreamingDecoded], State) =
-    feedBytes(cfg, state, dup, chunk.toArray, 0, chunk.size)
+    chunk.materialize match {
+      case Chunk.ByteArray(arr, off, len) =>
+        feedBytes(cfg, state, dup, arr, off, len)
+      case _ =>
+        feedBytes(cfg, state, dup, chunk.toArray, 0, chunk.size)
+    }
 
   private def feedBytes(
     cfg: Config,
@@ -274,13 +245,15 @@ object StreamingDecode {
     val incoming =
       if (offset == 0 && length == buf.length) BitVector.view(buf)
       else BitVector(ByteVector.view(buf, offset, length))
+    def appendCarry(c: BitVector): BitVector =
+      if (c.isEmpty) incoming else c ++ incoming
     val newCarry = state match {
-      case WaitingHeader(c)            => c ++ incoming
-      case ForwardingBytes(r, c)       => c ++ incoming
-      case BufferingBytes(_, _, _, c, _) => c ++ incoming
-      case SkippingStreamPayload(r, c) => c ++ incoming
-      case ConsumingTrailer(c)         => c ++ incoming
-      case ConsumingTrailerNoStream(c) => c ++ incoming
+      case WaitingHeader(c)              => appendCarry(c)
+      case ForwardingBytes(r, c)         => appendCarry(c)
+      case BufferingBytes(_, _, _, c, _) => appendCarry(c)
+      case SkippingStreamPayload(r, c)   => appendCarry(c)
+      case ConsumingTrailer(c)           => appendCarry(c)
+      case ConsumingTrailerNoStream(c)   => appendCarry(c)
     }
     val withCarry: State = state match {
       case WaitingHeader(c)            => WaitingHeader(newCarry)
@@ -317,7 +290,12 @@ object StreamingDecode {
     fs: FinalState,
     chunk: Chunk[Byte]
   ): (Chunk[StreamingDecoded], FinalState) =
-    stepChunkBytes(config, fs, chunk.toArray, 0, chunk.size)
+    chunk.materialize match {
+      case Chunk.ByteArray(arr, off, len) =>
+        stepChunkBytes(config, fs, arr, off, len)
+      case _ =>
+        stepChunkBytes(config, fs, chunk.toArray, 0, chunk.size)
+    }
 
   /** Zero-copy slice when the caller already owns a read buffer. */
   def stepChunkBytes(

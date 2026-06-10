@@ -191,7 +191,7 @@ object StreamDecoder {
 
   /** Pipeline that converts `Byte` chunks into `BitVector` chunks. */
   private val bytesToBits: ZPipeline[Any, Nothing, Byte, BitVector] =
-    ZPipeline.mapChunks[Byte, BitVector](chunk => Chunk.single(BitVector.view(chunk.toArray)))
+    ZPipeline.mapChunks[Byte, BitVector](ChunkBytes.toBitVectorChunk)
 
   // -------------------------------------------------------------------
   // Constructors

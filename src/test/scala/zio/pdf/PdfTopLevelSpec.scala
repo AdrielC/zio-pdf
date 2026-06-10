@@ -113,6 +113,14 @@ object PdfTopLevelSpec extends ZIOSpecDefault {
                    .runCollect
         versions = out.collect { case TopLevel.VersionT(v) => v }
       } yield assertTrue(versions.nonEmpty, versions.head.major == 1)
+    },
+
+    test("decodeAll matches TopLevel.pipe on the same bytes") {
+      val arr = bytesOf(pdfPrologue).toArray
+      for {
+        streamed <- ZStream.fromChunk(Chunk.fromArray(arr)).via(TopLevel.pipe).runCollect
+        strict    = TopLevel.decodeAll(arr).fold(e => throw new RuntimeException(e.toString), identity)
+      } yield assertTrue(streamed == strict)
     }
   )
 }

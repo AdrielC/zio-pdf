@@ -11,7 +11,6 @@
 
 package zio.pdf.bench.fs2
 
-import java.nio.file.{Files, Path}
 import java.util.concurrent.TimeUnit
 
 import org.openjdk.jmh.annotations.*
@@ -23,7 +22,7 @@ import _root_.fs2.interop.scodec.{StreamDecoder as FsStreamDecoder}
 
 import _root_.zio.{Chunk, Runtime, Unsafe}
 import _root_.zio.stream.ZStream
-import _root_.zio.pdf.TopLevel
+import _root_.zio.pdf.{PdfStream, TopLevel}
 import _root_.zio.scodec.stream.syntax.*
 
 import scala.compiletime.uninitialized
@@ -43,18 +42,13 @@ class PdfDecodeHeadToHeadBench {
   private var bytes: Array[Byte] = uninitialized
   private val zioRuntime          = Runtime.default
 
-  // The shared scodec.Decoder[TopLevel] - both libraries see this.
   private val tlDecoder = TopLevel.streamDecoder
-
-  // Pre-built StreamDecoders.
-  private val zioMany = TopLevel.streamDecoder.streamMany
-  private val fsMany  = FsStreamDecoder.many(tlDecoder)
+  private val zioMany   = TopLevel.streamDecoder.streamMany
+  private val fsMany    = FsStreamDecoder.many(tlDecoder)
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    // The fixture is on the resources classpath; load via the
-    // classloader so we don't depend on the bench's CWD.
-    val is  = getClass.getResourceAsStream("/xref-stream.pdf")
+    val is = getClass.getResourceAsStream("/xref-stream.pdf")
     require(is != null, "xref-stream.pdf not on classpath")
     val baos = new java.io.ByteArrayOutputStream()
     val buf  = new Array[Byte](8192)
@@ -74,24 +68,38 @@ class PdfDecodeHeadToHeadBench {
     source.through(fsMany.toPipe).compile.count.unsafeRunSync()
   }
 
+  /**
+   * Apples-to-apples with fs2: same micro-chunk size, but stay on
+   * bytes (zero-copy [[ChunkBytes]] inside [[StreamDecoder.toBytePipeline]]).
+   */
   @Benchmark
   def zio_decode_pdf_topLevel: Long = {
-    val source = ZStream
-      .fromChunk(Chunk.fromArray(bytes))
-      .grouped(chunkSize)
-      .map(c => _root_.scodec.bits.BitVector.view(c.toArray))
+    val source = ZStream.fromChunk(Chunk.fromArray(bytes)).rechunk(chunkSize)
     Unsafe.unsafe { implicit u =>
-      zioRuntime.unsafe.run(source.viaDecoder(zioMany).runCount).getOrThrow()
+      zioRuntime.unsafe.run(source.via(zioMany.toBytePipeline).runCount).getOrThrow()
     }
   }
 
+  /** Production shape: byte stream + [[TopLevel.pipe]] (rechunk + zero-copy). */
   @Benchmark
   def zio_decode_pdf_topLevel_byteStream: Long = {
-    // Mirrors the real PdfStream.topLevel call shape: byte stream
-    // straight in, no manual rechunking.
     val source: ZStream[Any, Throwable, Byte] = ZStream.fromChunk(Chunk.fromArray(bytes))
     Unsafe.unsafe { implicit u =>
       zioRuntime.unsafe.run(source.via(TopLevel.pipe).runCount).getOrThrow()
     }
   }
+
+  /** Production facade: [[PdfStream.topLevel]]. */
+  @Benchmark
+  def zio_decode_pdf_topLevel_pdfStream: Long = {
+    val source: ZStream[Any, Throwable, Byte] = ZStream.fromChunk(Chunk.fromArray(bytes))
+    Unsafe.unsafe { implicit u =>
+      zioRuntime.unsafe.run(source.via(PdfStream.topLevel).runCount).getOrThrow()
+    }
+  }
+
+  /** Strict in-memory: one `runStrict`, no `Runtime`, no `ZChannel`. */
+  @Benchmark
+  def zio_decode_pdf_topLevel_strict: Int =
+    TopLevel.decodeAll(bytes).fold(_ => 0, _.size)
 }
