@@ -68,6 +68,18 @@ class RealPdfBench {
     }
 
   @Benchmark
+  def pdfIOSicko: Int =
+    Unsafe.unsafe { implicit u =>
+      runtime.unsafe.run(PdfIO.sicko(pdfPath)).getOrThrow().size
+    }
+
+  @Benchmark
+  def pdfIOSickoElements: Int =
+    Unsafe.unsafe { implicit u =>
+      runtime.unsafe.run(PdfIO.sickoElements(pdfPath)).getOrThrow().size
+    }
+
+  @Benchmark
   def zioStreamDecode: Int =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe

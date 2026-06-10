@@ -55,6 +55,35 @@ object PdfHyperdriveSpec extends ZIOSpecDefault {
         warpMapped <- PdfIO.warpMapped(path)
       } yield assertTrue(warpMapped == warp)
     },
+    test("sicko is warpMapped and decodeDecoded auto-routes sicko") {
+      for {
+        bytes <- loadFixture("xref-stream.pdf")
+        path  <- ZIO.attemptBlocking {
+          val p = java.nio.file.Files.createTempFile("sicko-", ".pdf")
+          java.nio.file.Files.write(p, bytes)
+          p
+        }
+        sicko   <- PdfIO.sicko(path)
+        mapped  <- PdfIO.warpMapped(path)
+        decoded <- PdfIO.decodeDecoded(path)
+      } yield assertTrue(sicko == mapped, sicko == decoded)
+    },
+    test("sickoElements matches stream decode + Elements.pipe") {
+      for {
+        bytes    <- loadFixture("xref-stream.pdf")
+        path     <- ZIO.attemptBlocking {
+          val p = java.nio.file.Files.createTempFile("sicko-el-", ".pdf")
+          java.nio.file.Files.write(p, bytes)
+          p
+        }
+        sicko    <- PdfIO.sickoElements(path)
+        streamed <- ZStream
+          .fromChunk(Chunk.fromArray(bytes))
+          .via(PdfStream.decode())
+          .via(Elements.pipe)
+          .runCollect
+      } yield assertTrue(sicko == streamed)
+    },
     test("elementsSync matches stream decode + Elements.pipe") {
       for {
         bytes    <- loadFixture("xref-stream.pdf")

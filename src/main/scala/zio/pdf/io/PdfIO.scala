@@ -80,9 +80,9 @@ object PdfIO {
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     hyperdriveThreshold: Long = PdfHyperdrive.defaultAutoThresholdBytes
   ): ZIO[Any, Throwable, Chunk[Decoded]] =
-    attemptHyperdrive(path, hyperdriveThreshold, enableDiagnostics, config).flatMap {
+    attemptSicko(path, hyperdriveThreshold, enableDiagnostics, config).flatMap {
       case Some(decoded) => ZIO.succeed(decoded)
-      case None          => reader(path, chunkSize).via(PdfStream.decode(enableDiagnostics, config)).runCollect
+      case None            => reader(path, chunkSize).via(PdfStream.decode(enableDiagnostics, config)).runCollect
     }
 
   /**
@@ -128,7 +128,35 @@ object PdfIO {
       PdfHyperdrive.elementsSync(bytes.toArray, enableDiagnostics = enableDiagnostics, config = config)
     }
 
-  private def attemptHyperdrive(
+  /**
+   * Full sicko: mmap + [[PdfHyperdrive.decodeSyncMapped]] — no `ZStream`, no
+   * heap copy when the OS mapping is array-backed. This is the fastest file path.
+   */
+  def sicko(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZIO[Any, Throwable, Chunk[Decoded]] =
+    warpMapped(path, enableDiagnostics, config)
+
+  /** mmap sicko + [[Elements]] classification. */
+  def sickoElements(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZIO[Any, Throwable, Chunk[Element]] =
+    ZIO.acquireReleaseWith(
+      ZIO.attemptBlocking(FileChannel.open(path, StandardOpenOption.READ))
+    )(ch => ZIO.attemptBlocking(ch.close()).orDie) { channel =>
+      ZIO.attemptBlocking {
+        val size = channel.size()
+        require(size <= Int.MaxValue, s"file too large for sicko mmap: $size bytes")
+        val mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0L, size)
+        PdfHyperdrive.sickoElementsMapped(mapped, enableDiagnostics = enableDiagnostics, config = config)
+      }
+    }
+
+  private def attemptSicko(
     path: Path,
     threshold: Long,
     enableDiagnostics: Boolean,
@@ -136,9 +164,7 @@ object PdfIO {
   ): ZIO[Any, Throwable, Option[Chunk[Decoded]]] =
     ZIO.attemptBlocking(Files.size(path)).flatMap { size =>
       if (PdfHyperdrive.fitsInHyperdrive(size, threshold))
-        readAll(path).map { bytes =>
-          Some(PdfHyperdrive.decodeSync(bytes.toArray, enableDiagnostics = enableDiagnostics, config = config))
-        }
+        sicko(path, enableDiagnostics, config).map(Some(_))
       else
         ZIO.none
     }
