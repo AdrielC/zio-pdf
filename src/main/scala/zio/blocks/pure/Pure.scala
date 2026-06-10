@@ -1,5 +1,8 @@
 /*
- * Port of [[zio.prelude.fx.ZPure]] for the zio-blocks substrate.
+ * Pure functional state+log monad for the zio-blocks substrate.
+ *
+ * Ported from [[zio.prelude.fx.ZPure]]; depends only on zio-blocks-chunk
+ * and local support types — no zio-core or zio-prelude.
  *
  * Copyright 2020-2023 John A. De Goes and the ZIO Contributors
  *
@@ -18,12 +21,11 @@
 
 package zio.blocks.pure
 
-import zio._
-import zio.prelude._
-import zio.prelude.coherent.CovariantIdentityBoth
+import zio.blocks.chunk.{Chunk, ChunkBuilder}
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.nowarn
+import scala.collection.BuildFrom
 import scala.reflect.ClassTag
 import scala.util.Try
 
@@ -410,7 +412,7 @@ sealed abstract class Pure[+W, -S1, +S2, -R, +E, +A] { self =>
   /**
    * Provides this computation with its required environment.
    */
-  final def provideEnvironment(r: ZEnvironment[R]): Pure[W, S1, S2, Any, E, A] =
+  final def provideEnvironment(r: Env): Pure[W, S1, S2, Any, E, A] =
     Pure.Provide(r, self)
 
   /**
@@ -418,13 +420,13 @@ sealed abstract class Pure[+W, -S1, +S2, -R, +E, +A] { self =>
    * computation requires multiple services use `provideEnvironment` instead.
    */
   final def provideService[Service <: R](service: => Service)(implicit tag: Tag[Service]): Pure[W, S1, S2, Any, E, A] =
-    provideEnvironment(ZEnvironment(service))
+    provideEnvironment(Env(service))
 
   /**
    * Provides this computation with part of its required environment, leaving
    * the remainder.
    */
-  final def provideSomeEnvironment[R0](f: ZEnvironment[R0] => ZEnvironment[R]): Pure[W, S1, S2, R0, E, A] =
+  final def provideSomeEnvironment[R0](f: Env => Env): Pure[W, S1, S2, R0, E, A] =
     Pure.environmentWithPure(r0 => self.provideEnvironment(f(r0)))
 
   /**
@@ -583,12 +585,12 @@ sealed abstract class Pure[+W, -S1, +S2, -R, +E, +A] { self =>
     run(s)._1
 
   /**
-   * Runs this computation to a `ZValidation` value.
+   * Runs this computation to a [[Validation]] value.
    */
-  final def runValidation(implicit ev1: Unit <:< S1, ev2: Any <:< R): ZValidation[W, E, A] =
+  final def runValidation(implicit ev1: Unit <:< S1, ev2: Any <:< R): Validation[W, E, A] =
     runAll(()) match {
-      case (log, Left(error))   => ZValidation.Failure(log, NonEmptyChunk.single(error))
-      case (log, Right((_, a))) => ZValidation.Success(log, a)
+      case (log, Left(error))   => Validation.Failure(log, error)
+      case (log, Right((_, a))) => Validation.Success(log, a)
     }
 
   /**
@@ -635,54 +637,6 @@ sealed abstract class Pure[+W, -S1, +S2, -R, +E, +A] { self =>
       case Some(value) => Pure.succeed(value)
       case None        => Pure.fail(new NoSuchElementException("None.get"))
     })
-
-  /**
-   * Transforms Pure to ZIO that either succeeds with `A` or fails with error(s) `E`.
-   * The original state is supposed to be `()`.
-   */
-  final def toZIO(implicit ev: Unit <:< S1): zio.ZIO[R, E, A] =
-    ZIO.environmentWithZIO[R] { r =>
-      provideEnvironment(r).runAll(())._2 match {
-        case Left(error)   => ZIO.fail(error)
-        case Right((_, a)) => ZIO.succeed(a)
-      }
-    }
-
-  /**
-   * Transforms Pure to ZIO that either succeeds with `A` or fails with error(s) `E`.
-   */
-  final def toZIOWith(s1: S1): zio.ZIO[R, E, A] =
-    ZIO.environmentWithZIO[R] { r =>
-      val result = provideEnvironment(r).runAll(s1)
-      result._2 match {
-        case Left(error)   => ZIO.fail(error)
-        case Right((_, a)) => ZIO.succeed(a)
-      }
-    }
-
-  /**
-   * Transforms Pure to ZIO that either succeeds with `S2` and `A` or fails with error(s) `E`.
-   */
-  final def toZIOWithState(s1: S1): zio.ZIO[R, E, (S2, A)] =
-    ZIO.environmentWithZIO[R] { r =>
-      val result = provideEnvironment(r).runAll(s1)
-      result._2 match {
-        case Left(error)   => ZIO.fail(error)
-        case Right(result) => ZIO.succeed(result)
-      }
-    }
-
-  /**
-   * Transforms Pure to ZIO that either succeeds with `Chunk[W]`, `S2` and `A` or fails with error(s) `E`.
-   */
-  final def toZIOWithAll(s1: S1): ZIO[R, E, (Chunk[W], S2, A)] =
-    ZIO.environmentWithZIO[R] { r =>
-      val (log, result) = provideEnvironment(r).runAll(s1)
-      result match {
-        case Left(error)    => ZIO.fail(error)
-        case Right((s2, a)) => ZIO.succeed((log, s2, a))
-      }
-    }
 
   /**
    * Combines this computation with the specified computation, passing the
@@ -818,13 +772,13 @@ object Pure {
    * passes the updated state from each computation to the next and collects
    * the results.
    */
-  def collectAll[F[+_]: ForEach, W, S, R, E, A](fa: F[Pure[W, S, S, R, E, A]]): Pure[W, S, S, R, E, F[A]] =
-    ForEach[F].flip[({ type lambda[+A] = Pure[W, S, S, R, E, A] })#lambda, A](fa)
+  def collectAll[W, S, R, E, A](fa: List[Pure[W, S, S, R, E, A]]): Pure[W, S, S, R, E, List[A]] =
+    foreach(fa)(identity)
 
   /**
    * Accesses the whole environment of the computation.
    */
-  def environment[S, R]: Pure[Nothing, S, S, R, Nothing, ZEnvironment[R]] =
+  def environment[S, R]: Pure[Nothing, S, S, R, Nothing, Env] =
     environmentWith(identity)
 
   /**
@@ -872,10 +826,10 @@ object Pure {
    * into a single computation that passes the updated state from each
    * computation to the next and collects the results.
    */
-  def forEach[F[+_]: ForEach, W, S, R, E, A, B](fa: F[A])(
+  def forEachList[W, S, R, E, A, B](fa: List[A])(
     f: A => Pure[W, S, S, R, E, B]
-  ): Pure[W, S, S, R, E, F[B]] =
-    ForEach[F].forEach[({ type lambda[+A] = Pure[W, S, S, R, E, A] })#lambda, A, B](fa)(f)
+  ): Pure[W, S, S, R, E, List[B]] =
+    foreach(fa)(f)
 
   /**
    * Maps each element of a collection to a computation and combines them all
@@ -1032,12 +986,12 @@ object Pure {
     pf.andThen(_.asSome).applyOrElse(a, (_: A) => none)
 
   final class EnvironmentWithPartiallyApplied[R](private val dummy: Boolean = true) extends AnyVal {
-    def apply[S, A](f: ZEnvironment[R] => A): Pure[Nothing, S, S, R, Nothing, A] =
+    def apply[S, A](f: Env => A): Pure[Nothing, S, S, R, Nothing, A] =
       Environment(f)
   }
 
   final class EnvironmentWithPurePartiallyApplied[R](private val dummy: Boolean = true) extends AnyVal {
-    def apply[W, S1, S2, E, A](f: ZEnvironment[R] => Pure[W, S1, S2, Any, E, A]): Pure[W, S1, S2, R, E, A] =
+    def apply[W, S1, S2, E, A](f: Env => Pure[W, S1, S2, Any, E, A]): Pure[W, S1, S2, R, E, A] =
       Environment(f).flatten
   }
 
@@ -1084,9 +1038,9 @@ object Pure {
         bf: BuildFrom[Collection[A], B, Collection[B]]
       ): Pure[W, S, S, R, E, Collection[B]]                                                                       =
         Pure.foreach(in)(f)
-      override def forEach_[A, B](in: Iterable[A])(
+      override def forEach_[A](in: Iterable[A])(
         f: A => Pure[W, S, S, R, E, Any]
-      ): Pure[W, S, S, R, E, Unit]                                                                                =
+      ): Pure[W, S, S, R, E, Unit] =
         Pure.foreachDiscard(in)(f)
     }
 
@@ -1098,6 +1052,10 @@ object Pure {
     new IdentityFlatten[({ type lambda[+A] = Pure[W, S, S, R, E, A] })#lambda] {
       def any: Pure[W, S, S, Any, Nothing, Any]                                                  =
         Pure.unit
+      def both[A, B](fa: => Pure[W, S, S, R, E, A], fb: => Pure[W, S, S, R, E, B]): Pure[W, S, S, R, E, (A, B)] =
+        fa.zip(fb)
+      def map[A, B](f: A => B): Pure[W, S, S, R, E, A] => Pure[W, S, S, R, E, B] =
+        _.map(f)
       def flatten[A](ffa: Pure[W, S, S, R, E, Pure[W, S, S, R, E, A]]): Pure[W, S, S, R, E, A] =
         ffa.flatten
     }
@@ -1131,9 +1089,9 @@ object Pure {
     override def apply(a: A): Pure[W, S2, S3, R, E2, B] =
       success(a)
   }
-  private final case class Environment[W, S1, S2, R, E, A](access: ZEnvironment[R] => A)
+  private final case class Environment[W, S1, S2, R, E, A](access: Env => A)
       extends Pure[W, S1, S2, R, E, A]
-  private final case class Provide[W, S1, S2, R, E, A](r: ZEnvironment[R], continue: Pure[W, S1, S2, R, E, A])
+  private final case class Provide[W, S1, S2, R, E, A](r: Env, continue: Pure[W, S1, S2, R, E, A])
       extends Pure[W, S1, S2, Any, E, A]
   private final case class Log[S, +W](log: W)               extends Pure[W, S, S, Any, Nothing, Unit]
   private final case class ClearLogOnError[W, S1, S2, R, E, A](
@@ -1169,15 +1127,15 @@ object Pure {
   final private class Runner private {
     private type Erased = Pure[Any, Any, Any, Any, Any, Any]
 
-    private[this] var _environment     = ZEnvironment.empty
+    private[this] var _environment     = Env.empty
     private[this] var _clearLogOnError = false
     private[this] var _logs            = ChunkBuilder.make[Any]()
     private[this] val stack            = new Stack
 
     private def clear(): Unit = {
-      _environment = ZEnvironment.empty
+      _environment = Env.empty
       _clearLogOnError = false
-      _logs.clear()
+      _logs = ChunkBuilder.make[Any]()
       stack.clear()
     }
 
@@ -1215,7 +1173,7 @@ object Pure {
                 curPure = continuation(())
 
               case log0: Log[Any, Any] =>
-                _logs addOne log0.log
+                _logs += log0.log
                 curPure = continuation(())
 
               case environment0: Environment[Any, Any, Any, Any, Any, Any] =>
@@ -1263,7 +1221,7 @@ object Pure {
                 },
                 (a: Any) => {
                   val logs0 = _logs.result()
-                  if (!logs0.isEmpty) previousLogs ++= logs0
+                  if (!logs0.isEmpty) previousLogs.addAll(logs0)
                   _logs = previousLogs
                   fold0.success(a)
                 }
@@ -1280,7 +1238,7 @@ object Pure {
             curPure = fold0.value
 
           case log0: Log[Any, Any] =>
-            _logs addOne log0.log
+            _logs += log0.log
             a = ()
             var loop = true
             while (loop)
