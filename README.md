@@ -9,18 +9,21 @@
 ## Start here
 
 ```bash
-sbt examples/run                              # decode xref-stream.pdf (scoped vs ZIO)
+sbt examples/run                              # decode xref-stream.pdf end-to-end
+sbt "testOnly zio.pdf.PdfHyperdriveSpec"      # sync hyperdrive vs stream parity
 sbt test                                      # full suite
-sbt "bench/Jmh/run -i 3 -wi 2 .*StreamDecoderBench.*"
-sbt "bench/Jmh/run -i 3 -wi 2 .*PdfIOBench.*"
+sbt "bench/Jmh/run -i 5 -wi 3 .*StreamDecoderBench.*"
+sbt "bench/Jmh/run -i 5 -wi 3 .*ScanBench.(handCoded|inlineByteScanRun|blocksPureByteScanBatched)"
+sbt "bench/Jmh/run -i 5 -wi 3 .*PdfIOBench.*"
+sbt "benchFs2/Jmh/run -i 5 -wi 3 .*HeadToHeadBench.*"
 ```
 
 | Path | What it is |
 |------|------------|
-| `zio.pdf` (`PdfStream`, `PdfIO`) | **Product** — read/decode/validate/compare PDFs |
+| `zio.pdf` (`PdfStream`, `PdfIO`, `PdfHyperdrive`) | **Product** — read/decode/validate/compare PDFs |
 | `zio.scodec.stream` | **Codec engine** — `StreamDecoder`, `PureDecoder`, `ZChannel` |
-| `zio.scan` | **Fast ZPure byte substrate** — fused maps on `zio.blocks.chunk` |
-| `zio.pdf.scan` | **Scan algebra** (Kyo) — CDC, fanout, fusion experiments |
+| `zio.scan` | **Hot byte scan** — `InlineByteScan` (compile-time fuse), `BytePipeline`, `BlocksPureByteScan` |
+| `scan-kyo/` (`zio.pdf.scan`) | **Scan algebra** (Kyo) — CDC, fanout, fusion experiments; not in root artifact |
 | `legacy/` | **Reference only** — original fs2-pdf, not in the build |
 
 Diagnostics: pass `enableDiagnostics = true` on decode/IO entry points (uses `ZPureLog`, not a separate `Log` trait).
@@ -131,8 +134,8 @@ baseline just decodes them):
   ratio fused/scodec = 0.35x
 ```
 
-JMH numbers from `bench/Jmh/run -p n=1048576 zio.pdf.scan.bench.ScanBench`
-agree:
+For the **production** byte-scan hot path see [`zio.scan`](#zioscan--1-mib-fused-byte-maps-inlinebytescan)
+(`InlineByteScan` at ~0.31 ms/MiB). The Kyo `Scan` lanes below are experimental:
 
 ```
 Benchmark                        (n)  Mode  Cnt    Score     Error  Units
@@ -336,34 +339,39 @@ Day-to-day callsites no longer have to mention `StreamDecoder.fromPure(PureDecod
 
 ## Performance
 
-Run JMH with:
+All numbers below from JMH on **JDK 24** (Eclipse Temurin), `-i 5 -wi 3 -f 1 -t 1`.
+Re-run locally — file I/O and OS page cache make some lanes noisy.
 
 ```bash
 sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*StreamDecoderBench.*'
+sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 .*ScanBench.(handCoded|inlineByteScanRun|blocksPureByteScanBatched|blocksPureByteScanBatchedPure)'
+sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 .*PdfIOBench.*'
+sbt 'benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*HeadToHeadBench.*'
+sbt 'benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*PdfDecode.*'
 sbt 'bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*RingBufferBench.*'
 ```
 
-### `StreamDecoder` / `PureDecoder` — 1 MiB of `uint8`, JDK 21
+### `StreamDecoder` / `PureDecoder` — 1 MiB of `uint8`
 
 ```
 Benchmark                                     (chunkSize)      (n)  Mode  Cnt    Score    Error  Units
-StreamDecoderBench.chunkedFastPathStrict            65536  1048576  avgt    5    0.890 ±  0.081  ms/op   <-- ~57x baseline
-StreamDecoderBench.chunkedFastPathChannel           65536  1048576  avgt    5    1.146 ±  0.224  ms/op   <-- ~44x baseline
-StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   50.873 ±  0.751  ms/op   reference
-StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   95.215 ± 11.892  ms/op
-StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5  105.574 ±  9.118  ms/op
-StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5  106.975 ±  3.026  ms/op
-StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5  106.703 ±  7.950  ms/op
-StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5  243.897 ±  6.592  ms/op
+StreamDecoderBench.chunkedFastPathStrict            65536  1048576  avgt    5    0.253 ±  0.049  ms/op   <-- ~67× baseline
+StreamDecoderBench.streamDecoderStrict              65536  1048576  avgt    5    0.253 ±  0.047  ms/op
+StreamDecoderBench.syntaxStreamDecoderStrict        65536  1048576  avgt    5    0.269 ±  0.222  ms/op
+StreamDecoderBench.streamDecoderChannel             65536  1048576  avgt    5    0.335 ±  0.030  ms/op
+StreamDecoderBench.chunkedFastPathChannel           65536  1048576  avgt    5    0.556 ±  0.926  ms/op
+StreamDecoderBench.scodecVectorBaseline             65536  1048576  avgt    5   17.073 ±  1.694  ms/op   reference
+StreamDecoderBench.pureDecoderRunAll                65536  1048576  avgt    5   36.900 ±  7.401  ms/op   per-byte ZPure trap
+StreamDecoderBench.streamDecoderHybrid              65536  1048576  avgt    5   55.788 ± 40.923  ms/op   fromPure(PureDecoder.many)
 ```
 
 Five takeaways:
 
-1. **The chunked fast path beats `scodec.codecs.vector` by ~57×.** It uses `PureDecoder.manyChunked + StreamDecoder.fromPureChunked`: each upstream chunk is consumed in **one** `ZPure.runAll`, decoded in **one** tight `while` loop on the underlying `Array[Byte]`, and shipped downstream as **one** `ZChannel.write`. By contrast, `scodec.codecs.vector(uint8)` does ~1M individual `uint8.decode` calls (each allocates a 1-element `BitVector` slice and a `DecodeResult`) and concats into a boxed `Vector[Int]` — most of its time is allocation and per-element dispatch, not actual byte reading.
-2. **`inline` extension methods are free.** `uint8.streamMany.strict.decode` (sugar) and `StreamDecoder.many(uint8).strict.decode` (raw) are within JMH's error bars.
-3. **`strict` is no `Runtime` away from `scodec`.** The first cut spun up a `ZChannel` and `unsafe`-ran it (~1800 ms); `runStrict` walks the `Step` algebra directly in pure code (~107 ms), within ~2× of `vector`. ZIO IO belongs at the streaming-I/O boundary; never on the in-memory-decode hot path.
-4. **The two-layer architecture pays for itself.** `streamDecoderHybrid` (= `StreamDecoder.fromPure(PureDecoder.many)`) is ~2.3× faster than the plain `ZChannel`-only path because each upstream chunk drives one `ZPure.runAll` instead of looping through `ZChannel.write` per emitted value.
-5. **For maximum throughput on byte-aligned, fixed-width formats, use the chunked fast path.** It's the only one that bypasses both per-element scodec dispatch *and* per-element ZPure log overhead.
+1. **The hot path beats `scodec.codecs.vector` by ~67×.** `chunkedFastPathStrict` and `streamDecoderStrict` both land at ~0.25 ms/MiB. `runStrict` walks the `Step` algebra directly — no `Runtime`, no fiber, no per-element `ZChannel.write`.
+2. **`inline` extension methods are free.** `uint8.streamMany.strict.decode` (sugar) and `StreamDecoder.many(uint8).strict.decode` (raw) are within JMH error bars.
+3. **Avoid per-byte `ZPure.log` on bulk data.** `pureDecoderRunAll` (~37 ms) and `streamDecoderHybrid` (~56 ms) pay one interpreter step per element. Use `manyChunked` / `fromPureChunked` or `strict` instead.
+4. **ZIO IO belongs at the streaming-I/O boundary.** In-memory decode should never spin up a `Runtime`; `strict` and the chunked fast path keep decoding in pure code.
+5. **For maximum throughput on byte-aligned, fixed-width formats, use the chunked fast path** (`PureDecoder.manyChunked + StreamDecoder.fromPureChunked`). It batches the entire upstream chunk into one inlined `while` loop.
 
 How to write your own chunked fast path:
 
@@ -400,29 +408,82 @@ Same `scodec.Decoder`, same in-memory bytes, same chunk size — only the stream
 
 ```
 Benchmark                                          (chunkSize)      (n)  Mode  Cnt     Score     Error  Units
-HeadToHeadBench.baseline_scodec_vector                   65536  4194304  avgt    5   223.343 ±  39.800  ms/op   reference
-HeadToHeadBench.baseline_zio_PureDecoder_runAll          65536  4194304  avgt    5   430.181 ±  32.729  ms/op
-HeadToHeadBench.fs2_StreamDecoder_many                   65536  4194304  avgt    5  2659.758 ± 427.614  ms/op   fs2 streaming
-HeadToHeadBench.zio_StreamDecoder_many                   65536  4194304  avgt    5  1031.921 ±  87.637  ms/op   ZIO ZChannel streaming    (~2.6x faster than fs2)
-HeadToHeadBench.zio_StreamDecoder_fromPureChunked        65536  4194304  avgt    5     4.232 ±   0.608  ms/op   ZIO chunked fast path     (~628x faster than fs2)
+HeadToHeadBench.baseline_scodec_vector                   65536  4194304  avgt    5    94.205 ±  35.841  ms/op   reference (strict, no streaming)
+HeadToHeadBench.baseline_zio_PureDecoder_runAll          65536  4194304  avgt    5   180.751 ± 170.160  ms/op   per-byte ZPure
+HeadToHeadBench.fs2_StreamDecoder_many                   65536  4194304  avgt    5  1875.824 ± 147.132  ms/op   fs2 Pull + scodec-stream
+HeadToHeadBench.zio_StreamDecoder_many                   65536  4194304  avgt    5     3.977 ±   7.389  ms/op   ZIO strict path           (~470× faster than fs2)
+HeadToHeadBench.zio_StreamDecoder_fromPureChunked        65536  4194304  avgt    5     1.406 ±   0.237  ms/op   ZIO chunked fast path     (~1330× faster than fs2)
 ```
 
-**Real PDF top-level decode (the legacy `xref-stream.pdf` fixture):**
+**Real PDF top-level decode (the legacy `xref-stream.pdf` fixture, 649 bytes):**
 
 ```
 Benchmark                                                    (chunkSize)  Mode  Cnt    Score     Error  Units
-PdfDecodeHeadToHeadBench.fs2_decode_pdf_topLevel                    8192  avgt    5  366.326 ± 138.016  us/op   fs2 + scodec.choice
-PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel                    8192  avgt    5  457.112 ± 120.087  us/op   ZIO + scodec.choice
-PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_byteStream         8192  avgt    5  439.639 ±  68.776  us/op   ZIO + byte-stream pipe
+PdfDecodeHeadToHeadBench.fs2_decode_pdf_topLevel                    8192  avgt   10  181.367 ± 102.407  us/op   fs2 Pull + scodec.choice
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel                    8192  avgt   10  188.249 ± 123.200  us/op   ZIO byte chunks (same shape)
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_byteStream         8192  avgt   10  157.410 ±  72.986  us/op   [[TopLevel.pipe]]           (~15% faster than fs2)
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_pdfStream          8192  avgt   10  196.769 ± 121.922  us/op   [[PdfStream.topLevel]]
+PdfDecodeHeadToHeadBench.zio_decode_pdf_topLevel_strict             8192  avgt   10  124.740 ±  32.517  us/op   [[TopLevel.decodeAll]]        (~45% faster than fs2)
 ```
 
 Honest reading:
 
-- **For high-throughput byte-aligned decoding** (one element type, many elements): ZIO's chunked fast path beats fs2 by **~628×**. This is the architectural win — `PureDecoder.manyChunked + StreamDecoder.fromPureChunked` lets the entire batch decoder live inside one inlined while-loop per upstream chunk; fs2 has no equivalent because `scodec-stream`'s `Decode` step is per-element.
-- **For the plain ZChannel path vs fs2's Pull path** on the same per-element decoder: ZIO is **~2.6× faster** on a tight `uint8` loop. Same algorithm both sides (we ported it from fs2's source), but `ZChannel` has lower per-step overhead than `Pull` for this shape.
-- **For real PDF parsing where the scodec `choice`-decoder body dominates** (~360 µs of decoding work per PDF): the two libraries are within ~25% of each other and **fs2 actually edges us by ~25%**. The streaming library overhead is in the noise once the per-element decoder body itself is expensive — what wins or loses at that point is JIT inlining of the choice arms, not channel vs pull.
+- **For high-throughput byte-aligned decoding** (one element type, many elements): ZIO's chunked fast path beats fs2 by **~1300×**. `PureDecoder.manyChunked + StreamDecoder.fromPureChunked` batches the entire upstream chunk into one inlined `while` loop; fs2's `scodec-stream` `Decode` step is per-element.
+- **For the ZIO `StreamDecoder.many` path vs fs2's Pull path** on the same per-element decoder: ZIO is **~470× faster** on a tight `uint8` loop (ZIO routes through `runStrict`, not per-element `ZChannel`).
+- **For real PDF parsing** use the byte-stream pipes (`TopLevel.pipe`, `PdfStream.topLevel`) or **`TopLevel.decodeAll` / `PdfIO.decodeTopLevelStrict`** when the file fits in memory. Zero-copy `ChunkBytes` + 10 MiB rechunk beats fs2 on the head-to-head fixture; strict in-memory decode is **~45% faster** than fs2 Pull.
 
-So if your workload is "stream a giant binary log of fixed-width records" the chunked fast path is a transformative win. If your workload is "parse a few KiB of nested PDF structure", any modern Scala streaming library is fine and the difference is in the noise.
+So if your workload is "stream a giant binary log of fixed-width records" the chunked fast path is a transformative win. If your workload is "parse PDF structure", use `TopLevel.pipe` / `PdfStream.decode()` — not manual micro-chunk BitVector conversion.
+
+### `zio.scan` — 1 MiB fused byte maps (`InlineByteScan`)
+
+```
+Benchmark                                    (n)  Mode  Cnt  Score   Error  Units
+ScanBench.handCoded                      1048576  avgt    5  0.272 ± 0.096  ms/op   reference while-loop
+ScanBench.inlineByteScanRun              1048576  avgt    5  0.311 ± 0.271  ms/op   compile-time fused loop
+ScanBench.blocksPureByteScanBatched      1048576  avgt    5  0.376 ± 0.183  ms/op   batched slices, no Pure
+ScanBench.blocksPureByteScanBatchedPure  1048576  avgt    5  1.472 ± 1.139  ms/op   one Pure.log per slice
+```
+
+Hot path: `InlineByteScan.map(_ + 1).map(_ ^ 0x55).run(bytes)` — stages beta-reduce into one monomorphic `while` loop at compile time (~hand-coded speed). Use `BlocksPureByteScan.runBatchedPure` only when you need the `Pure` log channel.
+
+The Kyo `Scan` algebra (`scan-kyo/` subproject) remains for CDC/fanout experiments; it is **not** on the hot path for PDF or bulk uint8 decode.
+
+### `PdfIO` — full decode on `xref-stream.pdf`
+
+```
+Benchmark                 (chunkSize)  (enableDiagnostics)  Mode  Cnt  Score   Error  Units
+PdfIOBench.readAll              65536                false  avgt    5  0.094 ± 0.141  ms/op
+PdfIOBench.decodeDecoded        65536                false  avgt    5  0.310 ± 0.077  ms/op
+PdfIOBench.decodeCount          65536                false  avgt    5  0.351 ± 0.231  ms/op
+PdfIOBench.validate             65536                false  avgt    5  0.437 ± 0.706  ms/op
+```
+
+`PdfIO.decodeDecoded` (read + `PdfStream.decode` + collect) is ~0.31 ms on the warmed page-cache fixture. Decode dominates; raw `readAll` is ~0.09 ms.
+
+### `PdfHyperdrive` — synchronous full decode (no `ZStream`)
+
+When the PDF fits in RAM, skip the streaming interpreter entirely:
+
+```scala
+import zio.pdf.PdfHyperdrive
+import zio.pdf.io.PdfIO
+
+val decoded = PdfHyperdrive.decodeSync(bytes)
+// or
+PdfIO.warp(path)   // read + hyperdrive
+```
+
+`PdfIO.decodeDecoded` auto-routes files ≤ 32 MiB through Hyperdrive. Same semantics as `PdfStream.decode()`, one sync pass over the state machine + expansion bridge.
+
+```
+Benchmark                                Mode  Cnt   Score    Error  Units
+PdfHyperdriveBench.hyperdriveDecodeSync  avgt   10  332 µs/op   (full Decoded, sync)
+PdfHyperdriveBench.zioStreamDecode       avgt   10  657 µs/op   (ZStream + ZChannel)
+```
+
+```bash
+sbt "bench/Jmh/run -i 10 -wi 5 .*PdfHyperdriveBench.*"
+```
 
 ### `SpscRingBuffer` (`zio-blocks-ringbuffer`) vs `ArrayBlockingQueue`
 

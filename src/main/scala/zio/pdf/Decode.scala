@@ -9,17 +9,12 @@
  *   - Xref (textual)             -> accumulated, emitted as Meta at EOS
  *   - StartXref / Comment / WS   -> ignored
  *   - Version                    -> remembered for the final Meta
- *
- * That's textbook ZPure - state plus log emissions plus a fail
- * signal - so we use `StatefulPipe` and let the ZChannel layer
- * stay one line.
  */
 
 package zio.pdf
 
 import _root_.scodec.Attempt
-import zio.NonEmptyChunk
-import zio.prelude.fx.ZPure
+import zio.{Chunk, NonEmptyChunk}
 import zio.scodec.stream.StatefulPipe
 import zio.stream.ZPipeline
 
@@ -63,52 +58,36 @@ object Decode {
   ): Attempt[Either[Xref, List[Decoded]]] =
     analyzeStream(index, data)(rawStream, Content.uncompress(rawStream)(data))
 
-  /** Pure step: convert one TopLevel into zero-or-more Decoded
-    * outputs, threading the xref / version accumulator. */
-  private val step: StatefulPipe.Step[TopLevel, State, Decoded] = {
-
-    def emit(d: Decoded): ZPure[Decoded, State, State, Any, Throwable, Unit] =
-      ZPure.log[State, Decoded](d)
-
-    def emits(ds: List[Decoded]): ZPure[Decoded, State, State, Any, Throwable, Unit] =
-      ds.foldLeft[ZPure[Decoded, State, State, Any, Throwable, Unit]](ZPure.unit)(
-        (acc, d) => acc *> emit(d)
-      )
-
-    {
+  private def applyStep(s: State, ev: TopLevel): Either[Throwable, (Chunk[Decoded], State)] =
+    ev match {
       case TopLevel.IndirectObjT(IndirectObj(Obj(index, data), Some(stream))) =>
         analyzeStream(index, data)(stream, Content.uncompress(stream)(data)) match {
-          case Attempt.Successful(Right(decoded)) => emits(decoded)
-          case Attempt.Successful(Left(xref))     =>
-            ZPure.update[State, State](s => s.copy(xrefs = xref :: s.xrefs))
-          case Attempt.Failure(cause) =>
-            ZPure.fail(new RuntimeException(s"extract stream objects: ${cause.messageWithContext}"))
+          case Attempt.Successful(Right(decoded)) => Right((Chunk.fromIterable(decoded), s))
+          case Attempt.Successful(Left(xref))      => Right((Chunk.empty, s.copy(xrefs = xref :: s.xrefs)))
+          case Attempt.Failure(cause)             =>
+            Left(new RuntimeException(s"extract stream objects: ${cause.messageWithContext}"))
         }
       case TopLevel.IndirectObjT(IndirectObj(Obj(_, Prim.Dict(d)), None)) if d.contains("Linearized") =>
-        // Skip linearization parameter dicts.
-        ZPure.unit
+        Right((Chunk.empty, s))
       case TopLevel.IndirectObjT(IndirectObj(obj, None)) =>
-        emit(Decoded.DataObj(obj))
+        Right((Chunk.single(Decoded.DataObj(obj)), s))
       case TopLevel.VersionT(version) =>
-        ZPure.update[State, State](s => s.copy(version = Some(version)))
+        Right((Chunk.empty, s.copy(version = Some(version))))
       case TopLevel.XrefT(xref) =>
-        ZPure.update[State, State](s => s.copy(xrefs = xref :: s.xrefs))
+        Right((Chunk.empty, s.copy(xrefs = xref :: s.xrefs)))
       case TopLevel.StartXrefT(_) | TopLevel.CommentT(_) | TopLevel.WhitespaceT(_) =>
-        ZPure.unit
+        Right((Chunk.empty, s))
     }
-  }
 
-  /** Pure finalizer: emit a single Meta record with the accumulated
-    * xrefs, the sanitised trailer, and the version. */
-  private val finalize: State => ZPure[Decoded, State, State, Any, Throwable, Unit] = s => {
+  private def finalizeSync(s: State): Either[Throwable, Chunk[Decoded]] = {
     val trailers  = s.xrefs.map(_.trailer)
     val sanitised = NonEmptyChunk.fromIterableOption(trailers).map(Trailer.sanitize)
-    ZPure.log[State, Decoded](Decoded.Meta(s.xrefs, sanitised, s.version))
+    Right(Chunk.single(Decoded.Meta(s.xrefs, sanitised, s.version)))
   }
 
   /** Pipeline `TopLevel -> Decoded`, with a trailing `Meta` element. */
   val fromTopLevel: ZPipeline[Any, Throwable, TopLevel, Decoded] =
-    StatefulPipe[TopLevel, State, Decoded](initial, finalize)(step)
+    StatefulPipe.fromSync[TopLevel, State, Decoded](initial, finalizeSync, applyStep)
 
   /** Full decoder pipeline `Byte -> Decoded`, including duplicate
     * filtering. */

@@ -6,8 +6,8 @@
 
 package zio.pdf
 
-import _root_.scodec.bits.BitVector
 import zio.{Chunk, ZIO}
+import zio.scodec.stream.ChunkBytes
 import zio.stream.{ZPipeline, ZStream}
 
 object PdfStream {
@@ -19,22 +19,14 @@ object PdfStream {
    * causes the streaming decoder to re-parse large objects (like
    * images) until they have been read completely.
    */
-  val bits: ZPipeline[Any, Throwable, Byte, BitVector] =
+  val bits: ZPipeline[Any, Throwable, Byte, _root_.scodec.bits.BitVector] =
     ZPipeline
       .rechunk[Byte](10 * 1024 * 1024)
-      .andThen(ZPipeline.mapChunks[Byte, BitVector](c => Chunk.single(BitVector.view(c.toArray))))
+      .andThen(ZPipeline.mapChunks(ChunkBytes.toBitVectorChunk))
 
-  /**
-   * Decode top-level PDF chunks: indirect objects, the version
-   * header, comments, xrefs, and stand-alone startxrefs.
-   */
+  /** Decode top-level PDF chunks (same hot path as [[TopLevel.pipe]]). */
   val topLevel: ZPipeline[Any, Throwable, Byte, TopLevel] =
-    bits >>> ZPipeline.fromChannel(
-      zio.scodec.stream.StreamDecoder
-        .many(TopLevel.streamDecoder)
-        .toChannel
-        .unit
-    )
+    TopLevel.pipe
 
   /**
    * Decode to [[Decoded]]: streaming parse (memory-bounded for large
@@ -44,74 +36,15 @@ object PdfStream {
    * `config.inlineMaxBytes`) are buffered once as
    * [[StreamingDecoded.ContentObjStart]].inlinePayload; larger
    * streams use chunked bytes on the wire before expansion.
+   *
+   * When the PDF already fits in memory, prefer [[PdfHyperdrive.decodeSync]]
+   * or [[zio.pdf.io.PdfIO.warp]] — no `ZChannel` per chunk.
    */
   def decode(
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default
   ): ZPipeline[Any, Throwable, Byte, Decoded] =
     StreamingDecode.pipeline(enableDiagnostics, config) >>> DecodedFromStreaming.pipeline
-
-  /**
-   * One synchronous byte-chunk step for [[decode]]: same semantics as
-   * `bytes.via(decode(...))` but without building a [[ZStream]]. Intended
-   * for drivers that must keep the [[java.io.InputStream]] inside a
-   * zio-blocks-scope `$` block.
-   */
-  def decodeSyncStep(
-    config: StreamingDecode.Config
-  )(
-    decodeAcc: DecodedFromStreaming.Acc,
-    streamingFs: StreamingDecode.FinalState,
-    chunk: Chunk[Byte]
-  ): Either[Throwable, (Chunk[Decoded], DecodedFromStreaming.Acc, StreamingDecode.FinalState)] =
-    decodeSyncStepBytes(config)(decodeAcc, streamingFs, chunk.toArray, 0, chunk.size)
-
-  /** Zero-copy when the caller already owns a read buffer (see [[zio.pdf.io.PdfIO.scoped]]). */
-  def decodeSyncStepBytes(
-    config: StreamingDecode.Config
-  )(
-    decodeAcc: DecodedFromStreaming.Acc,
-    streamingFs: StreamingDecode.FinalState,
-    buf: Array[Byte],
-    offset: Int,
-    length: Int
-  ): Either[Throwable, (Chunk[Decoded], DecodedFromStreaming.Acc, StreamingDecode.FinalState)] = {
-    val (evs, fs1) = StreamingDecode.stepChunkBytes(config, streamingFs, buf, offset, length)
-    if (evs.isEmpty) Right((Chunk.empty, decodeAcc, fs1))
-    else
-      DecodedFromStreaming.foldChunk(decodeAcc, evs) match {
-        case (_, Left(err))        => Left(err)
-        case (decoded, Right(acc)) => Right((decoded, acc, fs1))
-      }
-  }
-
-  /**
-   * After the last byte chunk, append trailing [[StreamingDecoded.Meta]]
-   * through the decode bridge (same order as the [[decode]] pipeline).
-   */
-  def decodeSyncFinish(
-    enableDiagnostics: Boolean
-  )(decodeAcc: DecodedFromStreaming.Acc, streamingFs: StreamingDecode.FinalState): ZIO[Any, Throwable, Chunk[Decoded]] =
-    decodeSyncFinishSync(enableDiagnostics)(decodeAcc, streamingFs) match {
-      case Left(err)    => ZIO.fail(err)
-      case Right(chunk) => ZIO.succeed(chunk)
-    }
-
-  /** After the last byte chunk, finish decode without ZIO (for [[zio.pdf.io.PdfIO.scoped]]). */
-  def decodeSyncFinishSync(
-    enableDiagnostics: Boolean
-  )(decodeAcc: DecodedFromStreaming.Acc, streamingFs: StreamingDecode.FinalState): Either[Throwable, Chunk[Decoded]] = {
-    val metaChunk = StreamingDecode.finalizeToMetaSync(enableDiagnostics, streamingFs)
-    val (d0, r0)  = DecodedFromStreaming.foldChunk(decodeAcc, metaChunk)
-    r0 match {
-      case Left(err) => Left(err)
-      case Right(acc1) =>
-        DecodedFromStreaming.finalizeAcc(acc1) match {
-          case Left(err)   => Left(err)
-          case Right(rest) => Right(d0 ++ rest)
-        }
-    }
-  }
 
   /**
    * Raw streaming events only (no ObjStm / XRef expansion). Prefer

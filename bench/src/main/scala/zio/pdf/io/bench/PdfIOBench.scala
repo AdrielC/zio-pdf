@@ -1,6 +1,5 @@
 /*
- * PdfIO entry-point benchmarks: scoped (zio-blocks-scope) vs ZIO reader
- * on the real `xref-stream.pdf` fixture.
+ * PdfIO entry-point benchmarks on the real `xref-stream.pdf` fixture.
  *
  * Run from sbt:
  *
@@ -11,8 +10,7 @@
  *   sbt "bench/Jmh/run -i 2 -wi 1 -f 1 -t 1 .*PdfIOBench.*"
  *
  * File I/O benches are noisy (OS cache, SSD). Use fixed warmup, treat
- * results as trends not gospel. Decode dominates on typical PDFs; these
- * measure whether scoped incremental read pays for itself vs ZStream.
+ * results as trends not gospel.
  */
 
 package zio.pdf.io.bench
@@ -23,7 +21,7 @@ import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
 
 import zio.{Runtime, Unsafe}
-import zio.pdf.{PdfStream, ValidatePdf}
+import zio.pdf.PdfStream
 import zio.pdf.io.PdfIO
 
 import scala.compiletime.uninitialized
@@ -42,8 +40,8 @@ class PdfIOBench {
   @Param(Array("false"))
   var enableDiagnostics: Boolean = uninitialized
 
-  private var pdfPath: Path       = uninitialized
-  private val runtime             = Runtime.default
+  private var pdfPath: Path = uninitialized
+  private val runtime     = Runtime.default
 
   @Setup(Level.Trial)
   def setup(): Unit = {
@@ -53,78 +51,62 @@ class PdfIOBench {
     Files.copy(is, pdfPath, StandardCopyOption.REPLACE_EXISTING)
     is.close()
     // Prime OS page cache so the first measured iteration isn't cold-start I/O.
-    PdfIO.scoped.readAll(pdfPath, chunkSize)
     Unsafe.unsafe { implicit u =>
-      runtime.unsafe.run(PdfIO.zio.readAll(pdfPath, chunkSize)).getOrThrow()
+      val _ = runtime.unsafe.run(PdfIO.readAll(pdfPath, chunkSize)).getOrThrow()
     }
   }
 
   @TearDown(Level.Trial)
-  def tearDown(): Unit =
-    Files.deleteIfExists(pdfPath)
+  def tearDown(): Unit = {
+    val _ = Files.deleteIfExists(pdfPath)
+  }
 
   // -------------------------------------------------------------------
   // Full decode pipeline (the shape production code uses)
   // -------------------------------------------------------------------
 
   @Benchmark
-  def scopedDecodeDecoded: Int =
-    PdfIO.scoped.decodeDecoded(pdfPath, chunkSize, enableDiagnostics) match {
-      case Right(chunk) => chunk.size
-      case Left(err)    => throw err
+  def decodeDecoded: Int =
+    Unsafe.unsafe { implicit u =>
+      runtime.unsafe
+        .run(PdfIO.decodeDecoded(pdfPath, chunkSize, enableDiagnostics))
+        .getOrThrow()
+        .size
     }
 
   @Benchmark
-  def zioDecodeDecoded: Int =
+  def decodeCount: Long =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe
         .run(
-          PdfIO.zio
+          PdfIO
             .reader(pdfPath, chunkSize)
             .via(PdfStream.decode(enableDiagnostics))
             .runCount
         )
         .getOrThrow()
-        .toInt
     }
 
   // -------------------------------------------------------------------
-  // Validate on top of decode (scoped sync vs ZIO effect)
+  // Validate on top of decode
   // -------------------------------------------------------------------
 
   @Benchmark
-  def scopedValidate: Boolean =
-    PdfIO.scoped.validate(pdfPath, chunkSize, enableDiagnostics) match {
-      case Right(v) => v.isSuccess
-      case Left(e)  => throw e
-    }
-
-  @Benchmark
-  def zioValidate: Boolean =
+  def validate: Boolean =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe
-        .run(
-          PdfIO.zio
-            .reader(pdfPath, chunkSize)
-            .via(PdfStream.decode(enableDiagnostics))
-            .runCollect
-            .map(ValidatePdf.fromChunk)
-            .map(_.isSuccess)
-        )
+        .run(PdfIO.validate(pdfPath, chunkSize, enableDiagnostics))
         .getOrThrow()
+        .isSuccess
     }
 
   // -------------------------------------------------------------------
-  // Raw bytes only (isolates I/O + Scope vs ZStream overhead)
+  // Raw bytes only (isolates I/O + ZStream overhead)
   // -------------------------------------------------------------------
 
   @Benchmark
-  def scopedReadAll: Int =
-    PdfIO.scoped.readAll(pdfPath, chunkSize).size
-
-  @Benchmark
-  def zioReadAll: Int =
+  def readAll: Int =
     Unsafe.unsafe { implicit u =>
-      runtime.unsafe.run(PdfIO.zio.readAll(pdfPath, chunkSize)).getOrThrow().size
+      runtime.unsafe.run(PdfIO.readAll(pdfPath, chunkSize)).getOrThrow().size
     }
 }

@@ -164,20 +164,29 @@ class ScanBench {
   // exercises the Kyo lane on a smaller payload.
 
   // -------------------------------------------------------------------
-  // zio.scan: ZPure-aligned substrate on zio.blocks.chunk.Chunk
+  // zio.scan: zio-blocks.chunk + inline fusion + blocks.pure log path
   // -------------------------------------------------------------------
+
+  /** Compile-time fused loop — no [[BytePipeline]] wrapper on the hot path. */
+  @Benchmark
+  def inlineByteScanRun: zio.blocks.chunk.Chunk[Int] =
+    InlineByteScan.map(_ + 1).map(_ ^ 0x55).map(_ - 1).run(bytes)
+
+  @Benchmark
+  def inlineByteScanFused: zio.blocks.chunk.Chunk[Int] =
+    InlineByteScan.map(_ + 1).map(_ ^ 0x55).map(_ - 1).pipeline.run(bytes)
 
   @Benchmark
   def bytePipelineFused: zio.blocks.chunk.Chunk[Int] =
     BytePipeline.scanBenchFused.run(bytes)
 
   @Benchmark
-  def zpureByteScanFast: zio.blocks.chunk.Chunk[Int] =
-    ZPureByteScan.runFast(BytePipeline.scanBenchFused, bytes)
+  def blocksPureByteScanBatched: zio.blocks.chunk.Chunk[Int] =
+    BlocksPureByteScan.runBatched(BytePipeline.scanBenchFused, bytes, batchSize = 65536)
 
   @Benchmark
-  def zpureByteScanBatched: zio.blocks.chunk.Chunk[Int] =
-    ZPureByteScan.runBatched(BytePipeline.scanBenchFused, bytes, batchSize = 65536)
+  def blocksPureByteScanBatchedPure: zio.blocks.chunk.Chunk[Int] =
+    BlocksPureByteScan.runBatchedPure(BytePipeline.scanBenchFused, bytes, batchSize = 65536)
 
   @Benchmark
   def handCoded: Array[Int] = {
