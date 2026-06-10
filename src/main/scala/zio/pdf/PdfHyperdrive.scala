@@ -116,6 +116,50 @@ object PdfHyperdrive {
   ): Chunk[Element] =
     Elements.foldSync(decodeSync(bytes, enableDiagnostics, config, batchSize))
 
+  /** mmap [[decodeSyncMapped]] + [[Elements.foldSync]] — file sicko in-memory. */
+  def elementsSyncMapped(
+    mapped: MappedByteBuffer,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  ): Chunk[Element] =
+    Elements.foldSync(decodeSyncMapped(mapped, enableDiagnostics, config, batchSize))
+
+  /** In-memory full sicko: hyperdrive decode (alias for [[decodeSync]]). */
+  def sicko(
+    bytes: Array[Byte],
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  ): Chunk[Decoded] =
+    decodeSync(bytes, enableDiagnostics, config, batchSize)
+
+  /** mmap sicko — zero heap copy when the mapping is array-backed. */
+  def sickoMapped(
+    mapped: MappedByteBuffer,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  ): Chunk[Decoded] =
+    decodeSyncMapped(mapped, enableDiagnostics, config, batchSize)
+
+  /** Decode + classify in one synchronous pass (alias for [[elementsSync]]). */
+  def sickoElements(
+    bytes: Array[Byte],
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  ): Chunk[Element] =
+    elementsSync(bytes, enableDiagnostics, config, batchSize)
+
+  def sickoElementsMapped(
+    mapped: MappedByteBuffer,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  ): Chunk[Element] =
+    elementsSyncMapped(mapped, enableDiagnostics, config, batchSize)
+
   def fitsInHyperdrive(fileSizeBytes: Long, thresholdBytes: Long = defaultAutoThresholdBytes): Boolean =
     fileSizeBytes >= 0 && fileSizeBytes <= thresholdBytes
 }
