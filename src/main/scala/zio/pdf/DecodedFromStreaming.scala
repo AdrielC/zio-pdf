@@ -18,9 +18,12 @@ import zio.stream.ZPipeline
 
 object DecodedFromStreaming {
 
+  /** Pre-sized buffer for chunked content streams (avoids Chunk concatenation). */
+  private[pdf] final case class StreamBuf(obj: Obj, bytes: Array[Byte], filled: Int)
+
   /** Mutable bridge state between [[StreamingDecoded]] chunks and [[Decoded]] output. */
   final case class Acc(
-    collect: Option[(Obj, Chunk[Byte])],
+    collect: Option[StreamBuf],
     embeddedXrefs: List[Xref]
   )
 
@@ -32,6 +35,27 @@ object DecodedFromStreaming {
     a match {
       case Attempt.Successful(v) => Right(v)
       case Attempt.Failure(c)    => Left(new RuntimeException(c.messageWithContext))
+    }
+
+  private def appendChunk(bytes: Array[Byte], filled: Int, c: Chunk[Byte]): Either[Throwable, Int] =
+    c.materialize match {
+      case Chunk.ByteArray(arr, off, len) =>
+        val space = bytes.length - filled
+        if (len > space)
+          Left(new IllegalStateException(s"content stream overflow: $len bytes at offset $filled"))
+        else {
+          System.arraycopy(arr, off, bytes, filled, len)
+          Right(filled + len)
+        }
+      case _ =>
+        val it = c.iterator
+        var f  = filled
+        while it.hasNext do
+          if (f >= bytes.length)
+            return Left(new IllegalStateException(s"content stream overflow at offset $f"))
+          bytes(f) = it.next()
+          f += 1
+        Right(f)
     }
 
   /**
@@ -59,46 +83,71 @@ object DecodedFromStreaming {
           case Right(rows) => (Chunk.fromIterable(rows), s)
         }
 
-      case StreamingDecoded.ContentObjStart(obj, _, None) =>
+      case StreamingDecoded.ContentObjStart(obj, length, None) =>
         s.collect match {
-          case None    => Right((Chunk.empty, s.copy(collect = Some((obj, Chunk.empty)))))
+          case None =>
+            if (length < 0L || length > Int.MaxValue)
+              Left(new IllegalStateException(s"invalid stream length: $length"))
+            else if (length == 0L)
+              fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, _root_.scodec.bits.BitVector.empty))
+                .map {
+                  case Left(xref)  => (Chunk.empty, s.copy(embeddedXrefs = xref :: s.embeddedXrefs))
+                  case Right(rows) => (Chunk.fromIterable(rows), s)
+                }
+            else
+              Right((Chunk.empty, s.copy(collect = Some(StreamBuf(obj, new Array(length.toInt), 0)))))
           case Some(_) => Left(new IllegalStateException("nested ContentObjStart"))
         }
 
       case StreamingDecoded.ContentObjBytes(c) =>
         s.collect match {
-          case Some((obj, buf)) => Right((Chunk.empty, s.copy(collect = Some((obj, buf ++ c)))))
-          case None             => Left(new IllegalStateException("ContentObjBytes without ContentObjStart"))
+          case Some(buf @ StreamBuf(_, bytes, filled)) =>
+            appendChunk(bytes, filled, c) match {
+              case Left(err)   => Left(err)
+              case Right(next) => Right((Chunk.empty, s.copy(collect = Some(buf.copy(filled = next)))))
+            }
+          case None => Left(new IllegalStateException("ContentObjBytes without ContentObjStart"))
         }
 
       case StreamingDecoded.ContentObjEnd =>
         s.collect match {
-          case Some((obj, buf)) =>
-            val bits = _root_.scodec.bits.BitVector(buf.toArray)
-            fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits)).map {
-              case Left(xref)  => (Chunk.empty, Acc(None, xref :: s.embeddedXrefs))
-              case Right(rows) => (Chunk.fromIterable(rows), Acc(None, s.embeddedXrefs))
+          case Some(StreamBuf(obj, bytes, filled)) =>
+            if (filled != bytes.length)
+              Left(new IllegalStateException(s"short content stream: expected ${bytes.length} got $filled"))
+            else {
+              val bits = _root_.scodec.bits.BitVector(bytes)
+              fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits)).map {
+                case Left(xref)  => (Chunk.empty, Acc(None, xref :: s.embeddedXrefs))
+                case Right(rows) => (Chunk.fromIterable(rows), Acc(None, s.embeddedXrefs))
+              }
             }
           case None =>
             Left(new IllegalStateException("ContentObjEnd without start"))
         }
     }
 
+  /** Fold streaming events into `emit` — no per-batch [[Chunk]]. */
+  def foldEventsAcc(acc: Acc, events: Chunk[StreamingDecoded], emit: Decoded => Unit): Acc = {
+    var s  = acc
+    val it = events.iterator
+    while it.hasNext do
+      applyStep(s, it.next()) match {
+        case Left(err) => throw err
+        case Right((chunk, next)) =>
+          val dit = chunk.iterator
+          while dit.hasNext do emit(dit.next())
+          s = next
+      }
+    s
+  }
+
   /**
    * Synchronous fold with no ZPure interpreter — used by [[zio.pdf.PdfHyperdrive]].
    */
   def foldSync(acc: Acc, chunk: Chunk[StreamingDecoded]): (Chunk[Decoded], Acc) = {
     val builder = Chunk.newBuilder[Decoded]
-    var s       = acc
-    val it      = chunk.iterator
-    while it.hasNext do
-      applyStep(s, it.next()) match {
-        case Left(err)         => throw err
-        case Right((out, next)) =>
-          builder ++= out
-          s = next
-      }
-    (builder.result(), s)
+    val next    = foldEventsAcc(acc, chunk, d => builder += d)
+    (builder.result(), next)
   }
 
   /** Validate bridge state after the last streaming event (no open content payload). */
