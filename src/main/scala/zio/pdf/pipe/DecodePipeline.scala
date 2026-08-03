@@ -1,5 +1,8 @@
 /*
- * Composed hyperdrive pipelines — volga comprehensions as plain fused functions.
+ * Composed hyperdrive pipelines — volga / [[Pipe]] arrows as plain fused functions.
+ *
+ * Sequential stages use `>>>`; fan-out of independent views uses `<>` / `&&&`
+ * (see [[PipeCat]] for the full CartesianCat instance).
  */
 
 package zio.pdf.pipe
@@ -54,10 +57,8 @@ object DecodePipeline {
 
   val bytesFromMapped: Pipe[MappedByteBuffer, Slice] = Pipe(sliceFromMapped)
 
-  val readSliceMmap: Pipe[Path, Slice] = Pipe.comp { path =>
-    val mapped = mmapRead.run(path)
-    bytesFromMapped.run(mapped)
-  }
+  val readSliceMmap: Pipe[Path, Slice] =
+    mmapRead >>> bytesFromMapped
 
   def readSlice(cfg: Cfg = Cfg()): Pipe[Path, Slice] = readSliceMmap
 
