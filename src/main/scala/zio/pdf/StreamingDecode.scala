@@ -15,7 +15,7 @@
 
 package zio.pdf
 
-import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
+import _root_.scodec.{Attempt, DecodeResult, Err}
 import _root_.scodec.bits.{BitVector, ByteVector}
 import zio.{Cause, Chunk, NonEmptyChunk, ZIO}
 import zio.stream.{ZChannel, ZPipeline}
@@ -32,43 +32,8 @@ object StreamingDecode {
     val default: Config = Config(inlineMaxBytes = 256 * 1024L)
   }
 
-  private sealed trait HeaderEvent
-  private object HeaderEvent {
-    final case class V(v: Version)                      extends HeaderEvent
-    final case class C(b: ByteVector)                 extends HeaderEvent
-    final case class S(s: StartXref)                  extends HeaderEvent
-    final case class X(x: Xref)                       extends HeaderEvent
-    final case class W(b: Byte)                       extends HeaderEvent
-    final case class H(o: IndirectObj.IndirectObjHeader) extends HeaderEvent
-  }
-
-  private val headerDecoder: Decoder[HeaderEvent] =
-    Decoder.choiceDecoder(
-      Version.codec.map(HeaderEvent.V(_)),
-      summon[_root_.scodec.Codec[Xref]].map(HeaderEvent.X(_)),
-      StartXref.codec.map(HeaderEvent.S(_)),
-      IndirectObj.headerOnly.map(HeaderEvent.H(_)),
-      (Comment.start ~> Comment.line).map(HeaderEvent.C(_)),
-      Decoder { bits =>
-        if (bits.size < 8L) Attempt.failure(Err.InsufficientBits(8L, bits.size, Nil))
-        else {
-          val (head, rest) = bits.splitAt(8L)
-          val byte         = head.bytes.head
-          if (byte == ' '.toByte || byte == '\n'.toByte || byte == '\r'.toByte || byte == '\t'.toByte)
-            Attempt.successful(DecodeResult(HeaderEvent.W(byte): HeaderEvent, rest))
-          else
-            Attempt.failure(Err(s"streaming top-level: unrecognised byte ${byte.toInt & 0xff}"))
-        }
-      }
-    )
-
-  private val streamingHeaderDecoder: Decoder[HeaderEvent] =
-    Decoder { bits =>
-      headerDecoder.decode(bits) match {
-        case s @ Attempt.Successful(_) => s
-        case Attempt.Failure(e)        => Attempt.failure(Err.InsufficientBits(0, 0, e.context))
-      }
-    }
+  private type HeaderEvent = PdfByteLexer.HeaderEvent
+  import PdfByteLexer.HeaderEvent
 
   private val streamTrailer: _root_.scodec.Codec[Unit] = IndirectObj.streamTrailer
 
@@ -185,7 +150,9 @@ object StreamingDecode {
       else {
         val carryBytes = carry.bytes
         val take       = math.min(remaining, carryBytes.size).toInt
-        val emit       = Chunk.fromArray(carryBytes.take(take.toLong).toArray)
+        val emitArr    = new Array[Byte](take)
+        carryBytes.copyToArray(emitArr, 0, 0L, take)
+        val emit       = Chunk.fromArray(emitArr)
         val rest       = carry.drop(take.toLong * 8)
         stepAll(
           cfg,
@@ -244,12 +211,13 @@ object StreamingDecode {
       }
 
     case wh @ WaitingHeader(carry) =>
-      streamingHeaderDecoder.decode(carry) match {
-        case Attempt.Successful(DecodeResult(event, rest)) =>
-          val (events, next) = headerToEvent(cfg, event, rest, dup)
-          stepAll(cfg, next, dup, in ++ events)
-        case Attempt.Failure(_) =>
+      PdfByteLexer.next(carry.bytes) match {
+        case PdfByteLexer.LexResult.NeedMore =>
           (in, wh)
+        case PdfByteLexer.LexResult.Ok(event, rest) =>
+          val restBits = if (rest.isEmpty) BitVector.empty else rest.bits
+          val (events, next) = headerToEvent(cfg, event, restBits, dup)
+          stepAll(cfg, next, dup, in ++ events)
       }
   }
 
@@ -258,15 +226,34 @@ object StreamingDecode {
     state: State,
     dup: DuplicateFilterState.Mutable,
     chunk: Chunk[Byte]
+  ): (Chunk[StreamingDecoded], State) =
+    chunk.materialize match {
+      case Chunk.ByteArray(arr, off, len) =>
+        feedBytes(cfg, state, dup, arr, off, len)
+      case _ =>
+        feedBytes(cfg, state, dup, chunk.toArray, 0, chunk.size)
+    }
+
+  private def feedBytes(
+    cfg: Config,
+    state: State,
+    dup: DuplicateFilterState.Mutable,
+    buf: Array[Byte],
+    offset: Int,
+    length: Int
   ): (Chunk[StreamingDecoded], State) = {
-    val incoming = BitVector.view(chunk.toArray)
+    val incoming =
+      if (offset == 0 && length == buf.length) BitVector.view(buf)
+      else BitVector(ByteVector.view(buf, offset, length))
+    def appendCarry(c: BitVector): BitVector =
+      if (c.isEmpty) incoming else c ++ incoming
     val newCarry = state match {
-      case WaitingHeader(c)            => c ++ incoming
-      case ForwardingBytes(r, c)       => c ++ incoming
-      case BufferingBytes(_, _, _, c, _) => c ++ incoming
-      case SkippingStreamPayload(r, c) => c ++ incoming
-      case ConsumingTrailer(c)         => c ++ incoming
-      case ConsumingTrailerNoStream(c) => c ++ incoming
+      case WaitingHeader(c)              => appendCarry(c)
+      case ForwardingBytes(r, c)         => appendCarry(c)
+      case BufferingBytes(_, _, _, c, _) => appendCarry(c)
+      case SkippingStreamPayload(r, c)   => appendCarry(c)
+      case ConsumingTrailer(c)           => appendCarry(c)
+      case ConsumingTrailerNoStream(c)   => appendCarry(c)
     }
     val withCarry: State = state match {
       case WaitingHeader(c)            => WaitingHeader(newCarry)
@@ -302,8 +289,23 @@ object StreamingDecode {
     config: Config,
     fs: FinalState,
     chunk: Chunk[Byte]
+  ): (Chunk[StreamingDecoded], FinalState) =
+    chunk.materialize match {
+      case Chunk.ByteArray(arr, off, len) =>
+        stepChunkBytes(config, fs, arr, off, len)
+      case _ =>
+        stepChunkBytes(config, fs, chunk.toArray, 0, chunk.size)
+    }
+
+  /** Zero-copy slice when the caller already owns a read buffer. */
+  def stepChunkBytes(
+    config: Config,
+    fs: FinalState,
+    buf: Array[Byte],
+    offset: Int,
+    length: Int
   ): (Chunk[StreamingDecoded], FinalState) = {
-    val (out, nextState) = feed(config, fs.state, fs.dupFilter, chunk)
+    val (out, nextState) = feedBytes(config, fs.state, fs.dupFilter, buf, offset, length)
     val updatedBase      = fs.copy(state = nextState)
     val updated          = out.foldLeft(updatedBase)(updateAccumulators)
     (out, updated)
@@ -313,18 +315,31 @@ object StreamingDecode {
    * After the last byte chunk, emit optional duplicate-debug log and the
    * trailing [[StreamingDecoded.Meta]] (same as [[pipeline]]'s channel).
    */
-  def finalizeToMeta(log: Log, fs: FinalState): ZIO[Any, Throwable, Chunk[StreamingDecoded]] =
-    (if (fs.dupFilter.duplicateCount > 0)
-       log.debug(
-         s"duplicate indirect objects suppressed before first xref (count: ${fs.dupFilter.duplicateCount})"
-       )
-     else ZIO.unit)
-      .as {
-        val xs        = fs.xrefs.reverse
-        val trailers  = xs.map(_.trailer)
-        val sanitised = NonEmptyChunk.fromIterableOption(trailers).map(Trailer.sanitize)
-        Chunk.single(StreamingDecoded.Meta(xs, sanitised, fs.version))
-      }
+  def finalizeToMeta(enableDiagnostics: Boolean, fs: FinalState): ZIO[Any, Throwable, Chunk[StreamingDecoded]] =
+    ZPureLog.drainToZio(finalizeToMetaDiagnostics(enableDiagnostics, fs)) *>
+      ZIO.succeed(finalizeToMetaChunk(fs))
+
+  /** Trailing [[StreamingDecoded.Meta]] chunk (no diagnostics). */
+  def finalizeToMetaChunk(fs: FinalState): Chunk[StreamingDecoded] = {
+    val xs        = fs.xrefs.reverse
+    val trailers  = xs.map(_.trailer)
+    val sanitised = NonEmptyChunk.fromIterableOption(trailers).map(Trailer.sanitize)
+    Chunk.single(StreamingDecoded.Meta(xs, sanitised, fs.version))
+  }
+
+  /** Diagnostic lines from [[ZPure.log]] when duplicate suppression ran. */
+  def finalizeToMetaDiagnostics(enableDiagnostics: Boolean, fs: FinalState): Chunk[ZPureLogEntry] =
+    if (enableDiagnostics && fs.dupFilter.duplicateCount > 0)
+      ZPureLog.lines(
+        s"duplicate indirect objects suppressed before first xref (count: ${fs.dupFilter.duplicateCount})"
+      )
+    else ZPureLog.empty
+
+  /** Same as [[finalizeToMeta]] without ZIO (diagnostics go to stderr when enabled). */
+  def finalizeToMetaSync(enableDiagnostics: Boolean, fs: FinalState): Chunk[StreamingDecoded] = {
+    ZPureLog.drainSync(finalizeToMetaDiagnostics(enableDiagnostics, fs))
+    finalizeToMetaChunk(fs)
+  }
 
   private def updateAccumulators(fs: FinalState, ev: StreamingDecoded): FinalState = ev match {
     case StreamingDecoded.VersionT(v) => fs.copy(version = Some(v))
@@ -334,28 +349,28 @@ object StreamingDecode {
 
   private def loop(
     cfg: Config,
-    log: Log,
+    enableDiagnostics: Boolean,
     fs: FinalState
   ): ZChannel[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[StreamingDecoded], FinalState] =
     ZChannel.readWithCause[Any, Throwable, Chunk[Byte], Any, Throwable, Chunk[StreamingDecoded], FinalState](
       (chunk: Chunk[Byte]) => {
         val (out, updated) = stepChunk(cfg, fs, chunk)
-        if (out.isEmpty) loop(cfg, log, updated)
-        else ZChannel.write(out) *> loop(cfg, log, updated)
+        if (out.isEmpty) loop(cfg, enableDiagnostics, updated)
+        else ZChannel.write(out) *> loop(cfg, enableDiagnostics, updated)
       },
       (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
       (_: Any) => ZChannel.succeed(fs)
     )
 
   private def emitMeta(
-    log: Log,
+    enableDiagnostics: Boolean,
     fs: FinalState
   ): ZChannel[Any, Any, Any, Any, Throwable, Chunk[StreamingDecoded], Unit] =
-    ZChannel.fromZIO(finalizeToMeta(log, fs).map(ZChannel.write(_))).flatten
+    ZChannel.fromZIO(finalizeToMeta(enableDiagnostics, fs).map(ZChannel.write(_))).flatten
 
   def pipeline(
-    log: Log = Log.noop,
+    enableDiagnostics: Boolean = false,
     config: Config = Config.default
   ): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    ZPipeline.fromChannel(loop(config, log, initial).flatMap(emitMeta(log, _)))
+    ZPipeline.fromChannel(loop(config, enableDiagnostics, initial).flatMap(emitMeta(enableDiagnostics, _)))
 }

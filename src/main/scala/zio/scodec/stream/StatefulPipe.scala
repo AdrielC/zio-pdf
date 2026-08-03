@@ -54,6 +54,60 @@ object StatefulPipe {
    * `finalize` has emitted its outputs. The pure layer stays pure;
    * the effect lives in ZIO where it belongs.
    */
+  /**
+   * Lift a synchronous per-element step into a `ZPipeline` without a
+   * ZPure interpreter — same channel shape as [[apply]], but the hot
+   * loop is a tight `while` over each input chunk.
+   */
+  def fromSync[In, S, Out](
+    initial: S,
+    finalize: S => Either[Throwable, Chunk[Out]] = (_: S) => Right(Chunk.empty),
+    step: (S, In) => Either[Throwable, (Chunk[Out], S)]
+  ): ZPipeline[Any, Throwable, In, Out] = {
+
+    def loop(state: S): ZChannel[Any, Throwable, Chunk[In], Any, Throwable, Chunk[Out], S] =
+      ZChannel.readWithCause[Any, Throwable, Chunk[In], Any, Throwable, Chunk[Out], S](
+        (chunk: Chunk[In]) => {
+          val builder = Chunk.newBuilder[Out]
+          var s       = state
+          val it      = chunk.iterator
+          var err: Option[Throwable] = None
+          while it.hasNext && err.isEmpty do
+            step(s, it.next()) match {
+              case Left(e)         => err = Some(e)
+              case Right((out, n)) =>
+                builder ++= out
+                s = n
+            }
+          err match {
+            case Some(e) =>
+              val log = builder.result()
+              val emit: ZChannel[Any, Throwable, Any, Any, Throwable, Chunk[Out], Unit] =
+                if (log.isEmpty) ZChannel.unit else ZChannel.write(log)
+              emit *> ZChannel.fail(e)
+            case None =>
+              val log = builder.result()
+              if (log.isEmpty) loop(s)
+              else ZChannel.write(log) *> loop(s)
+          }
+        },
+        (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
+        (_: Any)                  => ZChannel.succeed(state)
+      )
+
+    val withFinal: ZChannel[Any, Throwable, Chunk[In], Any, Throwable, Chunk[Out], Unit] =
+      loop(initial).flatMap { finalState =>
+        finalize(finalState) match {
+          case Left(err) =>
+            ZChannel.fail(err)
+          case Right(log) =>
+            if (log.isEmpty) ZChannel.unit else ZChannel.write(log)
+        }
+      }
+
+    ZPipeline.fromChannel(withFinal)
+  }
+
   def applyEffect[In, S, Out](
     initial: S,
     finalize: S => ZPure[Out, S, S, Any, Throwable, Unit] = (_: S) => ZPure.unit[S],

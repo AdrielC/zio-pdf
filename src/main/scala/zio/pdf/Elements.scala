@@ -10,7 +10,7 @@
 package zio.pdf
 
 import _root_.scodec.Attempt
-import zio.prelude.fx.ZPure
+import zio.Chunk
 import zio.scodec.stream.StatefulPipe
 import zio.stream.ZPipeline
 
@@ -56,6 +56,19 @@ private[pdf] object AnalyzeContent {
 
 object Elements {
 
+  /** Synchronous classification — no ZPure interpreter. */
+  def foldSync(chunk: Chunk[Decoded]): Chunk[Element] = {
+    val builder = zio.Chunk.newBuilder[Element]
+    val it      = chunk.iterator
+    while it.hasNext do
+      element(it.next()) match {
+        case Attempt.Successful(e) => builder += e
+        case Attempt.Failure(c)    =>
+          throw new RuntimeException(s"failed to analyze object: ${c.messageWithContext}")
+      }
+    builder.result()
+  }
+
   private[pdf] def element: Decoded => Attempt[Element] = {
     case Decoded.DataObj(obj) =>
       AnalyzeData(obj.index)(obj.data).map(Element.Data(obj, _))
@@ -65,16 +78,18 @@ object Elements {
       Attempt.successful(Element.Meta(trailer, version))
   }
 
-  /** Pure step: emit one Element per Decoded, or fail if analysis
-    * fails. No state. */
-  private val step: StatefulPipe.Step[Decoded, Unit, Element] =
-    d => element(d) match {
-      case Attempt.Successful(e) => ZPure.log[Unit, Element](e)
+  private def applyStep(d: Decoded): Either[Throwable, Element] =
+    element(d) match {
+      case Attempt.Successful(e) => Right(e)
       case Attempt.Failure(c)    =>
-        ZPure.fail(new RuntimeException(s"failed to analyze object: ${c.messageWithContext}"))
+        Left(new RuntimeException(s"failed to analyze object: ${c.messageWithContext}"))
     }
 
   /** Pipeline `Decoded -> Element`. */
   val pipe: ZPipeline[Any, Throwable, Decoded, Element] =
-    StatefulPipe[Decoded, Unit, Element]((), _ => ZPure.unit[Unit])(step)
+    StatefulPipe.fromSync[Decoded, Unit, Element](
+      (),
+      _ => Right(Chunk.empty),
+      (_, d) => applyStep(d).map(e => (Chunk.single(e), ()))
+    )
 }

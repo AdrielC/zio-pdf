@@ -4,7 +4,7 @@ val zioBlocksSchemaVersion     = "0.0.33"
 val zioBlocksMediaTypeVersion  = "0.0.33"
 val zioBlocksRingbufferVersion = "0.0.32"
 val zioBlocksStreamsVersion    = "0.0.20"
-val zioBlocksScopeVersion      = "0.0.33"
+val zioBlocksChunkVersion      = "0.0.33"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
 val kyoVersion                 = "1.0-RC1"
@@ -42,14 +42,9 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio-blocks-mediatype"  % zioBlocksMediaTypeVersion,
       "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
       "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
-      "dev.zio"   %% "zio-blocks-scope"      % zioBlocksScopeVersion,
+      "dev.zio"   %% "zio-blocks-chunk"      % zioBlocksChunkVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
-      "io.getkyo" %% "kyo-data"          % kyoVersion,
-      "io.getkyo" %% "kyo-kernel"        % kyoVersion,
-      "io.getkyo" %% "kyo-prelude"       % kyoVersion,
-      "io.getkyo" %% "kyo-core"          % kyoVersion,
-      "io.getkyo" %% "kyo-zio"           % kyoVersion,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt"      % zioVersion % Test
     ),
@@ -64,14 +59,37 @@ lazy val root = (project in file("."))
  * (-i = measurement iterations, -wi = warmup iterations,
  *  -f = forks, -t = threads).
  */
+/**
+ * Kyo-based scan algebra (experimental). Not part of the ZIO-only core;
+ * kept for benchmarks and migration reference. Run tests with `scanKyo/test`.
+ */
+lazy val scanKyo = (project in file("scan-kyo"))
+  .dependsOn(root)
+  .settings(
+    name           := "zio-pdf-scan-kyo",
+    publish / skip := true,
+    libraryDependencies ++= List(
+      "io.getkyo" %% "kyo-data"    % kyoVersion,
+      "io.getkyo" %% "kyo-kernel"  % kyoVersion,
+      "io.getkyo" %% "kyo-prelude" % kyoVersion,
+      "io.getkyo" %% "kyo-core"    % kyoVersion,
+      "io.getkyo" %% "kyo-zio"     % kyoVersion,
+      "dev.zio"   %% "zio-test"    % zioVersion % Test,
+      "dev.zio"   %% "zio-test-sbt" % zioVersion % Test
+    ),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
 lazy val bench = (project in file("bench"))
   .enablePlugins(JmhPlugin)
-  .dependsOn(root)
+  .dependsOn(root, scanKyo)
   .settings(
     name              := "zio-pdf-bench",
     publish / skip    := true,
     Jmh / version     := "1.37",
-    scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused"))
+    scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused")),
+    Compile / unmanagedResourceDirectories +=
+      (LocalRootProject / Test / resourceDirectory).value
   )
 
 /**
@@ -86,6 +104,21 @@ lazy val bench = (project in file("bench"))
  *
  *   sbt 'benchFs2/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms'
  */
+/**
+ * Runnable examples. Start here if the repo feels scattered:
+ *
+ *   sbt examples/run
+ */
+lazy val examples = (project in file("examples"))
+  .dependsOn(root)
+  .settings(
+    name           := "zio-pdf-examples",
+    publish / skip := true,
+    Compile / mainClass := Some("zio.pdf.examples.ReadAndDecode"),
+    Compile / unmanagedResourceDirectories +=
+      (LocalRootProject / Test / resourceDirectory).value
+  )
+
 lazy val benchFs2 = (project in file("bench-fs2"))
   .enablePlugins(JmhPlugin)
   .dependsOn(root)

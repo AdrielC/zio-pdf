@@ -47,6 +47,7 @@ import _root_.scodec.codecs.{uint8, vector}
 import scala.compiletime.uninitialized
 
 import zio.pdf.scan.*
+import zio.scan.*
 
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
@@ -161,6 +162,31 @@ class ScanBench {
   // suspension cost that dominates this trivial workload by ~30x. See
   // `ScanPerfBench` in the test sources for an in-test measurement that
   // exercises the Kyo lane on a smaller payload.
+
+  // -------------------------------------------------------------------
+  // zio.scan: zio-blocks.chunk + inline fusion + blocks.pure log path
+  // -------------------------------------------------------------------
+
+  /** Compile-time fused loop — no [[BytePipeline]] wrapper on the hot path. */
+  @Benchmark
+  def inlineByteScanRun: zio.blocks.chunk.Chunk[Int] =
+    InlineByteScan.map(_ + 1).map(_ ^ 0x55).map(_ - 1).run(bytes)
+
+  @Benchmark
+  def inlineByteScanFused: zio.blocks.chunk.Chunk[Int] =
+    InlineByteScan.map(_ + 1).map(_ ^ 0x55).map(_ - 1).pipeline.run(bytes)
+
+  @Benchmark
+  def bytePipelineFused: zio.blocks.chunk.Chunk[Int] =
+    BytePipeline.scanBenchFused.run(bytes)
+
+  @Benchmark
+  def blocksPureByteScanBatched: zio.blocks.chunk.Chunk[Int] =
+    BlocksPureByteScan.runBatched(BytePipeline.scanBenchFused, bytes, batchSize = 65536)
+
+  @Benchmark
+  def blocksPureByteScanBatchedPure: zio.blocks.chunk.Chunk[Int] =
+    BlocksPureByteScan.runBatchedPure(BytePipeline.scanBenchFused, bytes, batchSize = 65536)
 
   @Benchmark
   def handCoded: Array[Int] = {
