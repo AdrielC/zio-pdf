@@ -3,13 +3,16 @@
  * Embeds xrefs from expanded stream payloads (Left branch of
  * [[Decode.expandStreamPayload]]) into [[Decoded.Meta]] after the
  * textual xrefs carried on [[StreamingDecoded.Meta]].
+ *
+ * Hot path ([[foldSync]] / [[finalizeSync]]) is imperative — no
+ * ZPure interpreter. The streaming [[pipeline]] reuses the same
+ * [[applyStep]] via a thin ZPure wrapper.
  */
 
 package zio.pdf
 
 import _root_.scodec.Attempt
 import zio.Chunk
-import zio.prelude.fx.ZPure
 import zio.scodec.stream.StatefulPipe
 import zio.stream.ZPipeline
 
@@ -25,94 +28,105 @@ object DecodedFromStreaming {
 
   private val acc0: Acc = accInitial
 
-  private def fromAttempt[A](a: Attempt[A]): ZPure[Decoded, Acc, Acc, Any, Throwable, A] =
+  private def fromAttempt[A](a: Attempt[A]): Either[Throwable, A] =
     a match {
-      case Attempt.Successful(v) => ZPure.succeed(v)
-      case Attempt.Failure(c)    => ZPure.fail(new RuntimeException(c.messageWithContext))
+      case Attempt.Successful(v) => Right(v)
+      case Attempt.Failure(c)    => Left(new RuntimeException(c.messageWithContext))
     }
 
-  private def emitDecoded(d: Decoded): ZPure[Decoded, Acc, Acc, Any, Throwable, Unit] =
-    ZPure.log[Acc, Decoded](d)
-
-  private def emitsDecoded(ds: List[Decoded]): ZPure[Decoded, Acc, Acc, Any, Throwable, Unit] =
-    ds.foldLeft[ZPure[Decoded, Acc, Acc, Any, Throwable, Unit]](ZPure.unit)((acc, d) => acc *> emitDecoded(d))
-
-  private val step: StatefulPipe.Step[StreamingDecoded, Acc, Decoded] = {
-    case m: StreamingDecoded.Meta =>
-      ZPure.get[Acc].flatMap { s =>
+  /**
+   * Core imperative step — shared by [[foldSync]] and the streaming
+   * [[pipeline]] (via ZPure wrapper).
+   */
+  private[pdf] def applyStep(s: Acc, ev: StreamingDecoded): Either[Throwable, (Chunk[Decoded], Acc)] =
+    ev match {
+      case m: StreamingDecoded.Meta =>
         val mergedXrefs = m.xrefs ++ s.embeddedXrefs.reverse
         val trailers    = mergedXrefs.map(_.trailer)
         val sanitised   = zio.NonEmptyChunk.fromIterableOption(trailers).map(Trailer.sanitize)
-        ZPure.set(acc0) *> emitDecoded(Decoded.Meta(mergedXrefs, sanitised, m.version))
-      }
-    case StreamingDecoded.DataObj(obj) =>
-      emitDecoded(Decoded.DataObj(obj))
-    case StreamingDecoded.VersionT(_) | _: StreamingDecoded.CommentT |
-        _: StreamingDecoded.StartXrefT | _: StreamingDecoded.XrefT =>
-      ZPure.unit
-    case StreamingDecoded.ContentObjStart(obj, _, Some(bits)) =>
-      fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits)).flatMap {
-        case Left(xref)  => ZPure.update[Acc, Acc](a => a.copy(embeddedXrefs = xref :: a.embeddedXrefs))
-        case Right(rows) => emitsDecoded(rows)
-      }
-    case StreamingDecoded.ContentObjStart(obj, _, None) =>
-      ZPure.get[Acc].flatMap {
-        case s @ Acc(None, _) =>
-          ZPure.set(s.copy(collect = Some((obj, Chunk.empty))))
-        case _ =>
-          ZPure.fail(new IllegalStateException("nested ContentObjStart"))
-      }
-    case StreamingDecoded.ContentObjBytes(c) =>
-      ZPure.get[Acc].flatMap {
-        case Acc(Some((obj, buf)), emb) =>
-          ZPure.set(Acc(Some((obj, buf ++ c)), emb))
-        case _ =>
-          ZPure.fail(new IllegalStateException("ContentObjBytes without ContentObjStart"))
-      }
-    case StreamingDecoded.ContentObjEnd =>
-      ZPure.get[Acc].flatMap {
-        case Acc(Some((obj, buf)), emb) =>
-          val bits = _root_.scodec.bits.BitVector(buf.toArray)
-          fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits)).flatMap {
-            case Left(xref) =>
-              ZPure.set(Acc(None, xref :: emb))
-            case Right(rows) =>
-              ZPure.set(Acc(None, emb)) *> emitsDecoded(rows)
-          }
-        case _ =>
-          ZPure.fail(new IllegalStateException("ContentObjEnd without start"))
-      }
-  }
+        Right((Chunk.single(Decoded.Meta(mergedXrefs, sanitised, m.version)), acc0))
 
-  private val finalize: Acc => ZPure[Decoded, Acc, Acc, Any, Throwable, Unit] = { s =>
-    if (s.collect.nonEmpty) ZPure.fail(new IllegalStateException("EOF inside content stream payload"))
-    else ZPure.unit
-  }
+      case StreamingDecoded.DataObj(obj) =>
+        Right((Chunk.single(Decoded.DataObj(obj)), s))
+
+      case StreamingDecoded.VersionT(_) | _: StreamingDecoded.CommentT |
+          _: StreamingDecoded.StartXrefT | _: StreamingDecoded.XrefT =>
+        Right((Chunk.empty, s))
+
+      case StreamingDecoded.ContentObjStart(obj, _, Some(bits)) =>
+        fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits)).map {
+          case Left(xref)  => (Chunk.empty, s.copy(embeddedXrefs = xref :: s.embeddedXrefs))
+          case Right(rows) => (Chunk.fromIterable(rows), s)
+        }
+
+      case StreamingDecoded.ContentObjStart(obj, _, None) =>
+        s.collect match {
+          case None    => Right((Chunk.empty, s.copy(collect = Some((obj, Chunk.empty)))))
+          case Some(_) => Left(new IllegalStateException("nested ContentObjStart"))
+        }
+
+      case StreamingDecoded.ContentObjBytes(c) =>
+        s.collect match {
+          case Some((obj, buf)) => Right((Chunk.empty, s.copy(collect = Some((obj, buf ++ c)))))
+          case None             => Left(new IllegalStateException("ContentObjBytes without ContentObjStart"))
+        }
+
+      case StreamingDecoded.ContentObjEnd =>
+        s.collect match {
+          case Some((obj, buf)) =>
+            val bits = _root_.scodec.bits.BitVector(buf.toArray)
+            fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits)).map {
+              case Left(xref)  => (Chunk.empty, Acc(None, xref :: s.embeddedXrefs))
+              case Right(rows) => (Chunk.fromIterable(rows), Acc(None, s.embeddedXrefs))
+            }
+          case None =>
+            Left(new IllegalStateException("ContentObjEnd without start"))
+        }
+    }
 
   /**
-   * Synchronous fold of one [[StreamingDecoded]] chunk through the same ZPure
-   * step as [[pipeline]]; returns emitted [[Decoded]] values and next [[Acc]].
+   * Synchronous fold with no ZPure interpreter — used by [[zio.pdf.PdfHyperdrive]].
    */
-  def foldChunk(acc: Acc, chunk: Chunk[StreamingDecoded]): (Chunk[Decoded], Either[Throwable, Acc]) = {
-    val run = chunk.foldLeft[ZPure[Decoded, Acc, Acc, Any, Throwable, Unit]](ZPure.unit) { (a, in) =>
-      a *> step(in)
-    }
-    val (log, result) = run.runAll(acc)
-    result match {
-      case Left(err)    => (log, Left(err))
-      case Right((s, _)) => (log, Right(s))
-    }
+  def foldSync(acc: Acc, chunk: Chunk[StreamingDecoded]): (Chunk[Decoded], Acc) = {
+    val builder = Chunk.newBuilder[Decoded]
+    var s       = acc
+    val it      = chunk.iterator
+    while it.hasNext do
+      applyStep(s, it.next()) match {
+        case Left(err)         => throw err
+        case Right((out, next)) =>
+          builder ++= out
+          s = next
+      }
+    (builder.result(), s)
   }
 
   /** Validate bridge state after the last streaming event (no open content payload). */
-  def finalizeAcc(acc: Acc): Either[Throwable, Chunk[Decoded]] = {
-    val (log, result) = finalize(acc).runAll(acc)
-    result match {
-      case Left(err)     => Left(err)
-      case Right((_, _)) => Right(log)
+  def finalizeSync(acc: Acc): Chunk[Decoded] =
+    if (acc.collect.nonEmpty) throw new IllegalStateException("EOF inside content stream payload")
+    else Chunk.empty
+
+  /**
+   * Synchronous fold of one [[StreamingDecoded]] chunk; returns emitted
+   * [[Decoded]] values and next [[Acc]].
+   */
+  def foldChunk(acc: Acc, chunk: Chunk[StreamingDecoded]): (Chunk[Decoded], Either[Throwable, Acc]) =
+    try {
+      val (decoded, next) = foldSync(acc, chunk)
+      (decoded, Right(next))
+    } catch {
+      case err: Throwable => (Chunk.empty, Left(err))
     }
-  }
+
+  /** Validate bridge state after the last streaming event. */
+  def finalizeAcc(acc: Acc): Either[Throwable, Chunk[Decoded]] =
+    try Right(finalizeSync(acc))
+    catch { case err: Throwable => Left(err) }
 
   val pipeline: ZPipeline[Any, Throwable, StreamingDecoded, Decoded] =
-    StatefulPipe[StreamingDecoded, Acc, Decoded](acc0, finalize)(step)
+    StatefulPipe.fromSync[StreamingDecoded, Acc, Decoded](
+      acc0,
+      finalizeAcc,
+      applyStep
+    )
 }

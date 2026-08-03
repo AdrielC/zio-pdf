@@ -21,7 +21,7 @@ object DecodeSpec extends ZIOSpecDefault {
     test("decodes the legacy xref-stream.pdf fixture into Decoded values") {
       for {
         bytes <- loadFixture("xref-stream.pdf")
-        out   <- ZStream.fromChunk(bytes).via(PdfStream.decode(Log.noop)).runCollect
+        out   <- ZStream.fromChunk(bytes).via(PdfStream.decode()).runCollect
       } yield {
         val versions = out.collect { case Decoded.Meta(_, _, Some(v)) => v }
         val data     = out.collect { case Decoded.DataObj(o) => o }
@@ -41,7 +41,7 @@ object DecodeSpec extends ZIOSpecDefault {
     test("decodes the legacy empty-kids.pdf fixture without errors") {
       for {
         bytes <- loadFixture("empty-kids.pdf")
-        out   <- ZStream.fromChunk(bytes).via(PdfStream.decode(Log.noop)).runCollect
+        out   <- ZStream.fromChunk(bytes).via(PdfStream.decode()).runCollect
       } yield {
         val metas = out.collect { case m: Decoded.Meta => m }
         val objs  = out.collect {
@@ -60,8 +60,8 @@ object DecodeSpec extends ZIOSpecDefault {
     test("decodes the same fixture even when fed in 64 byte chunks") {
       for {
         bytes  <- loadFixture("xref-stream.pdf")
-        large  <- ZStream.fromChunk(bytes).via(PdfStream.decode(Log.noop)).runCollect
-        small  <- ZStream.fromChunk(bytes).rechunk(64).via(PdfStream.decode(Log.noop)).runCollect
+        large  <- ZStream.fromChunk(bytes).via(PdfStream.decode()).runCollect
+        small  <- ZStream.fromChunk(bytes).rechunk(64).via(PdfStream.decode()).runCollect
       } yield {
         // Same number of objects either way.
         assertTrue(large.size == small.size)

@@ -10,7 +10,7 @@
 package zio.pdf
 
 import _root_.scodec.Attempt
-import zio.{NonEmptyChunk, ZIO}
+import zio.{Chunk, NonEmptyChunk, ZIO}
 import zio.prelude.Validation
 import zio.stream.ZStream
 
@@ -158,6 +158,13 @@ object ValidatePdf {
         errors.mapError(e => PdfError.Assembly(e): PdfError).zipParRight(apply(pdf))
       }
     }
+
+  /** Validate a collected decode result (for [[zio.pdf.io.PdfIO.scoped]]). */
+  def fromChunk(decoded: Chunk[Decoded]): Validation[PdfError, Unit] =
+    AssemblePdf.fromChunk(decoded).mapError(e => PdfError.Assembly(e): PdfError).flatMap {
+      case ValidatedPdf(pdf, errors) =>
+        errors.mapError(e => PdfError.Assembly(e): PdfError).zipParRight(apply(pdf))
+    }
 }
 
 sealed trait CompareError
@@ -207,14 +214,39 @@ object ComparePdfs {
               acc.zipParRight(compareObjs(num, (oldByNumber.get(num), newByNumber.get(num))))
           }
           val newErrorsAsCompare = newErrors.mapError(e => CompareError.Assembly(e): CompareError)
-          val validated = ValidatePdf(newPdf).mapError(e => CompareError.Validation(e): CompareError)
+          val validated        = ValidatePdf(newPdf).mapError(e => CompareError.Validation(e): CompareError)
           newErrorsAsCompare.zipParRight(validated).zipParRight(compared)
       }
     }
 
-  def fromBytes(log: Log)(
+  /** Compare two collected decode results (for [[zio.pdf.io.PdfIO.scoped]]). */
+  def fromChunks(
+    oldDecoded: Chunk[Decoded],
+    updatedDecoded: Chunk[Decoded]
+  ): Validation[CompareError, Unit] = {
+    val oldV = AssemblePdf.fromChunk(oldDecoded).mapError(e => CompareError.Assembly(e): CompareError)
+    val newV = AssemblePdf.fromChunk(updatedDecoded).mapError(e => CompareError.Assembly(e): CompareError)
+    oldV.zipPar(newV).flatMap {
+      case (ValidatedPdf(oldPdf, _), ValidatedPdf(newPdf, newErrors)) =>
+        val oldByNumber = ValidatePdf.objsByNumber(oldPdf)
+        val newByNumber = ValidatePdf.objsByNumber(newPdf)
+        val keys        = oldByNumber.keySet ++ newByNumber.keySet
+        val compared    = keys.toList.foldLeft[Validation[CompareError, Unit]](Validation.succeed(())) {
+          (acc, num) =>
+            acc.zipParRight(compareObjs(num, (oldByNumber.get(num), newByNumber.get(num))))
+        }
+        val newErrorsAsCompare = newErrors.mapError(e => CompareError.Assembly(e): CompareError)
+        val validated        = ValidatePdf(newPdf).mapError(e => CompareError.Validation(e): CompareError)
+        newErrorsAsCompare.zipParRight(validated).zipParRight(compared)
+    }
+  }
+
+  def fromBytes(enableDiagnostics: Boolean)(
     oldBytes: ZStream[Any, Throwable, Byte],
     updatedBytes: ZStream[Any, Throwable, Byte]
   ): ZIO[Any, Throwable, Validation[CompareError, Unit]] =
-    fromDecoded(oldBytes.via(PdfStream.decode(log)), updatedBytes.via(PdfStream.decode(log)))
+    fromDecoded(
+      oldBytes.via(PdfStream.decode(enableDiagnostics)),
+      updatedBytes.via(PdfStream.decode(enableDiagnostics))
+    )
 }

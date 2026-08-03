@@ -42,13 +42,15 @@ object FilterDuplicates {
     }
   }
 
-  def pipe(log: Log = Log.noop): ZPipeline[Any, Throwable, TopLevel, TopLevel] =
+  def pipe(enableDiagnostics: Boolean = false): ZPipeline[Any, Throwable, TopLevel, TopLevel] =
     StatefulPipe.applyEffect[TopLevel, State, TopLevel](
       initial = initial,
       onDone = s =>
-        if (s.filter.duplicateCount > 0)
-          log.debug(
-            s"duplicate indirect objects suppressed before first xref (count: ${s.filter.duplicateCount})"
+        if (enableDiagnostics && s.filter.duplicateCount > 0)
+          ZPureLog.drainToZio(
+            ZPureLog.lines(
+              s"duplicate indirect objects suppressed before first xref (count: ${s.filter.duplicateCount})"
+            )
           )
         else ZIO.unit
     )(step)

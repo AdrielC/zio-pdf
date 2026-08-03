@@ -110,7 +110,7 @@ object StreamObjSpec extends ZIOSpecDefault {
         bytes <- partStream.via(WritePdf.parts).runFold(ByteVector.empty)(_ ++ _)
         decoded <- ZStream
                      .fromChunk(Chunk.fromArray(bytes.toArray))
-                     .via(PdfStream.decode(Log.noop))
+                     .via(PdfStream.decode())
                      .runCollect
         ctnt = decoded.collect { case Decoded.ContentObj(o, _, s) => (o, s) }
       } yield {
