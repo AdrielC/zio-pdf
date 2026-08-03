@@ -40,6 +40,19 @@ object PipeSpec extends ZIOSpecDefault {
         val g = Pipe[Int, String](i => s"$i")
         val inputs = (0 until 8).toList
         assertTrue(inputs.map(Pipe.fanOut(f, g).run) == inputs.map(i => (f.run(i), g.run(i))))
+      },
+      test("<> and &&& are fanOut") {
+        val f = Pipe[Int, Int](_ + 1)
+        val g = Pipe[Int, String](i => s"$i")
+        assertTrue((f <> g).run(4) == (f &&& g).run(4), (f <> g).run(4) == Pipe.fanOut(f, g).run(4))
+      },
+      test("stagedDecodeAndDigest matches fused digest on fixture") {
+        for {
+          bytes <- loadFixture("xref-stream.pdf")
+          slice  = FusedDecode.Slice(bytes, 0, bytes.length)
+          staged = IngestPipeline.stagedDecodeAndDigest().run(slice)
+          fused  = IngestPipeline.fusedDecodeAndDigest(slice, FusedDecode.Cfg())
+        } yield assertTrue(staged.decoded == fused.decoded, staged.digest.sameElements(fused.digest))
       }
     ),
     suite("fused decode parity")(

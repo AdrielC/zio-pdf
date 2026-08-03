@@ -1,7 +1,8 @@
 /*
- * Ingest graphs — volga parallel blocks over one byte source.
+ * Ingest graphs — volga parallel (`<>` / `&&&`) over one byte source.
  *
  * Decode + digest share one [[HyperFuse]] scan (no second pass over bytes).
+ * For a non-fused staging view of the same shape, see [[stagedDecodeAndDigest]].
  */
 
 package zio.pdf.pipe
@@ -34,6 +35,13 @@ object IngestPipeline {
 
   def fusedElementsAndDigestSink(slice: Slice, cfg: Cfg)(sink: Element => Unit): DigestSink =
     HyperFuse.fuseElementsWithDigestSink(slice, cfg)(sink)
+
+  /** Two independent pipes on the same slice — parity / debug; prefer fused HyperFuse. */
+  def stagedDecodeAndDigest(cfg: Cfg = Cfg()): Pipe[Slice, DecodeDigest[Chunk[Decoded]]] = {
+    val decode = DecodePipeline.decodeSlice(cfg)
+    val digest = Pipe[Slice, Array[Byte]](slice => ByteDigest.digestSlice(slice))
+    (decode <> digest) >>> Pipe { case (decoded, dig) => DecodeDigest(decoded, dig) }
+  }
 
   def fromSlice[A](cfg: Cfg, fuse: (Slice, Cfg) => DecodeDigest[A]): Pipe[Path, DecodeDigest[A]] =
     DecodePipeline.readSlice(cfg) >>> Pipe(slice => fuse(slice, cfg))
