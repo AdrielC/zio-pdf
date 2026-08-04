@@ -1,7 +1,7 @@
 # zio-pdf (formerly fs2-pdf)
 
 > **Status: 0.2.0-RC1** — internal library (ZIO 2 / Scala 3).  
-> **Forge:** [git.internal.net/internal/zio-pdf](https://git.internal.net/internal/zio-pdf)
+> **Interim forge:** [github.com/AdrielC/zio-pdf](https://github.com/AdrielC/zio-pdf) until `git.internal.net` is back; canonical target remains internal.
 > ([releases](https://git.internal.net/internal/zio-pdf/releases) ·
 > [CI](https://git.internal.net/internal/zio-pdf/actions) ·
 > [packages](https://git.internal.net/internal/zio-pdf/packages) ·

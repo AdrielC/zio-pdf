@@ -1,7 +1,8 @@
 # Contributing to zio-pdf
 
-**internal repository** — [git.internal.net/internal/zio-pdf](https://git.internal.net/internal/zio-pdf).  
-No public mirror; artifacts publish only to internal Gitea Packages (`com.internal`).
+**internal repository** — canonical forge [git.internal.net/internal/zio-pdf](https://git.internal.net/internal/zio-pdf).  
+Until the forge is healthy, open PRs on [github.com/AdrielC/zio-pdf](https://github.com/AdrielC/zio-pdf) and push to internal when it is back.  
+No public mirror long-term; artifacts publish only to internal Gitea Packages (`com.internal`).
 
 ## Clone (SSH)
 

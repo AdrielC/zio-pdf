@@ -12,8 +12,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Required for Coursier on internal runners (see internal/quasar).
-  HOME: /root
   SBT_OPTS: -Dsbt.supershell=false
 
 jobs:
@@ -35,7 +33,10 @@ jobs:
 
       - name: Install sbt
         run: |
-          export HOME="${HOME:-/root}"
+          # internal Gitea runners need HOME=/root; GitHub Actions must not override HOME.
+          if [[ "${{ github.server_url }}" != "https://github.com" ]]; then
+            export HOME=/root
+          fi
           if ! command -v sbt >/dev/null 2>&1; then
             curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
             chmod +x /usr/local/bin/cs
