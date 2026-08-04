@@ -138,12 +138,11 @@ object StreamProcessPolicyTextSpec extends ZIOSpecDefault {
     },
 
     test("PdfPolicy denyFonts flags BaseFont") {
+      import PdfPolicy.dsl.*
       for {
         bytes   <- jsPdfBytes
         decoded <- ZStream.fromChunk(Chunk.fromArray(bytes)).via(PdfStream.decode()).runCollect
-        result = PdfPolicy.fromChunk(
-          PdfPolicy(denyFonts = Set("Courier"), banJavaScript = false, banDangerousActions = false)
-        )(decoded)
+        result = PdfPolicy.fromChunk(denyFonts("Courier"))(decoded)
       } yield assertTrue(
         !result.isSuccess,
         result.fold(
@@ -160,6 +159,47 @@ object StreamProcessPolicyTextSpec extends ZIOSpecDefault {
       for {
         bytes  <- jsPdfBytes
         result <- PdfStream.policy(PdfPolicy.permissive)(ZStream.fromChunk(Chunk.fromArray(bytes)))
+      } yield assertTrue(result.isSuccess)
+    },
+
+    test("Policy DSL when/unless and & composition") {
+      import PdfPolicy.dsl.*
+      for {
+        bytes   <- jsPdfBytes
+        decoded <- ZStream.fromChunk(Chunk.fromArray(bytes)).via(PdfStream.decode()).runCollect
+        // JS present → when(hasJavaScript)(reject) must fail
+        gated = PdfPolicy.fromChunk(
+          when(hasJavaScript)(reject("js not allowed")) &
+            unless(hasEncrypt)(pass)
+        )(decoded)
+        // disjunction: denyFonts(missing) passes, so overall anyOf passes
+        any = PdfPolicy.fromChunk(
+          anyOf(denyFonts("MissingFont"), banJavaScript)
+        )(decoded)
+        // conjunction still sees JS
+        both = PdfPolicy.fromChunk(banJavaScript & denyFonts("Courier"))(decoded)
+      } yield assertTrue(
+        !gated.isSuccess,
+        gated.fold(
+          errs => errs.exists {
+            case PolicyViolation.Custom("js not allowed") => true
+            case _                                        => false
+          },
+          _ => false
+        ),
+        any.isSuccess, // MissingFont check passes → anyOf succeeds
+        !both.isSuccess
+      )
+    },
+
+    test("Policy DSL ifElse branches on hasEncrypt") {
+      import PdfPolicy.dsl.*
+      for {
+        bytes   <- minimalPdfBytes
+        decoded <- ZStream.fromChunk(Chunk.fromArray(bytes)).via(PdfStream.decode()).runCollect
+        result = PdfPolicy.fromChunk(
+          ifElse(hasEncrypt)(reject("encrypted"), pass)
+        )(decoded)
       } yield assertTrue(result.isSuccess)
     },
 

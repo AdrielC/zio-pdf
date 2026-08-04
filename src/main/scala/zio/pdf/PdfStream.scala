@@ -158,8 +158,8 @@ object PdfStream {
   ): zio.ZIO[Any, Throwable, zio.prelude.Validation[PdfError, Unit]] =
     ValidatePdf.fromDecoded(bytes.via(decode(enableDiagnostics)))
 
-  /** Structural compliance ([[PdfPolicy]]) over a decoded byte stream. */
-  def policy(rules: PdfPolicy = PdfPolicy.strict, enableDiagnostics: Boolean = false)(
+  /** Structural compliance ([[Policy]] DSL) over a decoded byte stream. */
+  def policy(rules: Policy = PdfPolicy.strict, enableDiagnostics: Boolean = false)(
     bytes: zio.stream.ZStream[Any, Throwable, Byte]
   ): zio.ZIO[Any, Throwable, zio.prelude.Validation[PolicyViolation, Unit]] =
     PdfPolicy.fromDecoded(rules)(bytes.via(decode(enableDiagnostics)))
