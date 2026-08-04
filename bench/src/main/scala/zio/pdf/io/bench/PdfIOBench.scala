@@ -1,5 +1,5 @@
 /*
- * PdfEngine / PdfIO entry-point benchmarks on the real `xref-stream.pdf` fixture.
+ * PdfEngine + PdfIO entry-point benchmarks on `xref-stream.pdf`.
  *
  * Run from sbt:
  *
@@ -61,12 +61,8 @@ class PdfIOBench {
     val _ = Files.deleteIfExists(pdfPath)
   }
 
-  // -------------------------------------------------------------------
-  // Full decode pipeline (the shape production code uses)
-  // -------------------------------------------------------------------
-
   @Benchmark
-  def decodeDecoded: Int =
+  def pdfEngineDecode: Int =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe
         .run(
@@ -91,10 +87,6 @@ class PdfIOBench {
         .getOrThrow()
     }
 
-  // -------------------------------------------------------------------
-  // Validate on top of decode
-  // -------------------------------------------------------------------
-
   @Benchmark
   def validate: Boolean =
     Unsafe.unsafe { implicit u =>
@@ -107,10 +99,6 @@ class PdfIOBench {
         .getOrThrow()
         .isSuccess
     }
-
-  // -------------------------------------------------------------------
-  // Raw bytes only (isolates I/O + ZStream overhead)
-  // -------------------------------------------------------------------
 
   @Benchmark
   def readAll: Int =
