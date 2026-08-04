@@ -159,7 +159,7 @@ object ValidatePdf {
       }
     }
 
-  /** Validate a collected decode result (for [[zio.pdf.io.PdfIO.scoped]]). */
+  /** Validate a collected decode result. */
   def fromChunk(decoded: Chunk[Decoded]): Validation[PdfError, Unit] =
     AssemblePdf.fromChunk(decoded).mapError(e => PdfError.Assembly(e): PdfError).flatMap {
       case ValidatedPdf(pdf, errors) =>
@@ -219,7 +219,7 @@ object ComparePdfs {
       }
     }
 
-  /** Compare two collected decode results (for [[zio.pdf.io.PdfIO.scoped]]). */
+  /** Compare two collected decode results. */
   def fromChunks(
     oldDecoded: Chunk[Decoded],
     updatedDecoded: Chunk[Decoded]

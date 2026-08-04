@@ -1,5 +1,5 @@
 /*
- * PdfHyperdrive vs streaming PdfIO on xref-stream.pdf.
+ * PdfEngine fused path vs streaming PdfStream on xref-stream.pdf.
  *
  *   sbt "bench/Jmh/run -i 10 -wi 5 .*PdfHyperdriveBench.*"
  */
@@ -12,9 +12,7 @@ import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
 
 import zio.{Runtime, Unsafe}
-import zio.pdf.PdfHyperdrive
-import zio.pdf.io.PdfIO
-import zio.pdf.PdfStream
+import zio.pdf.{PdfEngine, PdfHyperdrive, PdfStream}
 
 import scala.compiletime.uninitialized
 
@@ -50,9 +48,9 @@ class PdfHyperdriveBench {
     PdfHyperdrive.decodeSync(bytes).size
 
   @Benchmark
-  def pdfIOWarp: Int =
+  def pdfEngineDecode: Int =
     Unsafe.unsafe { implicit u =>
-      runtime.unsafe.run(PdfIO.warp(pdfPath)).getOrThrow().size
+      runtime.unsafe.run(PdfEngine.decode(pdfPath).provide(PdfEngine.live)).getOrThrow().size
     }
 
   @Benchmark

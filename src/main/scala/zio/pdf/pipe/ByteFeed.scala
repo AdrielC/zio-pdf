@@ -19,7 +19,7 @@ import zio.Chunk
 import zio.prelude.fx.ZPure
 import zio.pdf.pipe.FusedDecode.{Cfg, Slice}
 
-object ByteFeed {
+private[pdf] object ByteFeed {
 
   /**
    * One window step — structurally

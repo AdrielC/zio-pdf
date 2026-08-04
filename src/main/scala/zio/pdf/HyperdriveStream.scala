@@ -6,8 +6,8 @@
  * never sees a materialised timeline [[Chunk]] unless it explicitly
  * `runCollect`s the stream.
  *
- * For fire-and-forget constant-memory sinks, prefer
- * [[zio.pdf.io.PdfIO.warpStreaming]] (no queue).
+ * Prefer [[PdfEngine.stream]] / [[PdfEngine.elements]]; for fire-and-forget
+ * constant-memory sinks use [[PdfEngine.sink]] (no queue).
  */
 
 package zio.pdf
@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference
 import zio.*
 import zio.stream.ZStream
 
-object HyperdriveStream {
+private[pdf] object HyperdriveStream {
 
   /** Sentinel: producer finished (success or failure). */
   private val StreamEnd = new AnyRef

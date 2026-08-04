@@ -1,5 +1,5 @@
 /*
- * Minimal end-to-end: read a PDF, decode, compare scoped vs ZIO.
+ * Minimal end-to-end: read a PDF, decode via PdfEngine vs PdfStream.
  *
  * Run from the repo root:
  *
@@ -15,7 +15,7 @@ package zio.pdf.examples
 import java.nio.file.{Files, Path, StandardCopyOption}
 
 import zio.*
-import zio.pdf.{Decoded, PdfStream}
+import zio.pdf.{Decoded, PdfEngine, PdfStream}
 import zio.pdf.io.PdfIO
 
 object ReadAndDecode extends ZIOAppDefault {
@@ -24,29 +24,29 @@ object ReadAndDecode extends ZIOAppDefault {
     for {
       path      <- resolvePath
       _         <- Console.printLine(s"Decoding: $path")
-      scopedOut <- ZIO.fromEither(PdfIO.scoped.decodeDecoded(path))
-      zioOut    <- PdfIO.zio.reader(path).via(PdfStream.decode()).runCollect
-      objs       = countObjs(scopedOut)
-      metas      = scopedOut.collect { case m: Decoded.Meta => m }.size
+      engineOut <- PdfEngine.decode(path).provide(PdfEngine.live)
+      zioOut    <- PdfIO.reader(path).via(PdfStream.decode()).runCollect
+      objs       = countObjs(engineOut)
+      metas      = engineOut.collect { case m: Decoded.Meta => m }.size
       _         <- Console.printLine(
-                     s"scoped: ${scopedOut.size} events ($objs objects, $metas meta)"
+                     s"engine: ${engineOut.size} events ($objs objects, $metas meta)"
                    )
       _         <- Console.printLine(
                      s"zio:    ${zioOut.size} events (${countObjs(zioOut)} objects, " +
                        s"${zioOut.collect { case m: Decoded.Meta => m }.size} meta)"
                    )
-      _         <- ZIO.when(scopedOut == zioOut)(
-                     Console.printLine("OK — scoped and ZIO decode paths agree")
+      _         <- ZIO.when(engineOut == zioOut)(
+                     Console.printLine("OK — PdfEngine and PdfStream decode paths agree")
                    )
-      _         <- ZIO.unless(scopedOut == zioOut)(
-                     Console.printLineError("FAIL — scoped and ZIO outputs differ")
+      _         <- ZIO.unless(engineOut == zioOut)(
+                     Console.printLineError("FAIL — PdfEngine and PdfStream outputs differ")
                    )
     } yield ExitCode.success
 
   private def countObjs(chunk: Chunk[Decoded]): Int =
     chunk.count {
       case Decoded.DataObj(_) | Decoded.ContentObj(_, _, _) => true
-      case _                                                  => false
+      case _                                                => false
     }
 
   private def resolvePath: ZIO[Any, Throwable, Path] =

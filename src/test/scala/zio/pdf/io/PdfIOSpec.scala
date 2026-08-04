@@ -3,7 +3,7 @@ package zio.pdf.io
 import java.nio.file.Files
 
 import zio.*
-import zio.pdf.PdfStream
+import zio.pdf.PdfEngine
 import zio.stream.*
 import zio.test.*
 
@@ -31,15 +31,15 @@ object PdfIOSpec extends ZIOSpecDefault {
         _    <- ZIO.attemptBlocking(Files.delete(path))
       } yield assertTrue(n == size.toLong)
     },
-    test("decodeDecoded on xref-stream.pdf") {
+    test("PdfEngine.decode on xref-stream.pdf") {
       val path = java.nio.file.Path.of("src/test/resources/xref-stream.pdf")
       for {
-        out <- PdfIO.decodeDecoded(path)
-        objs = out.collect {
-          case zio.pdf.Decoded.DataObj(_)          => 1
-          case zio.pdf.Decoded.ContentObj(_, _, _) => 1
-        }
-        metas = out.collect { case m: zio.pdf.Decoded.Meta => m }
+        out   <- PdfEngine.decode(path).provide(PdfEngine.live)
+        objs   = out.collect {
+                   case zio.pdf.Decoded.DataObj(_)          => 1
+                   case zio.pdf.Decoded.ContentObj(_, _, _) => 1
+                 }
+        metas  = out.collect { case m: zio.pdf.Decoded.Meta => m }
       } yield assertTrue(objs.size >= 1, metas.size == 1)
     }
   )
