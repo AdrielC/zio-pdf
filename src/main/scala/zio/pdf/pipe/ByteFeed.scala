@@ -1,10 +1,14 @@
 /*
- * Generic byte-slice feeding loop for state-carrying decode stages.
+ * Byte-window feed as [[ZPure]] — same slots as [[PureDecoder]] / [[StatefulPipe]]:
  *
- * Same contract as [[zio.scodec.stream.StatefulPipe]]: the step is a
- * [[ZPure]] whose log channel carries event batches and whose state
- * channel threads the machine. The driver is a tight `while` over
- * windows — one `runAll` per slice, no intermediate timelines.
+ *   W = E     each emitted event is a log entry (`runAll` → `Chunk[E]`)
+ *   S         machine state
+ *   E (err)   Nothing on the hot path
+ *   A         Unit
+ *
+ * [[apply]] composes the whole slice into one `ZPure`. [[runWindows]] is the
+ * StreamDecoder-style interpreter: `runAll` per window so a fuse sink can
+ * consume the log without retaining the full timeline.
  */
 
 package zio.pdf.pipe
@@ -18,19 +22,20 @@ import zio.pdf.pipe.FusedDecode.{Cfg, Slice}
 object ByteFeed {
 
   /**
-   * One streaming window: feed bytes, emit a batch on the log channel,
-   * thread machine state. Mirrors [[zio.scodec.stream.StatefulPipe.Step]].
+   * One window step — structurally
+   * `(Array[Byte], Int, Int) => S => (Chunk[E], S)`.
    */
-  type Step[S, E] =
-    (Array[Byte], Int, Int) => ZPure[Chunk[E], S, S, Any, Nothing, Unit]
+  type Step[S, +E] =
+    (Array[Byte], Int, Int) => ZPure[E, S, S, Any, Nothing, Unit]
 
-  type Finalize[S, E] =
-    S => ZPure[Chunk[E], S, S, Any, Nothing, Unit]
+  type Finalize[S, +E] =
+    S => ZPure[E, S, S, Any, Nothing, Unit]
 
-  /** Emit one batch (no-op when empty — avoids a useless log node). */
-  def emitBatch[S, E](out: Chunk[E]): ZPure[Chunk[E], S, S, Any, Nothing, Unit] =
-    if out.isEmpty then ZPure.unit[S]
-    else ZPure.log[S, Chunk[E]](out)
+  /** Emit each event on the log channel. */
+  def logAll[S, E](events: Chunk[E]): ZPure[E, S, S, Any, Nothing, Unit] =
+    events.foldLeft[ZPure[E, S, S, Any, Nothing, Unit]](ZPure.unit) {
+      (acc, e) => acc *> ZPure.log[S, E](e)
+    }
 
   /** Lift a sync `(state, window) => (events, state)` into a [[Step]]. */
   def fromSync[S, E](f: (S, Array[Byte], Int, Int) => (Chunk[E], S)): Step[S, E] =
@@ -40,40 +45,54 @@ object ByteFeed {
           val (out, next) = f(s, buf, off, len)
           (out, next)
         }
-        .flatMap(emitBatch)
-
-  /** Run `hook` on each window before `step` (digest, metrics). */
-  def tapBytes[S, E](hook: (Array[Byte], Int, Int) => Unit)(step: Step[S, E]): Step[S, E] =
-    (buf, off, len) =>
-      ZPure.succeed[S, Unit] { hook(buf, off, len) } *> step(buf, off, len)
+        .flatMap(logAll)
 
   /**
-   * Drive [[Step]] across a [[Slice]] in `batchSize` windows.
-   * `finalize` runs once after the last byte (e.g. trailing Meta).
+   * The whole slice as one `ZPure`. Interpret with `.runAll(initial)`:
+   * `(Chunk[E], Either[Nothing, (S, Unit)])`.
    */
+  def apply[S, E](
+    slice: Slice,
+    batchSize: Int,
+    step: Step[S, E],
+    finalize: Finalize[S, E] = (_: S) => ZPure.unit[S]
+  ): ZPure[E, S, S, Any, Nothing, Unit] = {
+    val buf = slice.bytes
+    val end = slice.offset + slice.length
+
+    def windows(pos: Int): ZPure[E, S, S, Any, Nothing, Unit] =
+      if pos >= end then ZPure.unit[S]
+      else
+        val len = math.min(batchSize, end - pos)
+        step(buf, pos, len) *> windows(pos + len)
+
+    windows(slice.offset) *> ZPure.get[S].flatMap(finalize)
+  }
+
+  /** Materialise: `apply(...).runAll(initial)`. */
   def run[S, E](
     slice: Slice,
     batchSize: Int,
     initial: S,
     step: Step[S, E],
-    finalize: Finalize[S, E]
+    finalize: Finalize[S, E] = (_: S) => ZPure.unit[S]
   ): (Chunk[E], S) = {
-    val builder = Chunk.newBuilder[E]
-    val state   = runDrain(slice, batchSize, initial, step, finalize)(builder ++= _)
-    (builder.result(), state)
+    val (log, result) = apply(slice, batchSize, step, finalize).runAll(initial)
+    (log, result.fold(_ => initial, _._1))
   }
 
   /**
-   * Fused driver: one `while` loop, drain each window's log batch through
-   * `drain` so the full timeline never materialises.
+   * Interpret window-by-window (like `StreamDecoder.fromPure`): each
+   * `runAll` yields that window's `Chunk[E]` for `consume`, then state
+   * continues. Fuse/sink path — does not retain the full log.
    */
-  def runDrain[S, E](
+  def runWindows[S, E](
     slice: Slice,
     batchSize: Int,
     initial: S,
     step: Step[S, E],
-    finalize: Finalize[S, E]
-  )(drain: Chunk[E] => Unit): S = {
+    finalize: Finalize[S, E] = (_: S) => ZPure.unit[S]
+  )(consume: Chunk[E] => Unit): S = {
     var state = initial
     var pos   = slice.offset
     val end   = slice.offset + slice.length
@@ -81,36 +100,27 @@ object ByteFeed {
     while pos < end do
       val len           = math.min(batchSize, end - pos)
       val (log, result) = step(buf, pos, len).runAll(state)
-      drainLog(log, drain)
+      if log.nonEmpty then consume(log)
       state = result.fold(_ => state, _._1)
       pos += len
     val (flog, fresult) = finalize(state).runAll(state)
-    drainLog(flog, drain)
+    if flog.nonEmpty then consume(flog)
     fresult.fold(_ => state, _._1)
   }
 
-  private def drainLog[E](log: Chunk[Chunk[E]], drain: Chunk[E] => Unit): Unit = {
-    var i = 0
-    while i < log.length do
-      val batch = log(i)
-      if batch.nonEmpty then drain(batch)
-      i += 1
-  }
-
-  /** SHA-256 over the same byte windows fed to [[runDrain]]. */
+  /** SHA-256 over the same byte windows — digest lives in [[ZPure]] state. */
   def digestBatched(slice: Slice, batchSize: Int): Array[Byte] = {
-    val md = MessageDigest.getInstance("SHA-256")
-    val _ = runDrain(
-      slice,
-      batchSize,
-      (),
-      tapBytes[Unit, Nothing]((buf, off, len) => md.update(buf, off, len))((_, _, _) => ZPure.unit),
-      (_: Unit) => ZPure.unit
-    )(_ => ())
+    val initial = MessageDigest.getInstance("SHA-256")
+    val step: Step[MessageDigest, Nothing] = (buf, off, len) =>
+      ZPure.update[MessageDigest, MessageDigest] { md =>
+        md.update(buf, off, len)
+        md
+      }
+    val (_, md) = run(slice, batchSize, initial, step)
     md.digest()
   }
 
-  /** [[FusedDecode.decodeStreamingSlice]] expressed as [[runDrain]]. */
+  /** [[FusedDecode.decodeStreamingSlice]] via [[run]]. */
   def streamingEvents(slice: Slice, cfg: Cfg): Chunk[zio.pdf.StreamingDecoded] = {
     import zio.pdf.StreamingDecode
     val Cfg(diag, config, batchSize) = cfg
@@ -119,7 +129,7 @@ object ByteFeed {
       batchSize,
       StreamingDecode.initialFinalState,
       fromSync((fs, buf, off, len) => StreamingDecode.stepChunkBytes(config, fs, buf, off, len)),
-      fs => emitBatch(StreamingDecode.finalizeToMetaSync(diag, fs))
+      fs => logAll(StreamingDecode.finalizeToMetaSync(diag, fs))
     )._1
   }
 }

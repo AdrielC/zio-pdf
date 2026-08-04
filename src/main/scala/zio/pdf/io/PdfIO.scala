@@ -284,8 +284,8 @@ object PdfIO {
     ZIO.attemptBlocking(PdfHyperdrive.digestFromPath(path, batchSize))
 
   /**
-   * Validate via hyperdrive stream — folds [[Decoded]] incrementally into
-   * [[AssemblePdf]] without materialising a timeline [[Chunk]].
+   * Validate via hyperdrive stream — no timeline [[Chunk]]; [[AssemblePdf]]
+   * still builds the assembled [[Pdf]] model (named assemble, not a silent collect).
    */
   def validateHyperdrive(
     path: Path,

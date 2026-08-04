@@ -16,29 +16,39 @@ final case class PageText(pageNumber: Long, text: String)
 
 object TextExtract {
 
-  def fromElements(elements: Chunk[Element]): Chunk[PageText] = {
-    val streams = scala.collection.mutable.LongMap.empty[BitVector]
-    val pages   = ArrayBuffer.empty[Page]
+  /** Fold state — content payloads + pages only (not a full [[Element]] timeline). */
+  final case class Acc(
+    streams: scala.collection.mutable.LongMap[BitVector] = scala.collection.mutable.LongMap.empty,
+    pages: ArrayBuffer[Page] = ArrayBuffer.empty
+  )
 
-    val it = elements.iterator
-    while it.hasNext do
-      it.next() match {
-        case Element.Content(obj, raw, stream, _) =>
-          val bits = stream.exec match {
-            case Attempt.Successful(b) => b
-            case Attempt.Failure(_)    => raw
-          }
-          streams.update(obj.index.number, bits)
-        case Element.Data(_, Element.DataKind.Page(p)) =>
-          pages += p
-        case _ => ()
-      }
+  def fold(acc: Acc, el: Element): Acc =
+    el match {
+      case Element.Content(obj, raw, stream, _) =>
+        val bits = stream.exec match {
+          case Attempt.Successful(b) => b
+          case Attempt.Failure(_)    => raw
+        }
+        acc.streams.update(obj.index.number, bits)
+        acc
+      case Element.Data(_, Element.DataKind.Page(p)) =>
+        acc.pages += p
+        acc
+      case _ => acc
+    }
 
+  def finish(acc: Acc): Chunk[PageText] =
     Chunk.fromArray {
-      pages.iterator.map { page =>
-        PageText(page.index.number, extractFromBytes(contentBytes(page, streams)))
+      acc.pages.iterator.map { page =>
+        PageText(page.index.number, extractFromBytes(contentBytes(page, acc.streams)))
       }.toArray
     }
+
+  def fromElements(elements: Chunk[Element]): Chunk[PageText] = {
+    var acc = Acc()
+    val it  = elements.iterator
+    while it.hasNext do acc = fold(acc, it.next())
+    finish(acc)
   }
 
   def extractFromBytes(bytes: Array[Byte]): String = {

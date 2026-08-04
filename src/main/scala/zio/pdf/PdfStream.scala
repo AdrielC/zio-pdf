@@ -164,13 +164,19 @@ object PdfStream {
   ): zio.ZIO[Any, Throwable, zio.prelude.Validation[PolicyViolation, Unit]] =
     PdfPolicy.fromDecoded(rules)(bytes.via(decode(enableDiagnostics)))
 
-  /** Decode elements then extract literal page text. */
+  /**
+   * Decode elements then extract literal page text.
+   * Folds content/page state as elements arrive — never materialises
+   * `Chunk[Element]` (callers that need the timeline should `runCollect`
+   * on [[elements]] themselves).
+   */
   def extractText(enableDiagnostics: Boolean = false): ZPipeline[Any, Throwable, Byte, PageText] =
     ZPipeline.fromFunction[Any, Throwable, Byte, PageText] { bytes =>
       ZStream.unwrap {
-        bytes.via(elements(enableDiagnostics)).runCollect.map { elems =>
-          ZStream.fromChunk(TextExtract.fromElements(elems))
-        }
+        bytes
+          .via(elements(enableDiagnostics))
+          .runFold(TextExtract.Acc())(TextExtract.fold)
+          .map(acc => ZStream.fromChunk(TextExtract.finish(acc)))
       }
     }
 
