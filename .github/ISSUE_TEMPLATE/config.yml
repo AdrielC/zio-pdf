@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: internal zio-pdf repo
+    url: https://git.internal.net/internal/zio-pdf
+    about: Canonical source, CI, and releases
+  - name: CHANGELOG
+    url: https://git.internal.net/internal/zio-pdf/src/branch/main/CHANGELOG.md
+    about: Release history and migration notes

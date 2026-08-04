@@ -1,7 +1,10 @@
 # zio-pdf (formerly fs2-pdf)
 
-> **Status: 0.2.0-RC1** — ZIO 2 / Scala 3 port. Canonical repo:
+> **Status: 0.2.0-RC1** — ZIO 2 / Scala 3 port. **Canonical forge:**
 > [git.internal.net/internal/zio-pdf](https://git.internal.net/internal/zio-pdf)
+> ([releases](https://git.internal.net/internal/zio-pdf/releases) ·
+> [CI](https://git.internal.net/internal/zio-pdf/actions) ·
+> [CONTRIBUTING.md](https://git.internal.net/internal/zio-pdf/src/branch/main/CONTRIBUTING.md))
 >
 > The original [fs2-pdf](https://github.com/springernature/fs2-pdf) was archived.
 > This project ports streaming PDF decode/encode off cats-effect / fs2 onto
@@ -11,6 +14,7 @@
 ## Start here
 
 ```bash
+git clone https://git.internal.net/internal/zio-pdf.git && cd zio-pdf
 sbt examples/run                              # decode xref-stream.pdf end-to-end
 sbt "testOnly zio.pdf.PdfEngineSpec"          # PdfEngine façade
 sbt "testOnly zio.pdf.PdfHyperdriveSpec"      # sync hyperdrive vs stream parity
