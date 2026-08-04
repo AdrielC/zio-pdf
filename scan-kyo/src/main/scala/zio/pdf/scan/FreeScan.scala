@@ -5,13 +5,19 @@
  *
  *   - `Prim`     -- lift a primitive (the only stateful node)
  *   - `Arr`      -- lift a pure function (zero-state, fuses freely)
- *   - `AndThen`  -- sequential composition (`>>>`)
- *   - `Fanout`   -- parallel composition into a tuple (`&&&`)
+ *   - `AndThen`  -- sequential composition (`>>>`)   ~ volga Cat.>>>
+ *   - `Fanout`   -- cartesian product (`&&&`)         ~ volga CartesianCat.<>
+ *   - `***`      -- tensor on pairs                   ~ volga MonoidalCat.><
  *   - `Choice`   -- routed composition over `Either` (`|||`)
  *
+ * Operator dictionary (align with `zio.pdf.pipe.Pipe` / tofu-tf/volga):
+ *   >>>  compose     <<<  reverse compose
+ *   &&&  fanout      ***  tensor
+ *   |||  choice      +++  disjoint parallel
+ *
  * The composition interpreter (`SinglePassInterp`) flattens left-nested
- * `AndThen` spines once before execution -- this is the structural
- * analogue of Volga's `StateCont.compose` reassociation, and it gives
+ * `AndThen` spines once before execution -- the structural analogue of
+ * Volga's `StateCont.compose` reassociation (see modules/volga), giving
  * O(1) stack depth per step.
  */
 

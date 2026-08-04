@@ -24,6 +24,7 @@ sbt "benchFs2/Jmh/run -i 5 -wi 3 .*HeadToHeadBench.*"
 | `zio.scodec.stream` | **Codec engine** — `StreamDecoder`, `PureDecoder`, `ZChannel` |
 | `zio.scan` | **Hot byte scan** — `InlineByteScan` (compile-time fuse), `BytePipeline`, `BlocksPureByteScan` |
 | `scan-kyo/` (`zio.pdf.scan`) | **Scan algebra** (Kyo) — CDC, fanout, fusion experiments; not in root artifact |
+| `modules/volga/` | **Reference submodule** — [tofu-tf/volga](https://github.com/tofu-tf/volga) Cat / SMC; mirrored in `zio.pdf.pipe` |
 | `legacy/` | **Reference only** — original fs2-pdf, not in the build |
 
 Diagnostics: pass `enableDiagnostics = true` on decode/IO entry points (uses `ZPureLog`, not a separate `Log` trait).
