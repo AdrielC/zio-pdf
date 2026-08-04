@@ -78,12 +78,14 @@ object Elements {
       Attempt.successful(Element.Meta(trailer, version))
   }
 
-  private def applyStep(d: Decoded): Either[Throwable, Element] =
+  def classifyOne(d: Decoded): Either[Throwable, Element] =
     element(d) match {
       case Attempt.Successful(e) => Right(e)
       case Attempt.Failure(c)    =>
         Left(new RuntimeException(s"failed to analyze object: ${c.messageWithContext}"))
     }
+
+  private def applyStep(d: Decoded): Either[Throwable, Element] = classifyOne(d)
 
   /** Pipeline `Decoded -> Element`. */
   val pipe: ZPipeline[Any, Throwable, Decoded, Element] =

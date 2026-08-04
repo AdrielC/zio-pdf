@@ -15,7 +15,6 @@
 
 package zio.pdf.io
 
-import java.nio.channels.FileChannel
 import java.nio.file.{Files, Path, StandardOpenOption}
 
 import zio.{Chunk, ZIO}
@@ -80,91 +79,246 @@ object PdfIO {
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     hyperdriveThreshold: Long = PdfHyperdrive.defaultAutoThresholdBytes
   ): ZIO[Any, Throwable, Chunk[Decoded]] =
-    attemptSicko(path, hyperdriveThreshold, enableDiagnostics, config).flatMap {
+    attemptHyperdrive(path, hyperdriveThreshold, enableDiagnostics, config).flatMap {
       case Some(decoded) => ZIO.succeed(decoded)
-      case None            => reader(path, chunkSize).via(PdfStream.decode(enableDiagnostics, config)).runCollect
+      case None          => HyperdriveStream.decoded(path, enableDiagnostics, config).runCollect
     }
 
   /**
-   * [[PdfHyperdrive.decodeSync]] for a file — zero `ZStream` on the hot path.
-   * Alias: the name we use when we mean business.
+   * Hyperdrive [[Decoded]] stream — mmap fused parse, bounded backpressure.
+   * Alias for [[HyperdriveStream.decoded]].
+   */
+  def decodeStream(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024,
+    queueCapacity: Int = 256
+  ): ZStream[Any, Throwable, Decoded] =
+    HyperdriveStream.decoded(path, enableDiagnostics, config, batchSize, queueCapacity)
+
+  def elementsStream(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024,
+    queueCapacity: Int = 256
+  ): ZStream[Any, Throwable, Element] =
+    HyperdriveStream.elements(path, enableDiagnostics, config, batchSize, queueCapacity)
+
+  /**
+   * [[PdfHyperdrive.decodeFromPath]] — mmap fused decode, no heap copy.
    */
   def warp(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default
   ): ZIO[Any, Throwable, Chunk[Decoded]] =
-    readAll(path).map { bytes =>
-      PdfHyperdrive.decodeSync(bytes.toArray, enableDiagnostics = enableDiagnostics, config = config)
-    }
+    ZIO.attemptBlocking(PdfHyperdrive.decodeFromPath(path, enableDiagnostics, config))
 
-  /**
-   * Memory-mapped [[PdfHyperdrive.decodeSyncMapped]] — avoids a heap
-   * copy when the OS mapping is array-backed.
-   */
+  /** Alias for [[warp]] — mmap is the default file path. */
   def warpMapped(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default
   ): ZIO[Any, Throwable, Chunk[Decoded]] =
-    ZIO.acquireReleaseWith(
-      ZIO.attemptBlocking(FileChannel.open(path, StandardOpenOption.READ))
-    )(ch => ZIO.attemptBlocking(ch.close()).orDie) { channel =>
-      ZIO.attemptBlocking {
-        val size = channel.size()
-        require(size <= Int.MaxValue, s"file too large for mmap warp: $size bytes")
-        val mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0L, size)
-        PdfHyperdrive.decodeSyncMapped(mapped, enableDiagnostics = enableDiagnostics, config = config)
-      }
-    }
+    warp(path, enableDiagnostics, config)
 
-  /** [[PdfHyperdrive.elementsSync]] for a file on disk. */
+  /** mmap/io_uring triple-fused [[Elements]] classification. */
   def warpElements(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default
   ): ZIO[Any, Throwable, Chunk[Element]] =
-    readAll(path).map { bytes =>
-      PdfHyperdrive.elementsSync(bytes.toArray, enableDiagnostics = enableDiagnostics, config = config)
-    }
+    ZIO.attemptBlocking(PdfHyperdrive.elementsFromPath(path, enableDiagnostics, config))
 
   /**
-   * Full sicko: mmap + [[PdfHyperdrive.decodeSyncMapped]] — no `ZStream`, no
-   * heap copy when the OS mapping is array-backed. This is the fastest file path.
+   * mmap fused decode with a per-event sink — never materialises `Chunk[Decoded]`.
+   * Use on memory-constrained servers for large PDFs; process each [[Decoded]]
+   * and drop it before the next arrives.
+   *
+   * {{{
+   *   PdfIO.warpStreaming(path)(decoded => ZIO.succeed(handle(decoded)))
+   * }}}
    */
+  def warpStreaming[R](
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  )(sink: Decoded => ZIO[R, Throwable, Unit]): ZIO[R, Throwable, Long] =
+    ZIO.runtime[R].flatMap { runtime =>
+      ZIO.attemptBlockingInterrupt {
+        import zio.Unsafe
+        var count = 0L
+        PdfHyperdrive.decodeFromPathSink(path, enableDiagnostics, config, batchSize) { decoded =>
+          count += 1
+          Unsafe.unsafe { implicit u =>
+            runtime.unsafe.run(sink(decoded)).getOrThrow()
+          }
+        }
+        count
+      }
+    }
+
+  /** Triple-fused elements with a per-event sink — never materialises timelines. */
+  def warpElementsStreaming[R](
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  )(sink: Element => ZIO[R, Throwable, Unit]): ZIO[R, Throwable, Long] =
+    ZIO.runtime[R].flatMap { runtime =>
+      ZIO.attemptBlockingInterrupt {
+        import zio.Unsafe
+        var count = 0L
+        PdfHyperdrive.elementsFromPathSink(path, enableDiagnostics, config, batchSize) { element =>
+          count += 1
+          Unsafe.unsafe { implicit u =>
+            runtime.unsafe.run(sink(element)).getOrThrow()
+          }
+        }
+        count
+      }
+    }
+
+  /** Full sicko: mmap + fused decode — fastest file path. */
   def sicko(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default
   ): ZIO[Any, Throwable, Chunk[Decoded]] =
-    warpMapped(path, enableDiagnostics, config)
+    warp(path, enableDiagnostics, config)
 
-  /** mmap sicko + [[Elements]] classification. */
+  /** mmap sicko + triple-fused [[Elements]] classification. */
   def sickoElements(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default
   ): ZIO[Any, Throwable, Chunk[Element]] =
-    ZIO.acquireReleaseWith(
-      ZIO.attemptBlocking(FileChannel.open(path, StandardOpenOption.READ))
-    )(ch => ZIO.attemptBlocking(ch.close()).orDie) { channel =>
-      ZIO.attemptBlocking {
-        val size = channel.size()
-        require(size <= Int.MaxValue, s"file too large for sicko mmap: $size bytes")
-        val mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0L, size)
-        PdfHyperdrive.sickoElementsMapped(mapped, enableDiagnostics = enableDiagnostics, config = config)
+    warpElements(path, enableDiagnostics, config)
+
+  /** Fused decode + SHA-256 in one scan (mmap auto-route). */
+  def decodeAndDigest(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZIO[Any, Throwable, (Chunk[Decoded], Array[Byte])] =
+    ZIO.attemptBlocking(PdfHyperdrive.decodeAndDigestFromPath(path, enableDiagnostics, config))
+
+  /**
+   * mmap decode + SHA-256 with a per-event sink — never materialises `Chunk[Decoded]`.
+   * Returns `(eventCount, rawFileDigest)`.
+   */
+  def decodeAndDigestStreaming[R](
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  )(sink: Decoded => ZIO[R, Throwable, Unit]): ZIO[R, Throwable, (Long, Array[Byte])] =
+    ZIO.runtime[R].flatMap { runtime =>
+      ZIO.attemptBlockingInterrupt {
+        import zio.Unsafe
+        PdfHyperdrive.decodeAndDigestFromPathSink(path, enableDiagnostics, config, batchSize) { decoded =>
+          Unsafe.unsafe { implicit u =>
+            runtime.unsafe.run(sink(decoded)).getOrThrow()
+          }
+        }
       }
     }
 
-  private def attemptSicko(
+  /** Triple-fused elements + SHA-256 in one scan. */
+  def elementsAndDigest(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default
+  ): ZIO[Any, Throwable, (Chunk[Element], Array[Byte])] =
+    ZIO.attemptBlocking(PdfHyperdrive.elementsAndDigestFromPath(path, enableDiagnostics, config))
+
+  /** Triple-fused elements + SHA-256 with a per-event sink. */
+  def elementsAndDigestStreaming[R](
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  )(sink: Element => ZIO[R, Throwable, Unit]): ZIO[R, Throwable, (Long, Array[Byte])] =
+    ZIO.runtime[R].flatMap { runtime =>
+      ZIO.attemptBlockingInterrupt {
+        import zio.Unsafe
+        PdfHyperdrive.elementsAndDigestFromPathSink(path, enableDiagnostics, config, batchSize) { element =>
+          Unsafe.unsafe { implicit u =>
+            runtime.unsafe.run(sink(element)).getOrThrow()
+          }
+        }
+      }
+    }
+
+  /**
+   * Hyperdrive mmap decode as a [[ZStream]] — fused parse, per-event emission.
+   * Bounded queue provides backpressure when downstream is slower than decode.
+   */
+  def warpStream(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024,
+    queueCapacity: Int = 256
+  ): ZStream[Any, Throwable, Decoded] =
+    decodeStream(path, enableDiagnostics, config, batchSize, queueCapacity)
+
+  /** Triple-fused [[Element]] stream from mmap hyperdrive. */
+  def warpElementsStream(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024,
+    queueCapacity: Int = 256
+  ): ZStream[Any, Throwable, Element] =
+    elementsStream(path, enableDiagnostics, config, batchSize, queueCapacity)
+
+  /** SHA-256 over raw file bytes — mmap batched scan, no decode. */
+  def digest(
+    path: Path,
+    batchSize: Int = 10 * 1024 * 1024
+  ): ZIO[Any, Throwable, Array[Byte]] =
+    ZIO.attemptBlocking(PdfHyperdrive.digestFromPath(path, batchSize))
+
+  /**
+   * Validate via hyperdrive stream — folds [[Decoded]] incrementally into
+   * [[AssemblePdf]] without materialising a timeline [[Chunk]].
+   */
+  def validateHyperdrive(
+    path: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024,
+    queueCapacity: Int = 256
+  ): ZIO[Any, Throwable, Validation[PdfError, Unit]] =
+    ValidatePdf.fromDecoded(decodeStream(path, enableDiagnostics, config, batchSize, queueCapacity))
+
+  /** Compare two PDFs via hyperdrive streams — incremental assembly per side. */
+  def comparePathsHyperdrive(
+    oldPath: Path,
+    newPath: Path,
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024,
+    queueCapacity: Int = 256
+  ): ZIO[Any, Throwable, Validation[CompareError, Unit]] =
+    ComparePdfs.fromDecoded(
+      decodeStream(oldPath, enableDiagnostics, config, batchSize, queueCapacity),
+      decodeStream(newPath, enableDiagnostics, config, batchSize, queueCapacity)
+    )
+
+  private def attemptHyperdrive(
     path: Path,
     threshold: Long,
     enableDiagnostics: Boolean,
     config: StreamingDecode.Config
   ): ZIO[Any, Throwable, Option[Chunk[Decoded]]] =
     ZIO.attemptBlocking(Files.size(path)).flatMap { size =>
-      if (PdfHyperdrive.fitsInHyperdrive(size, threshold))
-        sicko(path, enableDiagnostics, config).map(Some(_))
+      if PdfHyperdrive.fitsInHyperdrive(size, threshold) then
+        warp(path, enableDiagnostics, config).map(Some(_))
       else
         ZIO.none
     }
@@ -174,7 +328,7 @@ object PdfIO {
     chunkSize: Int = 64 * 1024,
     enableDiagnostics: Boolean = false
   ): ZIO[Any, Throwable, Validation[PdfError, Unit]] =
-    decodeDecoded(path, chunkSize, enableDiagnostics).map(ValidatePdf.fromChunk)
+    validateHyperdrive(path, enableDiagnostics = enableDiagnostics)
 
   def comparePaths(
     oldPath: Path,
@@ -182,8 +336,5 @@ object PdfIO {
     chunkSize: Int = 64 * 1024,
     enableDiagnostics: Boolean = false
   ): ZIO[Any, Throwable, Validation[CompareError, Unit]] =
-    for {
-      oldDecoded <- decodeDecoded(oldPath, chunkSize, enableDiagnostics)
-      newDecoded <- decodeDecoded(newPath, chunkSize, enableDiagnostics)
-    } yield ComparePdfs.fromChunks(oldDecoded, newDecoded)
+    comparePathsHyperdrive(oldPath, newPath, enableDiagnostics = enableDiagnostics)
 }
