@@ -1,5 +1,5 @@
 /*
- * PdfIO entry-point benchmarks on the real `xref-stream.pdf` fixture.
+ * PdfEngine + PdfIO entry-point benchmarks on `xref-stream.pdf`.
  *
  * Run from sbt:
  *
@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
 
 import zio.{Runtime, Unsafe}
-import zio.pdf.PdfStream
+import zio.pdf.{PdfEngine, PdfStream}
 import zio.pdf.io.PdfIO
 
 import scala.compiletime.uninitialized
@@ -41,7 +41,7 @@ class PdfIOBench {
   var enableDiagnostics: Boolean = uninitialized
 
   private var pdfPath: Path = uninitialized
-  private val runtime     = Runtime.default
+  private val runtime       = Runtime.default
 
   @Setup(Level.Trial)
   def setup(): Unit = {
@@ -61,15 +61,15 @@ class PdfIOBench {
     val _ = Files.deleteIfExists(pdfPath)
   }
 
-  // -------------------------------------------------------------------
-  // Full decode pipeline (the shape production code uses)
-  // -------------------------------------------------------------------
-
   @Benchmark
-  def decodeDecoded: Int =
+  def pdfEngineDecode: Int =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe
-        .run(PdfIO.decodeDecoded(pdfPath, chunkSize, enableDiagnostics))
+        .run(
+          PdfEngine
+            .decode(pdfPath, PdfEngine.Options(enableDiagnostics = enableDiagnostics))
+            .provide(PdfEngine.live)
+        )
         .getOrThrow()
         .size
     }
@@ -87,22 +87,18 @@ class PdfIOBench {
         .getOrThrow()
     }
 
-  // -------------------------------------------------------------------
-  // Validate on top of decode
-  // -------------------------------------------------------------------
-
   @Benchmark
   def validate: Boolean =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe
-        .run(PdfIO.validate(pdfPath, chunkSize, enableDiagnostics))
+        .run(
+          PdfEngine
+            .validate(pdfPath, PdfEngine.Options(enableDiagnostics = enableDiagnostics))
+            .provide(PdfEngine.live)
+        )
         .getOrThrow()
         .isSuccess
     }
-
-  // -------------------------------------------------------------------
-  // Raw bytes only (isolates I/O + ZStream overhead)
-  // -------------------------------------------------------------------
 
   @Benchmark
   def readAll: Int =

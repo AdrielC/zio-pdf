@@ -39,8 +39,9 @@ object PdfStream {
    * [[StreamingDecoded.ContentObjStart]].inlinePayload; larger
    * streams use chunked bytes on the wire before expansion.
    *
-   * When the PDF already fits in memory, prefer [[PdfHyperdrive.decodeSync]]
-   * or [[zio.pdf.io.PdfIO.warp]] — no `ZChannel` per chunk.
+   * When the PDF is a file path, prefer [[PdfEngine.decode]] — fused mmap
+   * path, no `ZChannel` per chunk. This pipeline remains for true
+   * `ZStream[Byte]` sources.
    */
   def decode(
     enableDiagnostics: Boolean = false,

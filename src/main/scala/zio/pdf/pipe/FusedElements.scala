@@ -10,7 +10,7 @@ import zio.Chunk
 import zio.pdf.Element
 import zio.pdf.pipe.FusedDecode.{Cfg, Slice}
 
-object FusedElements {
+private[pdf] object FusedElements {
 
   def decodeSlice(slice: Slice, cfg: Cfg): Chunk[Element] = {
     val builder = Chunk.newBuilder[Element]

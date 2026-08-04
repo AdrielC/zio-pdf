@@ -14,7 +14,7 @@ import zio.pdf.{Decoded, Element}
 import zio.pdf.pipe.FusedDecode.{Cfg, Slice}
 import zio.pdf.pipe.HyperFuse.DigestSink
 
-object IngestPipeline {
+private[pdf] object IngestPipeline {
 
   final case class DecodeDigest[A](decoded: A, digest: Array[Byte])
 
