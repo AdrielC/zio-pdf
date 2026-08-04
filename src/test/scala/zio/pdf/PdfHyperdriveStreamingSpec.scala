@@ -1,5 +1,7 @@
 package zio.pdf
 
+import java.nio.file.Files
+
 import zio.*
 import zio.stream.ZStream
 import zio.test.*
@@ -15,6 +17,14 @@ object PdfHyperdriveStreamingSpec extends ZIOSpecDefault {
       b
     }
 
+  private def withTempPdf[R](name: String)(use: java.nio.file.Path => ZIO[R, Throwable, TestResult]) =
+    for {
+      bytes  <- load(name)
+      path   <- ZIO.attemptBlocking(Files.createTempFile("zio-pdf-hyper-", ".pdf"))
+      _      <- ZIO.attemptBlocking(Files.write(path, bytes))
+      result <- use(path).ensuring(ZIO.attemptBlocking(Files.deleteIfExists(path)).ignore)
+    } yield result
+
   def spec: Spec[Any, Throwable] = suite("PdfHyperdrive streaming parity")(
     test("streaming timeline matches on test-image.pdf") {
       for {
@@ -22,6 +32,27 @@ object PdfHyperdriveStreamingSpec extends ZIOSpecDefault {
         hyper     = PdfHyperdrive.decodeStreamingSync(bytes)
         streamed <- ZStream.fromChunk(Chunk.fromArray(bytes)).via(PdfStream.streamingDecode()).runCollect
       } yield assertTrue(hyper == streamed)
+    },
+    test("PdfEngine.stream matches sink count without pre-collect") {
+      withTempPdf("test-image.pdf") { path =>
+        for {
+          streamed <- PdfEngine.stream(path, PdfEngine.Options(queueCapacity = 2)).runCount
+          sunk     <- PdfEngine.sink(path)(_ => ())
+        } yield assertTrue(streamed == sunk)
+      }.provide(PdfEngine.live)
+    },
+    test("PdfEngine.stream backpressures with queueCapacity=1") {
+      withTempPdf("test-image.pdf") { path =>
+        for {
+          first <- PdfEngine.stream(path, PdfEngine.Options(queueCapacity = 1)).take(1).runCollect
+          all   <- PdfEngine.decode(path)
+          headOk = (first.head, all.head) match {
+                     case (a: Decoded.ContentObj, b: Decoded.ContentObj) =>
+                       a.obj == b.obj && a.rawStream == b.rawStream
+                     case (a, b) => a == b
+                   }
+        } yield assertTrue(first.size == 1, all.nonEmpty, headOk)
+      }.provide(PdfEngine.live)
     }
   )
 }
