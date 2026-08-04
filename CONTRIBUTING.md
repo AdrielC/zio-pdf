@@ -1,15 +1,32 @@
 # Contributing to zio-pdf
 
-Canonical forge: [git.tybera.net/Tybera/zio-pdf](https://git.tybera.net/Tybera/zio-pdf)
+**Internal Tybera repository** — [git.tybera.net/Tybera/zio-pdf](https://git.tybera.net/Tybera/zio-pdf).  
+No public mirror; artifacts publish only to Tybera Gitea Packages (`com.tybera`).
+
+## Clone (SSH)
+
+Add to `~/.ssh/config`:
+
+```
+Host git.tybera.net
+  HostName git.tybera.net
+  User git
+  IdentityFile ~/.ssh/id_ed25519_tybera
+  IdentitiesOnly yes
+```
+
+Then:
+
+```bash
+git clone git@git.tybera.net:Tybera/zio-pdf.git
+cd zio-pdf
+```
+
+HTTPS also works: `git clone https://git.tybera.net/Tybera/zio-pdf.git`
 
 ## Workflow
 
-1. Clone and branch from `main`:
-   ```bash
-   git clone https://git.tybera.net/Tybera/zio-pdf.git
-   cd zio-pdf
-   git checkout -b feat/my-change
-   ```
+1. Branch from `main`: `git checkout -b feat/my-change`
 2. Make changes; keep public API on **`PdfEngine`** / **`PdfStream`** / **`PdfIO`**.
 3. Run locally:
    ```bash
@@ -38,6 +55,25 @@ fix: digestSink Chunk typing on ZIO 2.1.25
 docs: update pipeline-first README examples
 ```
 
-## Releases
+## Releases & Maven (internal)
 
-Maintainers tag on `main` (`v0.2.0-RC1`, …) and publish Gitea releases from `CHANGELOG.md`.
+Coordinates: **`com.tybera` %% `zio-pdf`**.
+
+Publish locally (requires Gitea token in env):
+
+```bash
+export GIT_USER=acasellas
+export GIT_TOKEN=<gitea-token>
+sbt publish
+```
+
+Consume from another Tybera project:
+
+```scala
+resolvers += "Tybera Gitea Maven" at "https://git.tybera.net/api/packages/Tybera/maven"
+libraryDependencies += "com.tybera" %% "zio-pdf" % "0.2.0-RC1"
+```
+
+CI publishes automatically on `v*` tags. Add repo secret **`GIT_TOKEN`** (Gitea Actions → Secrets) with a token for `git.runner` or your user.
+
+Tag on `main` and create a Gitea release from `CHANGELOG.md`.

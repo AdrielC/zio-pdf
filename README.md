@@ -1,15 +1,14 @@
 # zio-pdf (formerly fs2-pdf)
 
-> **Status: 0.2.0-RC1** — ZIO 2 / Scala 3 port. **Canonical forge:**
-> [git.tybera.net/Tybera/zio-pdf](https://git.tybera.net/Tybera/zio-pdf)
+> **Status: 0.2.0-RC1** — Internal Tybera library (ZIO 2 / Scala 3).  
+> **Forge:** [git.tybera.net/Tybera/zio-pdf](https://git.tybera.net/Tybera/zio-pdf)
 > ([releases](https://git.tybera.net/Tybera/zio-pdf/releases) ·
 > [CI](https://git.tybera.net/Tybera/zio-pdf/actions) ·
+> [packages](https://git.tybera.net/Tybera/zio-pdf/packages) ·
 > [CONTRIBUTING.md](https://git.tybera.net/Tybera/zio-pdf/src/branch/main/CONTRIBUTING.md))
 >
-> The original [fs2-pdf](https://github.com/springernature/fs2-pdf) was archived.
-> This project ports streaming PDF decode/encode off cats-effect / fs2 onto
-> **ZIO 2 / Scala 3**, with a fused mmap decode path (`PdfEngine`) and composable
-> byte pipelines (`PdfStream`).
+> Ports the archived fs2-pdf design onto **ZIO 2 / Scala 3** with fused mmap decode
+> (`PdfEngine`) and composable byte pipelines (`PdfStream`). Maven: `com.tybera %% zio-pdf`.
 
 ## Start here
 

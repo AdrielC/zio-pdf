@@ -9,14 +9,22 @@ val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.4"
 val kyoVersion                 = "1.0-RC1"
 
-ThisBuild / organization      := "com.springernature"
+ThisBuild / organization      := "com.tybera"
 ThisBuild / scalaVersion      := "3.8.3"
 ThisBuild / version           := "0.2.0-RC1"
+ThisBuild / versionScheme     := Some("early-semver")
 ThisBuild / fork              := true
 ThisBuild / licenses          := List(
-  "Apache 2" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")
+  "Apache-2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0.txt")
 )
 ThisBuild / homepage          := Some(url("https://git.tybera.net/Tybera/zio-pdf"))
+ThisBuild / scmInfo           := Some(
+  ScmInfo(
+    url("https://git.tybera.net/Tybera/zio-pdf"),
+    "scm:git:git@git.tybera.net:Tybera/zio-pdf.git",
+    Some("scm:git:git@git.tybera.net:Tybera/zio-pdf.git")
+  )
+)
 ThisBuild / autoAPIMappings   := true
 
 ThisBuild / scalacOptions ++= List(
@@ -34,6 +42,7 @@ ThisBuild / scalacOptions ++= List(
 lazy val root = (project in file("."))
   .settings(
     name := "zio-pdf",
+    resolvers += PublishSettings.tyberaResolver,
     libraryDependencies ++= List(
       "dev.zio"   %% "zio"               % zioVersion,
       "dev.zio"   %% "zio-streams"       % zioVersion,
@@ -50,6 +59,7 @@ lazy val root = (project in file("."))
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
+  .settings(PublishSettings.settings)
 
 /**
  * JMH benchmark subproject for the ZIO-based codec stack. Run with:

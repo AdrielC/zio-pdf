@@ -1,0 +1,42 @@
+# Publish to Tybera Gitea Package Registry on version tags (internal Maven only).
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  HOME: /root
+  GIT_USER: git.runner
+  GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Coursier cache
+        uses: coursier/cache-action@v6
+
+      - name: Install sbt
+        run: |
+          export HOME="${HOME:-/root}"
+          if ! command -v sbt >/dev/null 2>&1; then
+            curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
+            chmod +x /usr/local/bin/cs
+            cs install sbt
+          fi
+          echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
+
+      - name: Publish to Gitea Packages
+        run: sbt -batch publish
