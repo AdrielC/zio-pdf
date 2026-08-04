@@ -1,7 +1,8 @@
 # Contributing to zio-pdf
 
-**Internal Tybera repository** — [git.tybera.net/Tybera/zio-pdf](https://git.tybera.net/Tybera/zio-pdf).  
-No public mirror; artifacts publish only to Tybera Gitea Packages (`com.tybera`).
+**Internal Tybera repository** — canonical forge [git.tybera.net/Tybera/zio-pdf](https://git.tybera.net/Tybera/zio-pdf).  
+Until the forge is healthy, open PRs on [github.com/AdrielC/zio-pdf](https://github.com/AdrielC/zio-pdf) and push to Tybera when it is back.  
+No public mirror long-term; artifacts publish only to Tybera Gitea Packages (`com.tybera`).
 
 ## Clone (SSH)
 

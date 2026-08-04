@@ -1,7 +1,7 @@
 # zio-pdf (formerly fs2-pdf)
 
 > **Status: 0.2.0-RC1** — Internal Tybera library (ZIO 2 / Scala 3).  
-> **Forge:** [git.tybera.net/Tybera/zio-pdf](https://git.tybera.net/Tybera/zio-pdf)
+> **Interim forge:** [github.com/AdrielC/zio-pdf](https://github.com/AdrielC/zio-pdf) until `git.tybera.net` is back; canonical target remains Tybera.
 > ([releases](https://git.tybera.net/Tybera/zio-pdf/releases) ·
 > [CI](https://git.tybera.net/Tybera/zio-pdf/actions) ·
 > [packages](https://git.tybera.net/Tybera/zio-pdf/packages) ·

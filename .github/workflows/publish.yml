@@ -6,15 +6,15 @@ on:
     tags:
       - "v*"
 
-env:
-  HOME: /root
-  GIT_USER: git.runner
-  GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
-
 jobs:
   publish:
     name: publish
+    if: github.server_url != 'https://github.com'
     runs-on: ubuntu-latest
+    env:
+      HOME: /root
+      GIT_USER: git.runner
+      GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
 
       - name: Install sbt
         run: |
-          export HOME="${HOME:-/root}"
+          export HOME=/root
           if ! command -v sbt >/dev/null 2>&1; then
             curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
             chmod +x /usr/local/bin/cs
