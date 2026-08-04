@@ -1,7 +1,6 @@
 package zio.pdf
 
 import zio.*
-import zio.pdf.io.PdfIO
 import zio.stream.ZStream
 import zio.test.*
 
@@ -16,11 +15,22 @@ object PdfHyperdriveSpec extends ZIOSpecDefault {
       buf
     }
 
+  private def withTempPdf[R](name: String)(use: java.nio.file.Path => ZIO[R, Throwable, TestResult]) =
+    for {
+      bytes  <- loadFixture(name)
+      path   <- ZIO.attemptBlocking {
+                  val p = java.nio.file.Files.createTempFile("hyperdrive-", ".pdf")
+                  java.nio.file.Files.write(p, bytes)
+                  p
+                }
+      result <- use(path).ensuring(ZIO.attemptBlocking(java.nio.file.Files.deleteIfExists(path)).ignore)
+    } yield result
+
   def spec: Spec[Any, Throwable] = suite("PdfHyperdrive")(
     test("decodeSync matches PdfStream.decode on xref-stream.pdf") {
       for {
-        bytes   <- loadFixture("xref-stream.pdf")
-        hyper    = PdfHyperdrive.decodeSync(bytes)
+        bytes    <- loadFixture("xref-stream.pdf")
+        hyper     = PdfHyperdrive.decodeSync(bytes)
         streamed <- ZStream.fromChunk(Chunk.fromArray(bytes)).via(PdfStream.decode()).runCollect
       } yield assertTrue(hyper == streamed)
     },
@@ -31,68 +41,37 @@ object PdfHyperdriveSpec extends ZIOSpecDefault {
         streamed <- ZStream.fromChunk(Chunk.fromArray(bytes)).via(PdfStream.streamingDecode()).runCollect
       } yield assertTrue(hyper == streamed)
     },
-    test("warp matches decodeDecoded for in-memory fixture") {
-      for {
-        bytes <- loadFixture("xref-stream.pdf")
-        path  <- ZIO.attemptBlocking {
-          val p = java.nio.file.Files.createTempFile("hyperdrive-", ".pdf")
-          java.nio.file.Files.write(p, bytes)
-          p
-        }
-        warp    <- PdfIO.warp(path)
-        decoded <- PdfIO.decodeDecoded(path)
-      } yield assertTrue(warp == decoded)
+    test("PdfEngine.decode path matches in-memory decodeSync") {
+      withTempPdf("xref-stream.pdf") { path =>
+        for {
+          bytes   <- loadFixture("xref-stream.pdf")
+          engine  <- PdfEngine.decode(path).provide(PdfEngine.live)
+          direct   = PdfHyperdrive.decodeSync(bytes)
+        } yield assertTrue(engine == direct)
+      }
     },
-    test("warpMapped matches warp") {
-      for {
-        bytes <- loadFixture("xref-stream.pdf")
-        path  <- ZIO.attemptBlocking {
-          val p = java.nio.file.Files.createTempFile("hyperdrive-mmap-", ".pdf")
-          java.nio.file.Files.write(p, bytes)
-          p
-        }
-        warp      <- PdfIO.warp(path)
-        warpMapped <- PdfIO.warpMapped(path)
-      } yield assertTrue(warpMapped == warp)
-    },
-    test("sicko is warpMapped and decodeDecoded auto-routes sicko") {
-      for {
-        bytes <- loadFixture("xref-stream.pdf")
-        path  <- ZIO.attemptBlocking {
-          val p = java.nio.file.Files.createTempFile("sicko-", ".pdf")
-          java.nio.file.Files.write(p, bytes)
-          p
-        }
-        sicko   <- PdfIO.sicko(path)
-        mapped  <- PdfIO.warpMapped(path)
-        decoded <- PdfIO.decodeDecoded(path)
-      } yield assertTrue(sicko == mapped, sicko == decoded)
-    },
-    test("sickoElements matches stream decode + Elements.pipe") {
-      for {
-        bytes    <- loadFixture("xref-stream.pdf")
-        path     <- ZIO.attemptBlocking {
-          val p = java.nio.file.Files.createTempFile("sicko-el-", ".pdf")
-          java.nio.file.Files.write(p, bytes)
-          p
-        }
-        sicko    <- PdfIO.sickoElements(path)
-        streamed <- ZStream
-          .fromChunk(Chunk.fromArray(bytes))
-          .via(PdfStream.decode())
-          .via(Elements.pipe)
-          .runCollect
-      } yield assertTrue(sicko == streamed)
+    test("PdfEngine.elements matches stream decode + Elements.pipe") {
+      withTempPdf("xref-stream.pdf") { path =>
+        for {
+          bytes    <- loadFixture("xref-stream.pdf")
+          engine   <- PdfEngine.elements(path).runCollect.provide(PdfEngine.live)
+          streamed <- ZStream
+                        .fromChunk(Chunk.fromArray(bytes))
+                        .via(PdfStream.decode())
+                        .via(Elements.pipe)
+                        .runCollect
+        } yield assertTrue(engine == streamed)
+      }
     },
     test("elementsSync matches stream decode + Elements.pipe") {
       for {
         bytes    <- loadFixture("xref-stream.pdf")
         elements <- ZIO.succeed(PdfHyperdrive.elementsSync(bytes))
         streamed <- ZStream
-          .fromChunk(Chunk.fromArray(bytes))
-          .via(PdfStream.decode())
-          .via(Elements.pipe)
-          .runCollect
+                      .fromChunk(Chunk.fromArray(bytes))
+                      .via(PdfStream.decode())
+                      .via(Elements.pipe)
+                      .runCollect
       } yield assertTrue(elements == streamed)
     }
   )
