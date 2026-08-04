@@ -23,7 +23,7 @@ package zio.blocks.pure
 
 import zio.blocks.chunk.{Chunk, ChunkBuilder}
 
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentLinkedQueue
 import scala.annotation.nowarn
 import scala.collection.BuildFrom
 import scala.reflect.ClassTag
@@ -1100,26 +1100,25 @@ object Pure {
   ) extends Pure[W, S1, S2, R, E, A]
   private final case class Inspect[S, +A](run0: S => A)     extends Pure[Nothing, S, S, Any, Nothing, A]
 
+  /**
+   * Fiber-safe Runner reuse. zio-blocks streams allocate a fresh
+   * Interpreter per compile (no ThreadLocal); we keep amortization via a
+   * lock-free free-list so parallel ZIO fibers each borrow a distinct Runner
+   * (nested `runAll` borrows another or allocates).
+   */
   private object Runner {
-    private[this] val pool = new ThreadLocal[(Runner, AtomicBoolean)] {
-      override def initialValue(): (Runner, AtomicBoolean) = (new Runner(), new AtomicBoolean(false))
-    }
+    private[this] val free = new ConcurrentLinkedQueue[Runner]()
 
     def apply[W, S1, S2, R, E, A](
       state: S1,
       zPure: Pure[W, S1, S2, R, E, A]
     ): (Chunk[W], Either[E, (S2, A)]) = {
-      val (runner, running) = pool.get()
-
-      if (running.compareAndSet(false, true)) {
-        try
-          runner.run(state, zPure)
-        finally {
-          runner.clear()
-          running.set(false)
-        }
-      } else {
-        new Runner().run(state, zPure)
+      val borrowed = free.poll()
+      val runner   = if (borrowed ne null) borrowed else new Runner()
+      try runner.run(state, zPure)
+      finally {
+        runner.clear()
+        val _ = free.offer(runner)
       }
     }
   }
@@ -1135,7 +1134,7 @@ object Pure {
     private def clear(): Unit = {
       _environment = Env.empty
       _clearLogOnError = false
-      _logs = ChunkBuilder.make[Any]()
+      _logs.clear()
       stack.clear()
     }
 
