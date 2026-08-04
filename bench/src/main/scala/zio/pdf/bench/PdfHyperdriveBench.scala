@@ -47,6 +47,11 @@ class PdfHyperdriveBench {
   def hyperdriveDecodeSync: Int =
     PdfHyperdrive.decodeSync(bytes).size
 
+  /** Inline sink spine — count only, no timeline Chunk. */
+  @Benchmark
+  def hyperdriveDecodeSyncSink: Long =
+    PdfHyperdrive.decodeSyncSink(bytes)(_ => ())
+
   @Benchmark
   def pdfEngineDecode: Int =
     Unsafe.unsafe { implicit u =>

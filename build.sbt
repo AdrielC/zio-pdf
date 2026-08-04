@@ -87,7 +87,12 @@ lazy val bench = (project in file("bench"))
     name              := "zio-pdf-bench",
     publish / skip    := true,
     Jmh / version     := "1.37",
-    scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused")),
+    // Scala 3.8.3 JVM optimizer — scoped to sources + our packages (not JDK/deps).
+    scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused")) ++ List(
+      "-opt",
+      "-opt-inline:<sources>,zio.pdf.**,zio.scan.**,zio.scodec.**,zio.blocks.**",
+      "-Wopt:at-inline-failed-summary"
+    ),
     Compile / unmanagedResourceDirectories +=
       (LocalRootProject / Test / resourceDirectory).value
   )
