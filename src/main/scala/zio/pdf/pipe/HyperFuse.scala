@@ -1,8 +1,9 @@
 /*
- * Shared hyperdrive fuse — one [[ByteFeed.runBatched]] loop, pluggable sinks.
+ * Shared hyperdrive fuse — [[ByteFeed]] ZPure steps, StreamDecoder-style
+ * [[ByteFeed.runWindows]] so sinks never retain the full event log.
  *
- * [[FusedDecode]] and [[FusedElements]] differ only in what they do with each
- * [[zio.pdf.Decoded]] emission; ingest digests the same byte windows inline.
+ * Digest shares the same windows by putting [[MessageDigest]] in ZPure state
+ * beside the decode machine ([[Digested]]).
  */
 
 package zio.pdf.pipe
@@ -15,71 +16,118 @@ import zio.pdf.pipe.FusedDecode.{Cfg, Slice}
 
 object HyperFuse {
 
+  /** Decode machine + incremental SHA-256 over the same windows. */
+  private final case class Digested[S](machine: S, md: MessageDigest)
+
   private def streamingStep(cfg: Cfg): ByteFeed.Step[StreamingDecode.FinalState, StreamingDecoded] = {
     val Cfg(_, config, _) = cfg
-    (fs, buf, off, len) => StreamingDecode.stepChunkBytes(config, fs, buf, off, len)
+    ByteFeed.fromSync((fs, buf, off, len) => StreamingDecode.stepChunkBytes(config, fs, buf, off, len))
   }
 
-  private def streamingFinalize(cfg: Cfg): StreamingDecode.FinalState => Chunk[StreamingDecoded] = {
+  private def streamingFinalize(cfg: Cfg): ByteFeed.Finalize[StreamingDecode.FinalState, StreamingDecoded] = {
     val Cfg(diag, _, _) = cfg
-    fs => StreamingDecode.finalizeToMetaSync(diag, fs)
+    fs => ByteFeed.logAll(StreamingDecode.finalizeToMetaSync(diag, fs))
   }
 
-  /** Streaming parse + ObjStm/XRef bridge; emits each [[Decoded]] via `emit`. */
-  def fuseDecodedBuild(slice: Slice, cfg: Cfg, emit: Decoded => Unit, onBytes: ByteFeed.OnBytes = (_, _, _) => ()): Unit = {
-    var bridge = DecodedFromStreaming.accInitial
-    val onStreaming: ByteFeed.OnEvents[StreamingDecoded] = events =>
-      bridge = DecodedFromStreaming.foldEventsAcc(bridge, events, emit)
-    ByteFeed.runBatched(
+  private def streamingStepDigested(cfg: Cfg): ByteFeed.Step[Digested[StreamingDecode.FinalState], StreamingDecoded] = {
+    val Cfg(_, config, _) = cfg
+    ByteFeed.fromSync { (d, buf, off, len) =>
+      d.md.update(buf, off, len)
+      val (out, next) = StreamingDecode.stepChunkBytes(config, d.machine, buf, off, len)
+      (out, Digested(next, d.md))
+    }
+  }
+
+  private def streamingFinalizeDigested(cfg: Cfg): ByteFeed.Finalize[Digested[StreamingDecode.FinalState], StreamingDecoded] = {
+    val Cfg(diag, _, _) = cfg
+    d => ByteFeed.logAll(StreamingDecode.finalizeToMetaSync(diag, d.machine))
+  }
+
+  private def runStreaming(
+    slice: Slice,
+    cfg: Cfg,
+    step: ByteFeed.Step[StreamingDecode.FinalState, StreamingDecoded]
+  )(consume: Chunk[StreamingDecoded] => Unit): Unit = {
+    val _ = ByteFeed.runWindows(
       slice,
       cfg.batchSize,
       StreamingDecode.initialFinalState,
-      streamingStep(cfg),
-      streamingFinalize(cfg),
-      onBytes = onBytes,
-      onEvents = onStreaming
-    )
+      step,
+      streamingFinalize(cfg)
+    )(consume)
+  }
+
+  private def runStreamingDigested(
+    slice: Slice,
+    cfg: Cfg,
+    md: MessageDigest
+  )(consume: Chunk[StreamingDecoded] => Unit): MessageDigest = {
+    val end = ByteFeed.runWindows(
+      slice,
+      cfg.batchSize,
+      Digested(StreamingDecode.initialFinalState, md),
+      streamingStepDigested(cfg),
+      streamingFinalizeDigested(cfg)
+    )(consume)
+    end.md
+  }
+
+  /** Streaming parse + ObjStm/XRef bridge; emits each [[Decoded]] via `emit`. */
+  def fuseDecodedBuild(slice: Slice, cfg: Cfg, emit: Decoded => Unit): Unit = {
+    var bridge = DecodedFromStreaming.accInitial
+    runStreaming(slice, cfg, streamingStep(cfg)) { log =>
+      bridge = DecodedFromStreaming.foldEventsAcc(bridge, log, emit)
+    }
     val tail = DecodedFromStreaming.finalizeSync(bridge)
     if !tail.isEmpty then
       val it = tail.iterator
       while it.hasNext do emit(it.next())
   }
 
-  /** Streaming parse + ObjStm/XRef bridge; emits [[Decoded]] batches to [[sink]]. */
-  def fuseDecoded(slice: Slice, cfg: Cfg, onBytes: ByteFeed.OnBytes = (_, _, _) => ())(
-    sink: Chunk[Decoded] => Unit
-  ): Unit = {
+  private def fuseDecodedBuildDigested(
+    slice: Slice,
+    cfg: Cfg,
+    md: MessageDigest,
+    emit: Decoded => Unit
+  ): MessageDigest = {
     var bridge = DecodedFromStreaming.accInitial
-    val onStreaming: ByteFeed.OnEvents[StreamingDecoded] = events => {
-      val (decoded, next) = DecodedFromStreaming.foldSync(bridge, events)
+    val endMd = runStreamingDigested(slice, cfg, md) { log =>
+      bridge = DecodedFromStreaming.foldEventsAcc(bridge, log, emit)
+    }
+    val tail = DecodedFromStreaming.finalizeSync(bridge)
+    if !tail.isEmpty then
+      val it = tail.iterator
+      while it.hasNext do emit(it.next())
+    endMd
+  }
+
+  /** Streaming parse + ObjStm/XRef bridge; emits [[Decoded]] batches to [[sink]]. */
+  def fuseDecoded(slice: Slice, cfg: Cfg)(sink: Chunk[Decoded] => Unit): Unit = {
+    var bridge = DecodedFromStreaming.accInitial
+    runStreaming(slice, cfg, streamingStep(cfg)) { log =>
+      val (decoded, next) = DecodedFromStreaming.foldSync(bridge, log)
       if !decoded.isEmpty then sink(decoded)
       bridge = next
     }
-    ByteFeed.runBatched(
-      slice,
-      cfg.batchSize,
-      StreamingDecode.initialFinalState,
-      streamingStep(cfg),
-      streamingFinalize(cfg),
-      onBytes = onBytes,
-      onEvents = onStreaming
-    )
     val tail = DecodedFromStreaming.finalizeSync(bridge)
     if !tail.isEmpty then sink(tail)
   }
 
   /** Triple-fuse: parse → expand → classify; emits each [[Element]] via `emit`. */
-  def fuseElementsBuild(slice: Slice, cfg: Cfg, emit: Element => Unit, onBytes: ByteFeed.OnBytes = (_, _, _) => ()): Unit =
-    fuseDecodedBuild(slice, cfg, d => Elements.classifyOne(d) match {
-      case Left(err)      => throw err
-      case Right(element) => emit(element)
-    }, onBytes)
+  def fuseElementsBuild(slice: Slice, cfg: Cfg, emit: Element => Unit): Unit =
+    fuseDecodedBuild(
+      slice,
+      cfg,
+      d =>
+        Elements.classifyOne(d) match {
+          case Left(err)      => throw err
+          case Right(element) => emit(element)
+        }
+    )
 
   /** Triple-fuse: parse → expand → classify; never materialises timelines. */
-  def fuseElements(slice: Slice, cfg: Cfg, onBytes: ByteFeed.OnBytes = (_, _, _) => ())(
-    sink: Element => Unit
-  ): Unit =
-    fuseElementsBuild(slice, cfg, sink, onBytes)
+  def fuseElements(slice: Slice, cfg: Cfg)(sink: Element => Unit): Unit =
+    fuseElementsBuild(slice, cfg, sink)
 
   /** Decode + SHA-256 in one scan — digest windows match streaming batches. */
   def fuseDecodedWithDigest(slice: Slice, cfg: Cfg): (Chunk[Decoded], Array[Byte]) = {
@@ -90,18 +138,18 @@ object HyperFuse {
 
   /**
    * Decode + SHA-256 with a per-event sink — never materialises `Chunk[Decoded]`.
-   * Digest is computed over the same byte windows as [[fuseDecodedBuild]].
+   * Digest is [[ZPure]] state beside the decode machine.
    */
   def fuseDecodedWithDigestSink(slice: Slice, cfg: Cfg)(sink: Decoded => Unit): DigestSink = {
-    val md = MessageDigest.getInstance("SHA-256")
+    val md    = MessageDigest.getInstance("SHA-256")
     var count = 0L
-    fuseDecodedBuild(
+    val endMd = fuseDecodedBuildDigested(
       slice,
       cfg,
-      d => { sink(d); count += 1 },
-      onBytes = (buf, off, len) => md.update(buf, off, len)
+      md,
+      d => { sink(d); count += 1 }
     )
-    DigestSink(count, md.digest())
+    DigestSink(count, endMd.digest())
   }
 
   def fuseElementsWithDigest(slice: Slice, cfg: Cfg): (Chunk[Element], Array[Byte]) = {
@@ -112,15 +160,21 @@ object HyperFuse {
 
   /** Elements + SHA-256 with a per-event sink — never materialises timelines. */
   def fuseElementsWithDigestSink(slice: Slice, cfg: Cfg)(sink: Element => Unit): DigestSink = {
-    val md = MessageDigest.getInstance("SHA-256")
+    val md    = MessageDigest.getInstance("SHA-256")
     var count = 0L
-    fuseElementsBuild(
+    val endMd = fuseDecodedBuildDigested(
       slice,
       cfg,
-      el => { sink(el); count += 1 },
-      onBytes = (buf, off, len) => md.update(buf, off, len)
+      md,
+      d =>
+        Elements.classifyOne(d) match {
+          case Left(err) => throw err
+          case Right(el) =>
+            sink(el)
+            count += 1
+        }
     )
-    DigestSink(count, md.digest())
+    DigestSink(count, endMd.digest())
   }
 
   /** Fused scan summary — event count plus raw-file SHA-256. */
