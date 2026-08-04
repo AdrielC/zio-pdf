@@ -63,10 +63,7 @@ class RealPdfBench {
   @Benchmark
   def pdfEngineElements: Int =
     Unsafe.unsafe { implicit u =>
-      runtime.unsafe
-        .run(PdfEngine.elements(pdfPath).runCollect.provide(PdfEngine.live))
-        .getOrThrow()
-        .size
+      runtime.unsafe.run(PdfEngine.elements(pdfPath).provide(PdfEngine.live)).getOrThrow().size
     }
 
   @Benchmark

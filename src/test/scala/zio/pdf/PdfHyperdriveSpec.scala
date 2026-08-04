@@ -50,11 +50,20 @@ object PdfHyperdriveSpec extends ZIOSpecDefault {
         } yield assertTrue(engine == direct)
       }
     },
-    test("PdfEngine.elements matches stream decode + Elements.pipe") {
+    test("PdfEngine.elements path matches in-memory elementsSync") {
+      withTempPdf("xref-stream.pdf") { path =>
+        for {
+          bytes   <- loadFixture("xref-stream.pdf")
+          engine  <- PdfEngine.elements(path).provide(PdfEngine.live)
+          direct   = PdfHyperdrive.elementsSync(bytes)
+        } yield assertTrue(engine == direct)
+      }
+    },
+    test("PdfEngine.elementsStream matches stream decode + Elements.pipe") {
       withTempPdf("xref-stream.pdf") { path =>
         for {
           bytes    <- loadFixture("xref-stream.pdf")
-          engine   <- PdfEngine.elements(path).runCollect.provide(PdfEngine.live)
+          engine   <- PdfEngine.elementsStream(path).runCollect.provide(PdfEngine.live)
           streamed <- ZStream
                         .fromChunk(Chunk.fromArray(bytes))
                         .via(PdfStream.decode())

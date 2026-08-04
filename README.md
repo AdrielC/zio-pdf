@@ -1,10 +1,12 @@
 # zio-pdf (formerly fs2-pdf)
 
-> :warning: **Repository Status: rewrite in progress**
+> **Status: 0.2.0-RC1** — ZIO 2 / Scala 3 port. Canonical repo:
+> [git.tybera.net/Tybera/zio-pdf](https://git.tybera.net/Tybera/zio-pdf)
 >
-> The original `fs2-pdf` was archived. This branch ports the project
-> off of `cats-effect` / `fs2` / `scodec-stream` (Scala 2.13) and onto
-> the latest **ZIO 2 / Scala 3** ecosystem.
+> The original [fs2-pdf](https://github.com/springernature/fs2-pdf) was archived.
+> This project ports streaming PDF decode/encode off cats-effect / fs2 onto
+> **ZIO 2 / Scala 3**, with a fused mmap decode path (`PdfEngine`) and composable
+> byte pipelines (`PdfStream`).
 
 ## Start here
 
@@ -464,33 +466,44 @@ PdfIOBench.validate             65536                false  avgt    5  0.437 ± 
 
 ### `PdfEngine` — public ZIO façade
 
-Prefer **`PdfEngine`** for path decode / stream / validate / digest / policy / text. Public byte bags are **`Chunk[Byte]`** (never `Array` at the API boundary). Hyperdrive / HyperFuse / HyperdriveStream are `private[pdf]` internals.
+Prefer **`PdfEngine`** for PDF decode / validate / digest / policy / text. The **primary surface is composable `ZPipeline`s and `ZSink`s** on `ZStream[Byte]`; path and `Chunk` helpers are thin wrappers (fused mmap Hyperdrive where noted). Public byte bags are **`Chunk[Byte]`** (never `Array` at the API boundary).
 
 ```scala
 import zio.*
 import zio.pdf.*
+import zio.pdf.io.PdfIO
 import java.nio.file.Path
 
-// ZLayer — always fused Hyperdrive (mmap → HyperFuse)
 val layer: ZLayer[Any, Nothing, PdfEngine] = PdfEngine.live
 
-// Path decode → Chunk[Decoded]
-PdfEngine.decode(Path.of("doc.pdf")).provide(PdfEngine.live)
+// --- compose on ZStream[Byte] (primary) -----------------------------------
+PdfIO.reader(path).via(PdfEngine.decoded()).runCollect.provide(PdfEngine.live)
+PdfIO.reader(path).via(PdfEngine.elements()).runDrain.provide(PdfEngine.live)
+PdfIO.reader(path).via(PdfEngine.extractTextPipeline()).runDrain.provide(PdfEngine.live)
 
-// In-memory decode (Chunk[Byte] in, Chunk[Decoded] out)
-PdfEngine.decode(bytes).provide(PdfEngine.live)
+PdfEngine.runValidate(PdfIO.reader(path)).provide(PdfEngine.live)   // Validation[PdfError, Unit]
+PdfEngine.runPolicy(PdfIO.reader(path), rules).provide(PdfEngine.live)
+PdfEngine.runDigest(PdfIO.reader(path)).provide(PdfEngine.live)       // Chunk[Byte] SHA-256
+PdfIO.reader(path).run(PdfEngine.digestSink.provide(PdfEngine.live)) // same digest via sink
 
-// Streaming / element / text accessors (require PdfEngine in the environment)
-PdfEngine.stream(path)           // ZStream[PdfEngine, Throwable, Decoded]
-PdfEngine.elements(path)         // ZStream[PdfEngine, Throwable, Element]
-PdfEngine.extractText(path)      // ZStream[PdfEngine, Throwable, PageText]
-PdfEngine.validate(path)         // Validation[PdfError, Unit]
-PdfEngine.digest(path)           // Chunk[Byte] SHA-256 of file bytes
-PdfEngine.decodeAndDigest(path)  // (Chunk[Decoded], Chunk[Byte])
-PdfEngine.policy(path, rules)    // Validation[PolicyViolation, Unit]
+// --- path ergonomics (reader + pipeline / runner) -------------------------
+PdfEngine.stream(path)           // ZStream[..., Decoded]  (= reader.via(decoded))
+PdfEngine.elementsStream(path)   // ZStream[..., Element]
+PdfEngine.extractText(path)      // ZStream[..., PageText]
+PdfEngine.validate(path)
+PdfEngine.policy(path, rules)
 PdfEngine.compare(old, updated)
-PdfEngine.sink(path)(println)    // per-event sync sink on the fuse thread
-PdfEngine.sinkZIO(path)(d => ZIO.logInfo(d.toString))  // effectful; backpressures
+
+// --- fused fast path (mmap Hyperdrive — no ZChannel per chunk) ------------
+PdfEngine.decode(path).provide(PdfEngine.live)              // Chunk[Decoded]
+PdfEngine.elements(path).provide(PdfEngine.live)            // Chunk[Element]
+PdfEngine.decodeAndDigest(path).provide(PdfEngine.live)     // (Chunk[Decoded], Chunk[Byte])
+PdfEngine.sink(path)(println)
+PdfEngine.sinkZIO(path)(d => ZIO.logInfo(d.toString))
+PdfEngine.elementsSink(path)(println)                       // constant-memory classify
+
+// --- fused streams (mmap + bounded queue backpressure) --------------------
+PdfEngine.elementsStream(path).provide(PdfEngine.live)      // ZStream[..., Element]
 ```
 
 `PdfEngine.Options` (defaults via `PdfEngine.Options.default` / `PdfEngine.default`):
@@ -500,9 +513,8 @@ PdfEngine.sinkZIO(path)(d => ZIO.logInfo(d.toString))  // effectful; backpressur
 | `enableDiagnostics` | `false` | drain `ZPureLog` diagnostics |
 | `config` | `StreamingDecode.Config.default` | `inlineMaxBytes` (256 KiB) for small-stream buffering |
 | `batchSize` | 10 MiB | Hyperdrive mmap / fuse batching |
-| `queueCapacity` | 256 | backpressure queue for `stream` / `elements` |
 
-Same decode semantics as `PdfStream.decode()` (streaming parse + ObjStm / XRef expansion), but one sync / fused pass instead of a `ZChannel` per chunk. **`PdfIO`** is narrowed to file byte I/O only (`reader` / `writer` / `readAll` / `writeAll`). For true `ZStream[Byte]` sources (sockets, stdin), use `PdfStream.decode()` / `streamingDecode()`.
+Same decode semantics as `PdfStream.decode()` (streaming parse + ObjStm / XRef expansion). **`PdfEngine.decoded()`** delegates to that pipeline; **`PdfEngine.decode(path)`** uses fused mmap Hyperdrive for files. **`PdfIO`** is narrowed to file byte I/O only (`reader` / `writer` / `readAll` / `writeAll`). For arbitrary `ZStream[Byte]` sources (sockets, stdin), compose `PdfEngine.decoded()` or `PdfStream.decode()` directly.
 
 ```
 Benchmark                                Mode  Cnt   Score    Error  Units
@@ -680,18 +692,28 @@ There is **no** `DecodeMode` / `Log` argument anymore. Diagnostics are a boolean
 import zio.pdf.*
 import zio.pdf.io.PdfIO
 
-// Prefer for files — fused mmap Hyperdrive (private PdfHyperdrive / HyperFuse)
-PdfEngine.decode(path).provide(PdfEngine.live)                    // Chunk[Decoded]
-PdfEngine.stream(path).provide(PdfEngine.live)                    // ZStream[..., Decoded]
+// Pipelines (require PdfEngine in the environment)
+PdfIO.reader(path).via(PdfEngine.decoded()).runCollect.provide(PdfEngine.live)
+PdfIO.reader(path).via(PdfEngine.streaming()).runDrain.provide(PdfEngine.live)
 
-// Prefer for ZStream[Byte] sources — ZPipeline over StreamingDecode
+// Path ergonomics — same pipelines, wired to PdfIO.reader
+PdfEngine.stream(path).provide(PdfEngine.live)                    // → Decoded (pipeline)
+PdfEngine.elementsStream(path).provide(PdfEngine.live)          // → Element (fused stream)
+PdfEngine.elements(path).provide(PdfEngine.live)                  // Chunk[Element] (fused collect)
+
+// Fused mmap (files only — fastest full collect)
+PdfEngine.decode(path).provide(PdfEngine.live)                    // Chunk[Decoded]
+
+// Low-level byte pipes (no PdfEngine layer)
 PdfIO.reader(path).via(PdfStream.decode())                        // → Decoded (expanded)
 PdfIO.reader(path).via(PdfStream.streamingDecode())               // → StreamingDecoded (raw)
 ```
 
 | API | Input | Output | Expands ObjStm / XRef streams? |
 |---|---|---|---|
-| `PdfEngine.decode` / `.stream` | `Path` or `Chunk[Byte]` | `Decoded` | yes (same as `PdfStream.decode`) |
+| `PdfEngine.decoded()` / `.stream` | `ZStream[Byte]` or `Path` | `Decoded` | yes (via `PdfStream.decode`) |
+| `PdfEngine.elements()` / `.elementsStream` | `ZStream[Byte]` or `Path` | `Element` | yes (fused classify on path) |
+| `PdfEngine.elements` / `.decode` | `Path` or `Chunk[Byte]` | `Chunk[Element]` / `Chunk[Decoded]` | yes (fused Hyperdrive) |
 | `PdfStream.decode()` | `ZStream[Byte]` | `Decoded` | yes — via `DecodedFromStreaming` |
 | `PdfStream.streamingDecode()` | `ZStream[Byte]` | `StreamingDecoded` | **no** — raw stream bytes only |
 
@@ -746,9 +768,11 @@ When to use which:
 
 | Workload | Call |
 |---|---|
-| File on disk, need full `Decoded` / elements / validate / text | `PdfEngine.decode` / `.stream` / `.elements` / `.validate` / `.extractText` |
-| `ZStream[Byte]`, need ObjStm expansion / lazy decompress | `PdfStream.decode()` |
-| Big embedded streams, forward raw bytes (CDC, S3, hash) | `PdfStream.streamingDecode()` |
+| File on disk, compose decode in a pipeline | `PdfEngine.decoded()` / `.stream` / `.elementsStream` / `.extractTextPipeline` |
+| File on disk, need full `Chunk[Decoded]` fast | `PdfEngine.decode` (fused mmap) |
+| Validate / policy / digest / compare on bytes | `PdfEngine.runValidate` / `.runPolicy` / `.runDigest` / `.compareStreams` or path wrappers |
+| `ZStream[Byte]`, need ObjStm expansion / lazy decompress | `PdfEngine.decoded()` or `PdfStream.decode()` |
+| Big embedded streams, forward raw bytes (CDC, S3, hash) | `PdfStream.streamingDecode()` or `PdfEngine.streaming()` |
 
 This closes the loop: **both encoder and decoder are memory-bounded.** `Part.StreamObj` lets the encoder write multi-GB attachments without materialisation; `streamingDecode` lets the decoder read large stream payloads the same way.
 
@@ -835,7 +859,7 @@ When to use which:
 
 - **`PdfIO.{readAll, writeAll}`** — small/medium PDFs as `Chunk[Byte]`.
 - **`PdfIO.{reader, writer}`** — large files, async workflows, and anything that wants `ZStream` composition past the function boundary. Standard `ZIO.scoped` lifetime; the stream value flows freely through ZIO-shaped code.
-- **`PdfEngine`** — path decode, stream, validate, digest, policy, text extract.
+- **`PdfEngine`** — pipelines (`decoded`, `elements`, `digestSink`), path runners, and fused mmap decode.
 
 `PdfIOSpec` proves the I/O surface:
 

@@ -11,12 +11,12 @@ val kyoVersion                 = "1.0-RC1"
 
 ThisBuild / organization      := "com.springernature"
 ThisBuild / scalaVersion      := "3.8.3"
-ThisBuild / version           := "0.2.0-SNAPSHOT"
+ThisBuild / version           := "0.2.0-RC1"
 ThisBuild / fork              := true
 ThisBuild / licenses          := List(
   "Apache 2" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")
 )
-ThisBuild / homepage          := Some(url("https://github.com/springernature/fs2-pdf"))
+ThisBuild / homepage          := Some(url("https://git.tybera.net/Tybera/zio-pdf"))
 ThisBuild / autoAPIMappings   := true
 
 ThisBuild / scalacOptions ++= List(
@@ -87,6 +87,8 @@ lazy val bench = (project in file("bench"))
     name              := "zio-pdf-bench",
     publish / skip    := true,
     Jmh / version     := "1.37",
+    // Inline expansion of `zio.pdf.pipe` in forked JMH runs can fail class loading; keep fuse in PdfHyperdrive.
+    Jmh / fork        := false,
     // Scala 3.8.3 JVM optimizer — scoped to sources + our packages (not JDK/deps).
     scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused")) ++ List(
       "-opt",
