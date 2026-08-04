@@ -31,8 +31,10 @@ private[pdf] object FusedDecode {
   /**
    * Sink each [[Decoded]] as produced — never materialises a timeline [[Chunk]].
    * Returns the number of values delivered to `sink`.
+   *
+   * `sink` is `inline` so call-site lambdas fuse into the HyperFuse loop.
    */
-  def decodeSliceSink(slice: Slice, cfg: Cfg)(sink: Decoded => Unit): Long = {
+  inline def decodeSliceSink(slice: Slice, cfg: Cfg)(inline sink: Decoded => Unit): Long = {
     var count = 0L
     HyperFuse.fuseDecodedBuild(slice, cfg, d => { sink(d); count += 1 })
     count

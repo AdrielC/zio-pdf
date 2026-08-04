@@ -126,8 +126,12 @@ object DecodedFromStreaming {
         }
     }
 
-  /** Fold streaming events into `emit` — no per-batch [[Chunk]]. */
-  def foldEventsAcc(acc: Acc, events: Chunk[StreamingDecoded], emit: Decoded => Unit): Acc = {
+  /**
+   * Fold streaming events into `emit` — no per-batch [[Chunk]].
+   * `emit` is `inline` so HyperFuse sink spines can beta-reduce the
+   * consumer into this loop (see [[zio.scan.InlineByteScan]]).
+   */
+  inline def foldEventsAcc(acc: Acc, events: Chunk[StreamingDecoded], inline emit: Decoded => Unit): Acc = {
     var s  = acc
     val it = events.iterator
     while it.hasNext do

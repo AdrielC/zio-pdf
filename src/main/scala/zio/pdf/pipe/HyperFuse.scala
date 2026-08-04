@@ -2,6 +2,10 @@
  * Shared hyperdrive fuse — [[ByteFeed]] ZPure steps, StreamDecoder-style
  * [[ByteFeed.runWindows]] so sinks never retain the full event log.
  *
+ * Sink spines take `inline` emit/consume lambdas so classify / count /
+ * digest beta-reduce into the window loop (same pattern as
+ * [[zio.scan.InlineByteScan]]).
+ *
  * Digest shares the same windows by putting [[MessageDigest]] in ZPure state
  * beside the decode machine ([[Digested]]).
  */
@@ -43,11 +47,11 @@ private[pdf] object HyperFuse {
     d => ByteFeed.logAll(StreamingDecode.finalizeToMetaSync(diag, d.machine))
   }
 
-  private def runStreaming(
+  private inline def runStreaming(
     slice: Slice,
     cfg: Cfg,
     step: ByteFeed.Step[StreamingDecode.FinalState, StreamingDecoded]
-  )(consume: Chunk[StreamingDecoded] => Unit): Unit = {
+  )(inline consume: Chunk[StreamingDecoded] => Unit): Unit = {
     val _ = ByteFeed.runWindows(
       slice,
       cfg.batchSize,
@@ -57,11 +61,11 @@ private[pdf] object HyperFuse {
     )(consume)
   }
 
-  private def runStreamingDigested(
+  private inline def runStreamingDigested(
     slice: Slice,
     cfg: Cfg,
     md: MessageDigest
-  )(consume: Chunk[StreamingDecoded] => Unit): MessageDigest = {
+  )(inline consume: Chunk[StreamingDecoded] => Unit): MessageDigest = {
     val end = ByteFeed.runWindows(
       slice,
       cfg.batchSize,
@@ -73,7 +77,7 @@ private[pdf] object HyperFuse {
   }
 
   /** Streaming parse + ObjStm/XRef bridge; emits each [[Decoded]] via `emit`. */
-  def fuseDecodedBuild(slice: Slice, cfg: Cfg, emit: Decoded => Unit): Unit = {
+  inline def fuseDecodedBuild(slice: Slice, cfg: Cfg, inline emit: Decoded => Unit): Unit = {
     var bridge = DecodedFromStreaming.accInitial
     runStreaming(slice, cfg, streamingStep(cfg)) { log =>
       bridge = DecodedFromStreaming.foldEventsAcc(bridge, log, emit)
@@ -84,11 +88,11 @@ private[pdf] object HyperFuse {
       while it.hasNext do emit(it.next())
   }
 
-  private def fuseDecodedBuildDigested(
+  private inline def fuseDecodedBuildDigested(
     slice: Slice,
     cfg: Cfg,
     md: MessageDigest,
-    emit: Decoded => Unit
+    inline emit: Decoded => Unit
   ): MessageDigest = {
     var bridge = DecodedFromStreaming.accInitial
     val endMd = runStreamingDigested(slice, cfg, md) { log =>
@@ -102,7 +106,7 @@ private[pdf] object HyperFuse {
   }
 
   /** Streaming parse + ObjStm/XRef bridge; emits [[Decoded]] batches to [[sink]]. */
-  def fuseDecoded(slice: Slice, cfg: Cfg)(sink: Chunk[Decoded] => Unit): Unit = {
+  inline def fuseDecoded(slice: Slice, cfg: Cfg)(inline sink: Chunk[Decoded] => Unit): Unit = {
     var bridge = DecodedFromStreaming.accInitial
     runStreaming(slice, cfg, streamingStep(cfg)) { log =>
       val (decoded, next) = DecodedFromStreaming.foldSync(bridge, log)
@@ -114,7 +118,7 @@ private[pdf] object HyperFuse {
   }
 
   /** Triple-fuse: parse → expand → classify; emits each [[Element]] via `emit`. */
-  def fuseElementsBuild(slice: Slice, cfg: Cfg, emit: Element => Unit): Unit =
+  inline def fuseElementsBuild(slice: Slice, cfg: Cfg, inline emit: Element => Unit): Unit =
     fuseDecodedBuild(
       slice,
       cfg,
@@ -126,7 +130,7 @@ private[pdf] object HyperFuse {
     )
 
   /** Triple-fuse: parse → expand → classify; never materialises timelines. */
-  def fuseElements(slice: Slice, cfg: Cfg)(sink: Element => Unit): Unit =
+  inline def fuseElements(slice: Slice, cfg: Cfg)(inline sink: Element => Unit): Unit =
     fuseElementsBuild(slice, cfg, sink)
 
   /** Decode + SHA-256 in one scan — digest windows match streaming batches. */
@@ -140,7 +144,7 @@ private[pdf] object HyperFuse {
    * Decode + SHA-256 with a per-event sink — never materialises `Chunk[Decoded]`.
    * Digest is [[ZPure]] state beside the decode machine.
    */
-  def fuseDecodedWithDigestSink(slice: Slice, cfg: Cfg)(sink: Decoded => Unit): DigestSink = {
+  inline def fuseDecodedWithDigestSink(slice: Slice, cfg: Cfg)(inline sink: Decoded => Unit): DigestSink = {
     val md    = MessageDigest.getInstance("SHA-256")
     var count = 0L
     val endMd = fuseDecodedBuildDigested(
@@ -159,7 +163,7 @@ private[pdf] object HyperFuse {
   }
 
   /** Elements + SHA-256 with a per-event sink — never materialises timelines. */
-  def fuseElementsWithDigestSink(slice: Slice, cfg: Cfg)(sink: Element => Unit): DigestSink = {
+  inline def fuseElementsWithDigestSink(slice: Slice, cfg: Cfg)(inline sink: Element => Unit): DigestSink = {
     val md    = MessageDigest.getInstance("SHA-256")
     var count = 0L
     val endMd = fuseDecodedBuildDigested(
