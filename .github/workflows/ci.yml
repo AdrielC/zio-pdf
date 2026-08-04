@@ -14,6 +14,7 @@ concurrency:
 env:
   # Required for Coursier on Tybera runners (see Tybera/quasar).
   HOME: /root
+  SBT_OPTS: -Dsbt.supershell=false
 
 jobs:
   test:
@@ -43,11 +44,10 @@ jobs:
           echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
 
       - name: Run tests
-        run: |
-          export HOME="${HOME:-/root}"
-          sbt -batch -Dsbt.supershell=false test
+        run: sbt -batch test
+
+      - name: Smoke examples
+        run: sbt -batch examples/run
 
       - name: Compile bench subprojects
-        run: |
-          export HOME="${HOME:-/root}"
-          sbt -batch -Dsbt.supershell=false "bench/Jmh/compile" "benchFs2/Jmh/compile"
+        run: sbt -batch "bench/Jmh/compile" "benchFs2/Jmh/compile"
