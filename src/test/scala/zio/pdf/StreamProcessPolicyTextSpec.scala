@@ -4,6 +4,7 @@
 
 package zio.pdf
 
+import _root_.scodec.Attempt
 import _root_.scodec.bits.BitVector
 import zio.*
 import zio.prelude.Validation
@@ -101,6 +102,20 @@ object StreamProcessPolicyTextSpec extends ZIOSpecDefault {
         dec <- FlateDecode(enc, Prim.dict("DecodeParms" -> Prim.Dict.empty))
       } yield dec
       assertTrue(out.toOption.contains(raw))
+    },
+
+    test("FlateEncode is safe under parallel fibers") {
+      def attemptZIO[A](a: Attempt[A]): ZIO[Any, Throwable, A] =
+        ZIO.fromEither(a.toEither).mapError(e => new RuntimeException(e.messageWithContext))
+
+      val payloads =
+        Chunk.fromIterable(0 until 64).map(i => BitVector(s"parallel-flate-$i-${"x" * (i * 17)}".getBytes))
+      for {
+        encoded <- ZIO.foreachPar(payloads)(p => attemptZIO(FlateEncode(p)))
+        decoded <- ZIO.foreachPar(encoded.zip(payloads)) { case (enc, raw) =>
+                     attemptZIO(FlateDecode(enc, Prim.dict("DecodeParms" -> Prim.Dict.empty))).map(_ == raw)
+                   }
+      } yield assertTrue(decoded.forall(identity))
     },
 
     test("mapUncompressedContent identity preserves content bytes") {
