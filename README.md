@@ -434,7 +434,7 @@ Honest reading:
 - **For the ZIO `StreamDecoder.many` path vs fs2's Pull path** on the same per-element decoder: ZIO is **~470× faster** on a tight `uint8` loop (ZIO routes through `runStrict`, not per-element `ZChannel`).
 - **For real PDF parsing** use **`PdfEngine.decode(path)`** for files, or the byte-stream pipes (`TopLevel.pipe`, `PdfStream.topLevel` / `PdfStream.decode`) when you already have a `ZStream[Byte]`. Zero-copy `ChunkBytes` + 10 MiB rechunk beats fs2 on the head-to-head fixture; strict in-memory decode is **~45% faster** than fs2 Pull.
 
-So if your workload is "stream a giant binary log of fixed-width records" the chunked fast path is a transformative win. If your workload is "parse PDF structure", use `TopLevel.pipe` / `PdfStream.decode()` — not manual micro-chunk BitVector conversion.
+So if your workload is "stream a giant binary log of fixed-width records" the chunked fast path is a transformative win. If your workload is "parse PDF structure", use **`PdfEngine.decode(path)`** for files, or `TopLevel.pipe` / `PdfStream.decode()` for `ZStream[Byte]` — not manual micro-chunk BitVector conversion.
 
 ### `zio.scan` — 1 MiB fused byte maps (`InlineByteScan`)
 
@@ -460,20 +460,49 @@ PdfIOBench.decodeCount          65536                false  avgt    5  0.351 ± 
 PdfIOBench.validate             65536                false  avgt    5  0.437 ± 0.706  ms/op
 ```
 
-`PdfEngine.decode` (fused mmap Hyperdrive) is the unified decode entry point — ~0.31 ms on the warmed page-cache fixture. Decode dominates; raw `PdfIO.readAll` is ~0.09 ms.
+`PdfEngine.decode` (fused mmap Hyperdrive) is the path decode entry point — ~0.31 ms on the warmed page-cache fixture. Decode dominates; raw `PdfIO.readAll` is ~0.09 ms.
 
-### `PdfEngine` — unified decode entry point
+### `PdfEngine` — public ZIO façade
 
-Prefer the ZIO service façade for path decode / stream / validate:
+Prefer **`PdfEngine`** for path decode / stream / validate / digest / policy / text. Public byte bags are **`Chunk[Byte]`** (never `Array` at the API boundary). Hyperdrive / HyperFuse / HyperdriveStream are `private[pdf]` internals.
 
 ```scala
-import zio.pdf.PdfEngine
+import zio.*
+import zio.pdf.*
+import java.nio.file.Path
 
-PdfEngine.decode(path).provide(PdfEngine.live)
-PdfEngine.stream(path).provide(PdfEngine.live)
+// ZLayer — always fused Hyperdrive (mmap → HyperFuse)
+val layer: ZLayer[Any, Nothing, PdfEngine] = PdfEngine.live
+
+// Path decode → Chunk[Decoded]
+PdfEngine.decode(Path.of("doc.pdf")).provide(PdfEngine.live)
+
+// In-memory decode (Chunk[Byte] in, Chunk[Decoded] out)
+PdfEngine.decode(bytes).provide(PdfEngine.live)
+
+// Streaming / element / text accessors (require PdfEngine in the environment)
+PdfEngine.stream(path)           // ZStream[PdfEngine, Throwable, Decoded]
+PdfEngine.elements(path)         // ZStream[PdfEngine, Throwable, Element]
+PdfEngine.extractText(path)      // ZStream[PdfEngine, Throwable, PageText]
+PdfEngine.validate(path)         // Validation[PdfError, Unit]
+PdfEngine.digest(path)           // Chunk[Byte] SHA-256 of file bytes
+PdfEngine.decodeAndDigest(path)  // (Chunk[Decoded], Chunk[Byte])
+PdfEngine.policy(path, rules)    // Validation[PolicyViolation, Unit]
+PdfEngine.compare(old, updated)
+PdfEngine.sink(path)(println)    // per-event sync sink on the fuse thread
+PdfEngine.sinkZIO(path)(d => ZIO.logInfo(d.toString))  // effectful; backpressures
 ```
 
-`PdfEngine.live` always uses the fused Hyperdrive path (mmap → HyperFuse). Same semantics as `PdfStream.decode()`, one sync pass over the state machine + expansion bridge. `PdfIO` is narrowed to file byte I/O (`reader` / `writer` / `readAll` / `writeAll`).
+`PdfEngine.Options` (defaults via `PdfEngine.Options.default` / `PdfEngine.default`):
+
+| Field | Default | Role |
+|---|---|---|
+| `enableDiagnostics` | `false` | drain `ZPureLog` diagnostics |
+| `config` | `StreamingDecode.Config.default` | `inlineMaxBytes` (256 KiB) for small-stream buffering |
+| `batchSize` | 10 MiB | Hyperdrive mmap / fuse batching |
+| `queueCapacity` | 256 | backpressure queue for `stream` / `elements` |
+
+Same decode semantics as `PdfStream.decode()` (streaming parse + ObjStm / XRef expansion), but one sync / fused pass instead of a `ZChannel` per chunk. **`PdfIO`** is narrowed to file byte I/O only (`reader` / `writer` / `readAll` / `writeAll`). For true `ZStream[Byte]` sources (sockets, stdin), use `PdfStream.decode()` / `streamingDecode()`.
 
 ```
 Benchmark                                Mode  Cnt   Score    Error  Units
@@ -483,6 +512,7 @@ PdfHyperdriveBench.zioStreamDecode       avgt   10  657 µs/op   (ZStream + ZCha
 
 ```bash
 sbt "bench/Jmh/run -i 10 -wi 5 .*PdfHyperdriveBench.*"
+sbt examples/run   # PdfEngine vs PdfStream parity smoke on xref-stream.pdf
 ```
 
 ### `SpscRingBuffer` (`zio-blocks-ringbuffer`) vs `ArrayBlockingQueue`
@@ -585,7 +615,8 @@ pipeline is now ported:
 | `zio.pdf.Rewrite` (stateful transform + emit Part stream) | ✅ ported |
 | `zio.pdf.Pdf / AssemblePdf / ValidatedPdf / AssemblyError` | ✅ ported |
 | `zio.pdf.ValidatePdf / ComparePdfs / PdfError / CompareError` | ✅ ported, 3 tests |
-| `zio.pdf.PdfStream` (top-level façade: `bits / topLevel / decode / elements / transformElements / validate / compare`) | ✅ ported |
+| `zio.pdf.PdfEngine` (ZIO façade: `decode` / `stream` / `elements` / `validate` / `digest` / `policy` / `extractText` + `live`) | ✅ ported |
+| `zio.pdf.PdfStream` (byte pipes: `bits / topLevel / decode / streamingDecode / elements / transformElements / validate / compare`) | ✅ ported |
 | `zio.pdf.Pdf.objectNumbers` / `pageNumber` / `streamsOfPage` / `dictOfPage` (+ raw/stream variants) | ✅ ported (`ZStream` / `ZPipeline`) |
 | `zio.pdf.WriteLinearized` (first-page xref + linearization dict helpers) + `zio.pdf.Tiff` | ✅ ported — full linearized **file** layout: `WriteLinearized.encodeLinearizedPrefix` then `WritePdf.parts` on the tail (see `WriteLinearized` source doc) |
 | Image-test helpers: `zio.pdf.testkit.{Jar, ProcessJarPdf, WriteFile}` | ✅ ported (under `src/test`) |
@@ -641,55 +672,67 @@ partStream.via(WritePdf.parts).runFold(0L)(_ + _.size)  // counts bytes; ~64 KiB
 
 `StreamObjSpec` proves this end-to-end: it encodes a 1 MiB content stream and a 10 MiB content stream by piping a synthetic `ZStream[Byte]` through `WritePdf.parts` directly into a `runFold(0L)(_ + _.size)` byte counter — the total file bytes are never materialised. A separate test then encodes 1 MiB the same way, materialises the bytes, decodes them back, and verifies all 1 048 576 bytes of the deterministic `i & 0xff` pattern come through byte-perfect.
 
-### Unified decode entry point: `PdfStream.decode(log, mode)`
+### Decode surfaces: `PdfEngine` (paths) vs `PdfStream` (byte pipes)
 
-There is a single API with two **modes** (same duplicate-object filtering and final `Meta` in both cases):
+There is **no** `DecodeMode` / `Log` argument anymore. Diagnostics are a boolean (`enableDiagnostics`); path decode goes through **`PdfEngine`**; byte-stream composition stays on **`PdfStream`**.
 
 ```scala
-PdfStream.decode(log)                              // DecodeMode.Materialized → Decoded
-PdfStream.decode(log, PdfStream.DecodeMode.Streaming) // StreamingDecoded (SAX payloads)
+import zio.pdf.*
+import zio.pdf.io.PdfIO
+
+// Prefer for files — fused mmap Hyperdrive (private PdfHyperdrive / HyperFuse)
+PdfEngine.decode(path).provide(PdfEngine.live)                    // Chunk[Decoded]
+PdfEngine.stream(path).provide(PdfEngine.live)                    // ZStream[..., Decoded]
+
+// Prefer for ZStream[Byte] sources — ZPipeline over StreamingDecode
+PdfIO.reader(path).via(PdfStream.decode())                        // → Decoded (expanded)
+PdfIO.reader(path).via(PdfStream.streamingDecode())               // → StreamingDecoded (raw)
 ```
 
-`PdfStream.streamingDecode` remains as shorthand for `StreamingDecode.pipeline(Log.noop)`.
+| API | Input | Output | Expands ObjStm / XRef streams? |
+|---|---|---|---|
+| `PdfEngine.decode` / `.stream` | `Path` or `Chunk[Byte]` | `Decoded` | yes (same as `PdfStream.decode`) |
+| `PdfStream.decode()` | `ZStream[Byte]` | `Decoded` | yes — via `DecodedFromStreaming` |
+| `PdfStream.streamingDecode()` | `ZStream[Byte]` | `StreamingDecoded` | **no** — raw stream bytes only |
 
-**Why two output types at all?** A PDF content stream is not just opaque bytes: the materialized path runs `Content.uncompress`, detects **object streams** (`/Type /ObjStm`) and **xref streams**, and can emit many `Decoded.DataObj` values from one stream. That needs the full decompressed payload (lazy `BitVector`) in memory for that object. The streaming path deliberately forwards **raw** stream bytes in `ContentObjBytes` chunks so peak memory follows the upstream chunk size; it does **not** expand ObjStm / XRef stream payloads into nested objects (you would hash or store the bytes, or switch to materialized decode for that object).
+**Why two output types?** A PDF content stream is not just opaque bytes: the `Decoded` path runs `Content.uncompress`, detects **object streams** (`/Type /ObjStm`) and **xref streams**, and can emit many `Decoded.DataObj` values from one stream. That needs the decompressed payload (lazy `BitVector`) for that object. `streamingDecode` deliberately forwards **raw** stream bytes so peak memory follows the upstream chunk size (plus optional inline buffering — see below); it does **not** expand ObjStm / XRef payloads into nested objects (hash or store the bytes, or use `decode` / `PdfEngine` when you need expansion).
 
-The materialized pipeline materialises each ordinary content stream's payload as a `BitVector` so it can resolve `/Length` and verify the trailing `endstream`. For PDFs with multi-MB attachments / images / fonts this means peak memory is bounded by the largest single object, not by the upstream chunk size — fine for typical text-heavy PDFs, problematic for big binary blobs.
-
-The streaming pipeline is the SAX-style alternative: same top-level coverage (version, comment, xref, startxref, data objects, content objects, accumulated `Meta`), but each content-stream payload is forwarded as a sequence of `ContentObjBytes` chunks instead of being materialised:
+`PdfStream.decode()` is the usual byte-pipe entry: `StreamingDecode.pipeline` then `DecodedFromStreaming.pipeline`. Small streams (`length <= StreamingDecode.Config.inlineMaxBytes`, default 256 KiB) are buffered once on `ContentObjStart.inlinePayload`; larger streams use chunked `ContentObjBytes` + `ContentObjEnd` before expansion. `streamingDecode()` stops at the SAX-style events:
 
 ```scala
 sealed trait StreamingDecoded
 object StreamingDecoded {
   case class DataObj(obj: Obj)                                       extends StreamingDecoded
-  case class VersionT(v: Version)                                    extends StreamingDecoded
-  case class XrefT(x: Xref)                                          extends StreamingDecoded
-  case class StartXrefT(s: StartXref)                                extends StreamingDecoded
-  case class CommentT(b: ByteVector)                                 extends StreamingDecoded
-  // SAX events for one content stream:
-  case class ContentObjHeader(obj: Obj, length: Long)                extends StreamingDecoded
+  case class VersionT(version: Version)                              extends StreamingDecoded
+  case class XrefT(xref: Xref)                                       extends StreamingDecoded
+  case class StartXrefT(startxref: StartXref)                        extends StreamingDecoded
+  case class CommentT(data: ByteVector)                              extends StreamingDecoded
+  // content stream: Start (optional inline) → Bytes* → End (when not inlined)
+  case class ContentObjStart(obj: Obj, length: Long, inlinePayload: Option[BitVector])
+      extends StreamingDecoded
   case class ContentObjBytes(bytes: Chunk[Byte])                     extends StreamingDecoded
-  case object ContentObjEnd                                           extends StreamingDecoded
-  case class Meta(xrefs: List[Xref], trailer: Option[Trailer], version: Option[Version]) extends StreamingDecoded
+  case object ContentObjEnd                                          extends StreamingDecoded
+  case class Meta(xrefs: List[Xref], trailer: Option[Trailer], version: Option[Version])
+      extends StreamingDecoded
 }
 ```
 
-Internally the pipeline alternates between two modes:
+Internally the pipeline alternates between header-waiting and payload-forwarding / buffering states:
 
-- **WaitingHeader**: try to decode one of `Version | Xref | StartXref | Comment | IndirectObj.headerOnly` from the carry buffer. The new `IndirectObj.headerOnly` codec stops *just after* the `stream\n` keyword and yields an `IndirectObjHeader(obj, Option[Long])`. On success, emit the matching event (and for stream-bearing objects, a `ContentObjHeader` plus a transition).
-- **ForwardingBytes(remaining)**: forward upstream bytes downstream as `ContentObjBytes` chunks, decrementing `remaining`. When it hits zero, parse `\nendstream\nendobj\n` and return to WaitingHeader.
+- **WaitingHeader**: try to decode one of `Version | Xref | StartXref | Comment | IndirectObj.headerOnly` from the carry buffer. `IndirectObj.headerOnly` stops *just after* the `stream\n` keyword and yields an `IndirectObjHeader`. On success, emit the matching event (for stream-bearing objects, a `ContentObjStart` plus a transition).
+- **ForwardingBytes / BufferingBytes**: forward or buffer payload until `/Length` is satisfied, then parse `\nendstream\nendobj\n` and return to WaitingHeader.
 
-Peak memory = upstream chunk size + the carry buffer for one TopLevel-shaped header. **The actual content stream payload is forwarded chunk-by-chunk; it never lives in a single buffer.**
+For large (non-inlined) streams, peak memory ≈ upstream chunk size + carry for one header — **the payload is forwarded chunk-by-chunk**.
 
 ```scala
 import zio.pdf.{PdfStream, StreamingDecoded}
 import java.security.MessageDigest
 
-// Hash a 256 KiB embedded blob without ever holding it in memory:
+// Hash embedded stream bytes without materialising the whole PDF:
 val digest: ZIO[Any, Throwable, Array[Byte]] =
   ZStream
     .fromInputStream(...)                              // big PDF
-    .via(PdfStream.streamingDecode)
+    .via(PdfStream.streamingDecode())
     .collect { case StreamingDecoded.ContentObjBytes(c) => c }
     .runFold(MessageDigest.getInstance("SHA-256")) { (md, c) =>
       md.update(c.toArray); md
@@ -697,21 +740,17 @@ val digest: ZIO[Any, Throwable, Array[Byte]] =
     .map(_.digest())
 ```
 
-`StreamingDecodeSpec` proves the API works:
+`StreamingDecodeSpec` covers Start / Bytes\* / End sequencing, byte-perfect concatenation, multi-MiB streaming payloads, and streaming SHA-256.
 
-- **Header / Bytes\* / End sequence** is emitted exactly once per content object.
-- **Byte-perfect concatenation**: all `ContentObjBytes` chunks for one object concatenate to the original payload.
-- **1 MiB and 10 MiB streaming payloads** decoded end-to-end without materialisation (verified by `runFold(0L)` byte counters that never collect the chunks).
-- **Streaming SHA-256**: piping `ContentObjBytes` straight into `MessageDigest.update` produces the byte-perfect hash without buffering.
-
-When to use which mode:
+When to use which:
 
 | Workload | Call |
 |---|---|
-| Text-heavy PDFs, small content streams, need lazy decompression / ObjStm extraction | `PdfStream.decode(log)` or `decode(log, DecodeMode.Materialized)` |
-| Big embedded streams, forward raw bytes to a sink (CDC, S3, hash) without materialising | `PdfStream.decode(log, DecodeMode.Streaming)` or `streamingDecode` |
+| File on disk, need full `Decoded` / elements / validate / text | `PdfEngine.decode` / `.stream` / `.elements` / `.validate` / `.extractText` |
+| `ZStream[Byte]`, need ObjStm expansion / lazy decompress | `PdfStream.decode()` |
+| Big embedded streams, forward raw bytes (CDC, S3, hash) | `PdfStream.streamingDecode()` |
 
-This finally closes the loop: **both encoder and decoder are now memory-bounded.** `Part.StreamObj` lets the encoder write multi-GB attachments without materialisation; `PdfStream.streamingDecode` lets the decoder read them the same way.
+This closes the loop: **both encoder and decoder are memory-bounded.** `Part.StreamObj` lets the encoder write multi-GB attachments without materialisation; `streamingDecode` lets the decoder read large stream payloads the same way.
 
 ## Content-defined chunking (FastCDC) for storage dedup
 
