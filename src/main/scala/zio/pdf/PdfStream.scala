@@ -6,6 +6,8 @@
 
 package zio.pdf
 
+import _root_.scodec.Attempt
+import _root_.scodec.bits.BitVector
 import zio.{Chunk, ZIO}
 import zio.scodec.stream.ChunkBytes
 import zio.stream.{ZPipeline, ZStream}
@@ -110,12 +112,67 @@ object PdfStream {
   ): ZPipeline[Any, Throwable, Byte, _root_.scodec.bits.ByteVector] =
     elements(enableDiagnostics) >>> Rewrite.simpleParts(initial)(collect)(update) >>> WritePdf.parts
 
+  /**
+   * Decompress each rewritable content stream, apply `f` to the
+   * uncompressed bytes, recompress with Flate, and re-encode the PDF.
+   * Streams whose `/Filter` chain includes image/Crypt filters are
+   * left byte-identical (raw payload preserved).
+   */
+  def mapUncompressedContent(
+    enableDiagnostics: Boolean = false
+  )(f: BitVector => BitVector): ZPipeline[Any, Throwable, Byte, _root_.scodec.bits.ByteVector] =
+    transformElements(enableDiagnostics)(())(mapUncompressedCollect(f))(Rewrite.noUpdate)
+
+  private def mapUncompressedCollect(
+    f: BitVector => BitVector
+  ): RewriteState[Unit] => Element => (List[Part[Trailer]], RewriteState[Unit]) =
+    state => {
+      case Element.Meta(trailer, _) =>
+        (Nil, state.copy(trailer = trailer.orElse(state.trailer)))
+      case Element.Data(obj, _) =>
+        (List(Part.Obj(IndirectObj(obj, None))), state)
+      case Element.Content(obj, rawStream, stream, _) =>
+        if !Content.mayRewriteFilters(obj.data) then
+          (List(Part.Obj(IndirectObj(obj, Some(rawStream)))), state)
+        else
+          stream.exec match {
+            case Attempt.Failure(err) =>
+              throw new RuntimeException(s"uncompress obj ${obj.index.number}: ${err.messageWithContext}")
+            case Attempt.Successful(bits) =>
+              Content.compressFlate(obj.data, f(bits)) match {
+                case Attempt.Failure(err) =>
+                  throw new RuntimeException(s"FlateEncode obj ${obj.index.number}: ${err.messageWithContext}")
+                case Attempt.Successful((dict, compressed)) =>
+                  (
+                    List(Part.Obj(IndirectObj(Obj(obj.index, dict), Some(compressed)))),
+                    state
+                  )
+              }
+          }
+    }
+
   /** Validate a PDF byte stream and return either Unit or a
     * non-empty list of errors. */
   def validate(enableDiagnostics: Boolean = false)(
     bytes: zio.stream.ZStream[Any, Throwable, Byte]
   ): zio.ZIO[Any, Throwable, zio.prelude.Validation[PdfError, Unit]] =
     ValidatePdf.fromDecoded(bytes.via(decode(enableDiagnostics)))
+
+  /** Structural compliance ([[PdfPolicy]]) over a decoded byte stream. */
+  def policy(rules: PdfPolicy = PdfPolicy.strict, enableDiagnostics: Boolean = false)(
+    bytes: zio.stream.ZStream[Any, Throwable, Byte]
+  ): zio.ZIO[Any, Throwable, zio.prelude.Validation[PolicyViolation, Unit]] =
+    PdfPolicy.fromDecoded(rules)(bytes.via(decode(enableDiagnostics)))
+
+  /** Decode elements then extract literal page text. */
+  def extractText(enableDiagnostics: Boolean = false): ZPipeline[Any, Throwable, Byte, PageText] =
+    ZPipeline.fromFunction[Any, Throwable, Byte, PageText] { bytes =>
+      ZStream.unwrap {
+        bytes.via(elements(enableDiagnostics)).runCollect.map { elems =>
+          ZStream.fromChunk(TextExtract.fromElements(elems))
+        }
+      }
+    }
 
   /** Compare two PDF byte streams structurally. */
   def compare(enableDiagnostics: Boolean = false)(
