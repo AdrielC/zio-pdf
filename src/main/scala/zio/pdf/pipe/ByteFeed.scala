@@ -85,14 +85,17 @@ private[pdf] object ByteFeed {
    * Interpret window-by-window (like `StreamDecoder.fromPure`): each
    * `runAll` yields that window's `Chunk[E]` for `consume`, then state
    * continues. Fuse/sink path — does not retain the full log.
+   *
+   * `consume` is `inline` so call-site lambdas (count / classify / digest)
+   * beta-reduce into this loop — same idea as [[zio.scan.InlineByteScan]].
    */
-  def runWindows[S, E](
+  inline def runWindows[S, E](
     slice: Slice,
     batchSize: Int,
     initial: S,
     step: Step[S, E],
     finalize: Finalize[S, E] = (_: S) => ZPure.unit[S]
-  )(consume: Chunk[E] => Unit): S = {
+  )(inline consume: Chunk[E] => Unit): S = {
     var state = initial
     var pos   = slice.offset
     val end   = slice.offset + slice.length

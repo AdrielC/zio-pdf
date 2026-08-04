@@ -156,23 +156,26 @@ private[pdf] object PdfHyperdrive {
   )(sink: Decoded => Unit): Long =
     DecodePipeline.fromPathSink(cfg(enableDiagnostics, config, batchSize))(path, sink)
 
-  /** In-memory [[decodeSyncSlice]] with a sink — no timeline [[Chunk]]. */
-  def decodeSyncSink(
+  /**
+   * In-memory [[decodeSyncSlice]] with a sink — no timeline [[Chunk]].
+   * Pass a literal/`inline` lambda so the sink beta-reduces into HyperFuse.
+   */
+  inline def decodeSyncSink(
     bytes: Array[Byte],
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
-  )(sink: Decoded => Unit): Long =
+  )(inline sink: Decoded => Unit): Long =
     decodeSyncSliceSink(bytes, 0, bytes.length, enableDiagnostics, config, batchSize)(sink)
 
-  def decodeSyncSliceSink(
+  inline def decodeSyncSliceSink(
     bytes: Array[Byte],
     offset: Int,
     length: Int,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
-  )(sink: Decoded => Unit): Long =
+  )(inline sink: Decoded => Unit): Long =
     FusedDecode.decodeSliceSink(
       FusedDecode.Slice(bytes, offset, length),
       cfg(enableDiagnostics, config, batchSize)

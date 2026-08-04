@@ -18,8 +18,11 @@ private[pdf] object FusedElements {
     builder.result()
   }
 
-  /** Sink each [[Element]] as produced — never materialises timelines. */
-  def decodeSliceSink(slice: Slice, cfg: Cfg)(sink: Element => Unit): Long = {
+  /**
+   * Sink each [[Element]] as produced — never materialises timelines.
+   * `sink` is `inline` so call-site lambdas fuse into the HyperFuse loop.
+   */
+  inline def decodeSliceSink(slice: Slice, cfg: Cfg)(inline sink: Element => Unit): Long = {
     var count = 0L
     HyperFuse.fuseElementsBuild(slice, cfg, el => { sink(el); count += 1 })
     count
