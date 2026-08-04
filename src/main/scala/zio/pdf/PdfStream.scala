@@ -39,8 +39,9 @@ object PdfStream {
    * [[StreamingDecoded.ContentObjStart]].inlinePayload; larger
    * streams use chunked bytes on the wire before expansion.
    *
-   * When the PDF already fits in memory, prefer [[PdfHyperdrive.decodeSync]]
-   * or [[zio.pdf.io.PdfIO.warp]] — no `ZChannel` per chunk.
+   * When the PDF is a file path, prefer [[PdfEngine.decode]] — fused mmap
+   * path, no `ZChannel` per chunk. This pipeline remains for true
+   * `ZStream[Byte]` sources.
    */
   def decode(
     enableDiagnostics: Boolean = false,
@@ -164,13 +165,19 @@ object PdfStream {
   ): zio.ZIO[Any, Throwable, zio.prelude.Validation[PolicyViolation, Unit]] =
     PdfPolicy.fromDecoded(rules)(bytes.via(decode(enableDiagnostics)))
 
-  /** Decode elements then extract literal page text. */
+  /**
+   * Decode elements then extract literal page text.
+   * Folds content/page state as elements arrive — never materialises
+   * `Chunk[Element]` (callers that need the timeline should `runCollect`
+   * on [[elements]] themselves).
+   */
   def extractText(enableDiagnostics: Boolean = false): ZPipeline[Any, Throwable, Byte, PageText] =
     ZPipeline.fromFunction[Any, Throwable, Byte, PageText] { bytes =>
       ZStream.unwrap {
-        bytes.via(elements(enableDiagnostics)).runCollect.map { elems =>
-          ZStream.fromChunk(TextExtract.fromElements(elems))
-        }
+        bytes
+          .via(elements(enableDiagnostics))
+          .runFold(TextExtract.Acc())(TextExtract.fold)
+          .map(acc => ZStream.fromChunk(TextExtract.finish(acc)))
       }
     }
 
