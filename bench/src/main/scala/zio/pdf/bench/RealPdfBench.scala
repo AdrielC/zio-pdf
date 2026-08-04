@@ -12,8 +12,7 @@ import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
 
 import zio.{Runtime, Unsafe}
-import zio.pdf.{PdfHyperdrive, PdfStream}
-import zio.pdf.io.PdfIO
+import zio.pdf.{PdfEngine, PdfHyperdrive, PdfStream}
 
 import scala.compiletime.uninitialized
 
@@ -56,27 +55,18 @@ class RealPdfBench {
     PdfHyperdrive.elementsSync(bytes).size
 
   @Benchmark
-  def pdfIOWarp: Int =
+  def pdfEngineDecode: Int =
     Unsafe.unsafe { implicit u =>
-      runtime.unsafe.run(PdfIO.warp(pdfPath)).getOrThrow().size
+      runtime.unsafe.run(PdfEngine.decode(pdfPath).provide(PdfEngine.live)).getOrThrow().size
     }
 
   @Benchmark
-  def pdfIOWarpMapped: Int =
+  def pdfEngineElements: Int =
     Unsafe.unsafe { implicit u =>
-      runtime.unsafe.run(PdfIO.warpMapped(pdfPath)).getOrThrow().size
-    }
-
-  @Benchmark
-  def pdfIOSicko: Int =
-    Unsafe.unsafe { implicit u =>
-      runtime.unsafe.run(PdfIO.sicko(pdfPath)).getOrThrow().size
-    }
-
-  @Benchmark
-  def pdfIOSickoElements: Int =
-    Unsafe.unsafe { implicit u =>
-      runtime.unsafe.run(PdfIO.sickoElements(pdfPath)).getOrThrow().size
+      runtime.unsafe
+        .run(PdfEngine.elements(pdfPath).runCollect.provide(PdfEngine.live))
+        .getOrThrow()
+        .size
     }
 
   @Benchmark

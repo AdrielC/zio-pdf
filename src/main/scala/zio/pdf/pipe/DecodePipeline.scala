@@ -15,7 +15,7 @@ import zio.Chunk
 import zio.pdf.{Decoded, Element, Elements, StreamingDecoded}
 import zio.pdf.pipe.FusedDecode.{Cfg, Slice}
 
-object DecodePipeline {
+private[pdf] object DecodePipeline {
 
   val sliceWhole: Pipe[Array[Byte], Slice] =
     Pipe(bytes => Slice(bytes, 0, bytes.length))
@@ -86,9 +86,6 @@ object DecodePipeline {
   def elementsFromPathSink(cfg: Cfg = Cfg()): (Path, Element => Unit) => Long =
     (path, sink) => elementsSliceSink(cfg)(readSlice(cfg).run(path), sink)
 
-  def fromPathUring(cfg: Cfg = Cfg()): Pipe[Path, Chunk[Decoded]] =
-    fromPathMmap(cfg)
-
   def fromPath(cfg: Cfg = Cfg()): Pipe[Path, Chunk[Decoded]] =
     readSlice(cfg) >>> decodeSlice(cfg)
 
@@ -100,9 +97,6 @@ object DecodePipeline {
 
   def elementsFromPath(cfg: Cfg = Cfg()): Pipe[Path, Chunk[Element]] =
     readSlice(cfg) >>> elementsSlice(cfg)
-
-  def elementsFromPathUring(cfg: Cfg = Cfg()): Pipe[Path, Chunk[Element]] =
-    elementsFromPathMmap(cfg)
 
   /** Two-phase elements (decode timeline then classify) — parity / debug only. */
   def elementsStagedFromBytes(cfg: Cfg = Cfg()): Pipe[Array[Byte], Chunk[Element]] =

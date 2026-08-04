@@ -1,5 +1,5 @@
 /*
- * PdfIO entry-point benchmarks on the real `xref-stream.pdf` fixture.
+ * PdfEngine / PdfIO entry-point benchmarks on the real `xref-stream.pdf` fixture.
  *
  * Run from sbt:
  *
@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
 
 import zio.{Runtime, Unsafe}
-import zio.pdf.PdfStream
+import zio.pdf.{PdfEngine, PdfStream}
 import zio.pdf.io.PdfIO
 
 import scala.compiletime.uninitialized
@@ -41,7 +41,7 @@ class PdfIOBench {
   var enableDiagnostics: Boolean = uninitialized
 
   private var pdfPath: Path = uninitialized
-  private val runtime     = Runtime.default
+  private val runtime       = Runtime.default
 
   @Setup(Level.Trial)
   def setup(): Unit = {
@@ -69,7 +69,11 @@ class PdfIOBench {
   def decodeDecoded: Int =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe
-        .run(PdfIO.decodeDecoded(pdfPath, chunkSize, enableDiagnostics))
+        .run(
+          PdfEngine
+            .decode(pdfPath, PdfEngine.Options(enableDiagnostics = enableDiagnostics))
+            .provide(PdfEngine.live)
+        )
         .getOrThrow()
         .size
     }
@@ -95,7 +99,11 @@ class PdfIOBench {
   def validate: Boolean =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe
-        .run(PdfIO.validate(pdfPath, chunkSize, enableDiagnostics))
+        .run(
+          PdfEngine
+            .validate(pdfPath, PdfEngine.Options(enableDiagnostics = enableDiagnostics))
+            .provide(PdfEngine.live)
+        )
         .getOrThrow()
         .isSuccess
     }
