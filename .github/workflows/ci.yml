@@ -1,15 +1,23 @@
-# Continuous integration: compile and test on push and PRs.
+# Continuous integration — Gitea Actions (internal) + GitHub Actions compatible.
 name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
-    branches: ["**"]
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Required for Coursier on internal runners (see internal/quasar).
+  HOME: /root
 
 jobs:
   test:
-    name: Scala tests
+    name: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,19 +29,25 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # GitHub-hosted runners do not include `sbt` on PATH; coursier provides it.
-      - name: Setup coursier (sbt)
-        uses: coursier/setup-action@v1
-        with:
-          apps: sbt
-
       - name: Coursier cache
         uses: coursier/cache-action@v6
 
-      - name: Run tests
-        run: sbt -batch test
+      - name: Install sbt
+        run: |
+          export HOME="${HOME:-/root}"
+          if ! command -v sbt >/dev/null 2>&1; then
+            curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
+            chmod +x /usr/local/bin/cs
+            cs install sbt
+          fi
+          echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
 
-      # Keep bench subprojects compilable on every push so benchmark
-      # regressions are caught before the nightly run fires.
+      - name: Run tests
+        run: |
+          export HOME="${HOME:-/root}"
+          sbt -batch -Dsbt.supershell=false test
+
       - name: Compile bench subprojects
-        run: sbt -batch "bench/Jmh/compile" "benchFs2/Jmh/compile"
+        run: |
+          export HOME="${HOME:-/root}"
+          sbt -batch -Dsbt.supershell=false "bench/Jmh/compile" "benchFs2/Jmh/compile"
