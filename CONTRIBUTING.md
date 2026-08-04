@@ -1,15 +1,32 @@
 # Contributing to zio-pdf
 
-Canonical forge: [git.internal.net/internal/zio-pdf](https://git.internal.net/internal/zio-pdf)
+**internal repository** — [git.internal.net/internal/zio-pdf](https://git.internal.net/internal/zio-pdf).  
+No public mirror; artifacts publish only to internal Gitea Packages (`com.internal`).
+
+## Clone (SSH)
+
+Add to `~/.ssh/config`:
+
+```
+Host git.internal.net
+  HostName git.internal.net
+  User git
+  IdentityFile ~/.ssh/id_ed25519_internal
+  IdentitiesOnly yes
+```
+
+Then:
+
+```bash
+git clone git@git.internal.net:internal/zio-pdf.git
+cd zio-pdf
+```
+
+HTTPS also works: `git clone https://git.internal.net/internal/zio-pdf.git`
 
 ## Workflow
 
-1. Clone and branch from `main`:
-   ```bash
-   git clone https://git.internal.net/internal/zio-pdf.git
-   cd zio-pdf
-   git checkout -b feat/my-change
-   ```
+1. Branch from `main`: `git checkout -b feat/my-change`
 2. Make changes; keep public API on **`PdfEngine`** / **`PdfStream`** / **`PdfIO`**.
 3. Run locally:
    ```bash
@@ -38,6 +55,25 @@ fix: digestSink Chunk typing on ZIO 2.1.25
 docs: update pipeline-first README examples
 ```
 
-## Releases
+## Releases & Maven (internal)
 
-Maintainers tag on `main` (`v0.2.0-RC1`, …) and publish Gitea releases from `CHANGELOG.md`.
+Coordinates: **`com.internal` %% `zio-pdf`**.
+
+Publish locally (requires Gitea token in env):
+
+```bash
+export GIT_USER=acasellas
+export GIT_TOKEN=<gitea-token>
+sbt publish
+```
+
+Consume from another internal project:
+
+```scala
+resolvers += "internal Gitea Maven" at "https://git.internal.net/api/packages/internal/maven"
+libraryDependencies += "com.internal" %% "zio-pdf" % "0.2.0-RC1"
+```
+
+CI publishes automatically on `v*` tags. Add repo secret **`GIT_TOKEN`** (Gitea Actions → Secrets) with a token for `git.runner` or your user.
+
+Tag on `main` and create a Gitea release from `CHANGELOG.md`.
