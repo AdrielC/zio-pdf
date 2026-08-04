@@ -1,5 +1,5 @@
 /*
- * Minimal end-to-end: read a PDF, decode via PdfEngine vs PdfStream.
+ * Minimal end-to-end: read a PDF, decode via PdfEngine (fused + pipeline).
  *
  * Run from the repo root:
  *
@@ -22,25 +22,31 @@ object ReadAndDecode extends ZIOAppDefault {
 
   def run: ZIO[Any, Throwable, ExitCode] =
     for {
-      path      <- resolvePath
-      _         <- Console.printLine(s"Decoding: $path")
-      engineOut <- PdfEngine.decode(path).provide(PdfEngine.live)
-      zioOut    <- PdfIO.reader(path).via(PdfStream.decode()).runCollect
-      objs       = countObjs(engineOut)
-      metas      = engineOut.collect { case m: Decoded.Meta => m }.size
-      _         <- Console.printLine(
-                     s"engine: ${engineOut.size} events ($objs objects, $metas meta)"
-                   )
-      _         <- Console.printLine(
-                     s"zio:    ${zioOut.size} events (${countObjs(zioOut)} objects, " +
-                       s"${zioOut.collect { case m: Decoded.Meta => m }.size} meta)"
-                   )
-      _         <- ZIO.when(engineOut == zioOut)(
-                     Console.printLine("OK — PdfEngine and PdfStream decode paths agree")
-                   )
-      _         <- ZIO.unless(engineOut == zioOut)(
-                     Console.printLineError("FAIL — PdfEngine and PdfStream outputs differ")
-                   )
+      path       <- resolvePath
+      _          <- Console.printLine(s"Decoding: $path")
+      engineOut  <- PdfEngine.decode(path).provide(PdfEngine.live)
+      elements   <- PdfEngine.elements(path).provide(PdfEngine.live)
+      zioOut     <- PdfIO.reader(path).via(PdfStream.decode()).runCollect
+      objs        = countObjs(engineOut)
+      metas       = engineOut.collect { case m: Decoded.Meta => m }.size
+      _          <- Console.printLine(
+                      s"decode:   ${engineOut.size} events ($objs objects, $metas meta) [fused]"
+                    )
+      _          <- Console.printLine(
+                      s"elements: ${elements.size} classified [fused — PdfEngine.elements]"
+                    )
+      _          <- Console.printLine(
+                      s"pipeline: ${zioOut.size} events (${countObjs(zioOut)} objects) [PdfStream.decode]"
+                    )
+      _          <- ZIO.when(engineOut == zioOut)(
+                      Console.printLine("OK — fused decode matches pipeline decode")
+                    )
+      _          <- ZIO.unless(engineOut == zioOut)(
+                      Console.printLineError("FAIL — fused decode and pipeline differ")
+                    )
+      _          <- ZIO.when(elements.nonEmpty)(
+                      Console.printLine(s"sample element: ${elements.head.getClass.getSimpleName}")
+                    )
     } yield ExitCode.success
 
   private def countObjs(chunk: Chunk[Decoded]): Int =

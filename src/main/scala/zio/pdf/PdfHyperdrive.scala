@@ -168,6 +168,18 @@ private[pdf] object PdfHyperdrive {
   )(inline sink: Decoded => Unit): Long =
     decodeSyncSliceSink(bytes, 0, bytes.length, enableDiagnostics, config, batchSize)(sink)
 
+  /** Non-inline sink entry — JMH / reflective callers (body stays in [[FusedDecode]]). */
+  def decodeSyncSinkRuntime(
+    bytes: Array[Byte],
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  )(sink: Decoded => Unit): Long =
+    FusedDecode.decodeSliceSinkRuntime(
+      FusedDecode.Slice(bytes, 0, bytes.length),
+      cfg(enableDiagnostics, config, batchSize)
+    )(sink)
+
   inline def decodeSyncSliceSink(
     bytes: Array[Byte],
     offset: Int,

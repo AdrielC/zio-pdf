@@ -40,6 +40,13 @@ private[pdf] object FusedDecode {
     count
   }
 
+  /** Non-inline sink — safe for JMH forks (no call-site inline into `zio.pdf.pipe`). */
+  def decodeSliceSinkRuntime(slice: Slice, cfg: Cfg)(sink: Decoded => Unit): Long = {
+    var count = 0L
+    HyperFuse.fuseDecodedBuild(slice, cfg, d => { sink(d); count += 1 })
+    count
+  }
+
   def decodeBytes(
     bytes: Array[Byte],
     enableDiagnostics: Boolean = false,

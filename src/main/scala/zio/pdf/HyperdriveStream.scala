@@ -6,8 +6,7 @@
  * never sees a materialised timeline [[Chunk]] unless it explicitly
  * `runCollect`s the stream.
  *
- * Prefer [[PdfEngine.stream]] / [[PdfEngine.elements]]; for fire-and-forget
- * constant-memory sinks use [[PdfEngine.sink]] (no queue).
+ * Used by [[PdfEngine.elementsStream]]; callers should use the [[PdfEngine]] façade.
  */
 
 package zio.pdf

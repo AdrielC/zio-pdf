@@ -50,7 +50,13 @@ class PdfHyperdriveBench {
   /** Inline sink spine — count only, no timeline Chunk. */
   @Benchmark
   def hyperdriveDecodeSyncSink: Long =
-    PdfHyperdrive.decodeSyncSink(bytes)(_ => ())
+    PdfHyperdrive.decodeSyncSinkRuntime(bytes)(_ => ())
+
+  @Benchmark
+  def pdfEngineDecodeSink: Long =
+    Unsafe.unsafe { implicit u =>
+      runtime.unsafe.run(PdfEngine.sink(pdfPath)(_ => ()).provide(PdfEngine.live)).getOrThrow()
+    }
 
   @Benchmark
   def pdfEngineDecode: Int =

@@ -7,6 +7,7 @@ package zio.pdf
 import java.nio.file.Files
 
 import _root_.scodec.bits.BitVector
+import zio.pdf.io.PdfIO
 import zio.*
 import zio.stream.ZStream
 import zio.test.*
@@ -137,6 +138,16 @@ object PdfEngineSpec extends ZIOSpecDefault {
           for {
             pages <- PdfEngine.extractText(path).runCollect.provide(PdfEngine.live)
           } yield assertTrue(pages.exists(_.text.contains("hi")))
+        }
+      }
+    },
+    test("reader.via(decoded) matches fused path decode count") {
+      loadFixture("xref-stream.pdf").flatMap { bytes =>
+        withTempBytes(bytes) { path =>
+          for {
+            viaPipe <- PdfIO.reader(path).via(PdfEngine.decoded()).runCount.provide(PdfEngine.live)
+            fused   <- PdfEngine.decode(path).map(_.size.toLong).provide(PdfEngine.live)
+          } yield assertTrue(viaPipe == fused)
         }
       }
     },

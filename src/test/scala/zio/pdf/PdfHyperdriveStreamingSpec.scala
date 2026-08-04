@@ -36,15 +36,15 @@ object PdfHyperdriveStreamingSpec extends ZIOSpecDefault {
     test("PdfEngine.stream matches sink count without pre-collect") {
       withTempPdf("test-image.pdf") { path =>
         for {
-          streamed <- PdfEngine.stream(path, PdfEngine.Options(queueCapacity = 2)).runCount
-          sunk     <- PdfEngine.sink(path)(_ => ())
+          streamed <- PdfEngine.stream(path).runCount
+          sunk     <- PdfEngine.sink(path)(_ => ()).provide(PdfEngine.live)
         } yield assertTrue(streamed == sunk)
       }.provide(PdfEngine.live)
     },
-    test("PdfEngine.stream backpressures with queueCapacity=1") {
+    test("PdfEngine.stream take(1) matches decode head") {
       withTempPdf("test-image.pdf") { path =>
         for {
-          first <- PdfEngine.stream(path, PdfEngine.Options(queueCapacity = 1)).take(1).runCollect
+          first <- PdfEngine.stream(path).take(1).runCollect
           all   <- PdfEngine.decode(path)
           headOk = (first.head, all.head) match {
                      case (a: Decoded.ContentObj, b: Decoded.ContentObj) =>
