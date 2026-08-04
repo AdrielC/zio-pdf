@@ -14,7 +14,7 @@ import zio.Chunk
 import zio.pdf.{Decoded, DecodedFromStreaming, Element, Elements, StreamingDecode, StreamingDecoded}
 import zio.pdf.pipe.FusedDecode.{Cfg, Slice}
 
-object HyperFuse {
+private[pdf] object HyperFuse {
 
   /** Decode machine + incremental SHA-256 over the same windows. */
   private final case class Digested[S](machine: S, md: MessageDigest)

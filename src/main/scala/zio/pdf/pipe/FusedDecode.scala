@@ -11,7 +11,7 @@ package zio.pdf.pipe
 import zio.Chunk
 import zio.pdf.{Decoded, StreamingDecode, StreamingDecoded}
 
-object FusedDecode {
+private[pdf] object FusedDecode {
 
   final case class Slice(bytes: Array[Byte], offset: Int, length: Int)
 

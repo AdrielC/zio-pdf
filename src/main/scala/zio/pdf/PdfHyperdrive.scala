@@ -3,13 +3,7 @@
  *
  * Hot paths delegate to [[zio.pdf.pipe.FusedDecode]] (fused streaming +
  * expansion) and [[zio.pdf.pipe.DecodePipeline]] (composed I/O morphisms).
- * Use for in-memory PDFs and as the auto-fast path from
- * [[zio.pdf.io.PdfIO]] when the file fits in RAM.
- *
- * {{{
- *   val decoded = PdfHyperdrive.decodeFromPath(path)
- *   PdfIO.warpMapped(path)
- * }}}
+ * Callers should prefer [[PdfEngine]]; this object stays package-private.
  */
 
 package zio.pdf
@@ -22,10 +16,7 @@ import zio.pdf.pipe.DecodePipeline
 import zio.pdf.pipe.FusedDecode
 import zio.pdf.pipe.FusedDecode.Cfg
 
-object PdfHyperdrive {
-
-  /** Auto-route files at or below this size through hyperdrive. */
-  val defaultAutoThresholdBytes: Long = 32L * 1024 * 1024
+private[pdf] object PdfHyperdrive {
 
   private def cfg(
     enableDiagnostics: Boolean,
@@ -142,7 +133,7 @@ object PdfHyperdrive {
 
   /**
    * File decode with no `ZIO` — mmap, fused decode, close.
-   * Hot path for [[zio.pdf.io.PdfIO.warp]] and explicit sync callers.
+   * Hot path for [[PdfEngine]] Live.
    */
   def decodeFromPath(
     path: Path,
@@ -196,22 +187,6 @@ object PdfHyperdrive {
   ): Chunk[Decoded] =
     DecodePipeline.fromPathMmap(cfg(enableDiagnostics, config, batchSize)).run(path)
 
-  def decodeFromPathUring(
-    path: Path,
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Decoded] =
-    decodeFromPathUringRegistered(path, enableDiagnostics, config, batchSize)
-
-  def decodeFromPathUringRegistered(
-    path: Path,
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Decoded] =
-    DecodePipeline.fromPathUring(cfg(enableDiagnostics, config, batchSize)).run(path)
-
   /** File elements — mmap read, triple-fused classify. */
   def elementsFromPath(
     path: Path,
@@ -233,7 +208,7 @@ object PdfHyperdrive {
   )(sink: Element => Unit): Long =
     DecodePipeline.elementsFromPathSink(cfg(enableDiagnostics, config, batchSize))(path, sink)
 
-  /** Decode + SHA-256 in one fused scan (mmap auto-route). */
+  /** Decode + SHA-256 in one fused scan (mmap). */
   def decodeAndDigestFromPath(
     path: Path,
     enableDiagnostics: Boolean = false,
@@ -315,42 +290,4 @@ object PdfHyperdrive {
       FusedDecode.Slice(bytes, 0, bytes.length),
       cfg(enableDiagnostics, config, batchSize)
     )(sink)
-
-  /** In-memory full sicko: hyperdrive decode (alias for [[decodeSync]]). */
-  def sicko(
-    bytes: Array[Byte],
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Decoded] =
-    decodeSync(bytes, enableDiagnostics, config, batchSize)
-
-  /** mmap sicko — zero heap copy when the mapping is array-backed. */
-  def sickoMapped(
-    mapped: MappedByteBuffer,
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Decoded] =
-    decodeSyncMapped(mapped, enableDiagnostics, config, batchSize)
-
-  /** Decode + classify in one synchronous pass (alias for [[elementsFusedSync]]). */
-  def sickoElements(
-    bytes: Array[Byte],
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Element] =
-    elementsFusedSync(bytes, enableDiagnostics, config, batchSize)
-
-  def sickoElementsMapped(
-    mapped: MappedByteBuffer,
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Element] =
-    elementsSyncMapped(mapped, enableDiagnostics, config, batchSize)
-
-  def fitsInHyperdrive(fileSizeBytes: Long, thresholdBytes: Long = defaultAutoThresholdBytes): Boolean =
-    fileSizeBytes >= 0 && fileSizeBytes <= thresholdBytes
 }

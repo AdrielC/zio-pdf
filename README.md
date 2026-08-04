@@ -10,6 +10,7 @@
 
 ```bash
 sbt examples/run                              # decode xref-stream.pdf end-to-end
+sbt "testOnly zio.pdf.PdfEngineSpec"          # PdfEngine façade
 sbt "testOnly zio.pdf.PdfHyperdriveSpec"      # sync hyperdrive vs stream parity
 sbt test                                      # full suite
 sbt "bench/Jmh/run -i 5 -wi 3 .*StreamDecoderBench.*"
@@ -20,7 +21,7 @@ sbt "benchFs2/Jmh/run -i 5 -wi 3 .*HeadToHeadBench.*"
 
 | Path | What it is |
 |------|------------|
-| `zio.pdf` (`PdfStream`, `PdfIO`, `PdfHyperdrive`) | **Product** — read/decode/validate/compare PDFs |
+| `zio.pdf` (`PdfEngine`, `PdfStream`, `PdfIO`) | **Product** — path decode via `PdfEngine`; byte pipes via `PdfStream`; file I/O via `PdfIO` (Hyperdrive is internal) |
 | `zio.scodec.stream` | **Codec engine** — `StreamDecoder`, `PureDecoder`, `ZChannel` |
 | `zio.scan` | **Hot byte scan** — `InlineByteScan` (compile-time fuse), `BytePipeline`, `BlocksPureByteScan` |
 | `scan-kyo/` (`zio.pdf.scan`) | **Scan algebra** (Kyo) — CDC, fanout, fusion experiments; not in root artifact |
@@ -431,7 +432,7 @@ Honest reading:
 
 - **For high-throughput byte-aligned decoding** (one element type, many elements): ZIO's chunked fast path beats fs2 by **~1300×**. `PureDecoder.manyChunked + StreamDecoder.fromPureChunked` batches the entire upstream chunk into one inlined `while` loop; fs2's `scodec-stream` `Decode` step is per-element.
 - **For the ZIO `StreamDecoder.many` path vs fs2's Pull path** on the same per-element decoder: ZIO is **~470× faster** on a tight `uint8` loop (ZIO routes through `runStrict`, not per-element `ZChannel`).
-- **For real PDF parsing** use the byte-stream pipes (`TopLevel.pipe`, `PdfStream.topLevel`) or **`TopLevel.decodeAll` / `PdfIO.decodeTopLevelStrict`** when the file fits in memory. Zero-copy `ChunkBytes` + 10 MiB rechunk beats fs2 on the head-to-head fixture; strict in-memory decode is **~45% faster** than fs2 Pull.
+- **For real PDF parsing** use **`PdfEngine.decode(path)`** for files, or the byte-stream pipes (`TopLevel.pipe`, `PdfStream.topLevel` / `PdfStream.decode`) when you already have a `ZStream[Byte]`. Zero-copy `ChunkBytes` + 10 MiB rechunk beats fs2 on the head-to-head fixture; strict in-memory decode is **~45% faster** than fs2 Pull.
 
 So if your workload is "stream a giant binary log of fixed-width records" the chunked fast path is a transformative win. If your workload is "parse PDF structure", use `TopLevel.pipe` / `PdfStream.decode()` — not manual micro-chunk BitVector conversion.
 
@@ -449,7 +450,7 @@ Hot path: `InlineByteScan.map(_ + 1).map(_ ^ 0x55).run(bytes)` — stages beta-r
 
 The Kyo `Scan` algebra (`scan-kyo/` subproject) remains for CDC/fanout experiments; it is **not** on the hot path for PDF or bulk uint8 decode.
 
-### `PdfIO` — full decode on `xref-stream.pdf`
+### `PdfEngine` / `PdfIO` — full decode on `xref-stream.pdf`
 
 ```
 Benchmark                 (chunkSize)  (enableDiagnostics)  Mode  Cnt  Score   Error  Units
@@ -459,22 +460,20 @@ PdfIOBench.decodeCount          65536                false  avgt    5  0.351 ± 
 PdfIOBench.validate             65536                false  avgt    5  0.437 ± 0.706  ms/op
 ```
 
-`PdfIO.decodeDecoded` (read + `PdfStream.decode` + collect) is ~0.31 ms on the warmed page-cache fixture. Decode dominates; raw `readAll` is ~0.09 ms.
+`PdfEngine.decode` (fused mmap Hyperdrive) is the unified decode entry point — ~0.31 ms on the warmed page-cache fixture. Decode dominates; raw `PdfIO.readAll` is ~0.09 ms.
 
-### `PdfHyperdrive` — synchronous full decode (no `ZStream`)
+### `PdfEngine` — unified decode entry point
 
-When the PDF fits in RAM, skip the streaming interpreter entirely:
+Prefer the ZIO service façade for path decode / stream / validate:
 
 ```scala
-import zio.pdf.PdfHyperdrive
-import zio.pdf.io.PdfIO
+import zio.pdf.PdfEngine
 
-val decoded = PdfHyperdrive.decodeSync(bytes)
-// or
-PdfIO.warp(path)   // read + hyperdrive
+PdfEngine.decode(path).provide(PdfEngine.live)
+PdfEngine.stream(path).provide(PdfEngine.live)
 ```
 
-`PdfIO.decodeDecoded` auto-routes files ≤ 32 MiB through Hyperdrive. Same semantics as `PdfStream.decode()`, one sync pass over the state machine + expansion bridge.
+`PdfEngine.live` always uses the fused Hyperdrive path (mmap → HyperFuse). Same semantics as `PdfStream.decode()`, one sync pass over the state machine + expansion bridge. `PdfIO` is narrowed to file byte I/O (`reader` / `writer` / `readAll` / `writeAll`).
 
 ```
 Benchmark                                Mode  Cnt   Score    Error  Units
@@ -776,35 +775,34 @@ This is what an "embedded-file deduplication" workflow looks like: the encoder s
 
 `zio-blocks-scope` provides `Resource[A]` + `Scope` + the `$` macro for **compile-time** prevention of resource-escape bugs. The `$[A]` path-dependent type literally cannot leave a `scoped { … }` block — forgetting to close a file is a *type error*, not a runtime bug. This is genuinely interesting and worth wiring into the PDF library.
 
-It does **not** "erase ZIO". The streaming substrate (`ZStream` / `ZPipeline` / `ZChannel`) is not replaced by `Resource`; only the **file-handle ownership boundary** moves. The two APIs sit side-by-side in `zio.pdf.io.PdfIO`:
+It does **not** "erase ZIO". The streaming substrate (`ZStream` / `ZPipeline` / `ZChannel`) is not replaced by `Resource`; only the **file-handle ownership boundary** moves. `PdfIO` exposes ZIO-shaped file I/O; decode goes through `PdfEngine`:
 
 ```scala
+import zio.pdf.PdfEngine
 import zio.pdf.io.PdfIO
 import java.nio.file.Path
 
-// A) Scope-based: synchronous, compile-time leak prevention
-val bytes: Chunk[Byte] = PdfIO.scoped.readAll(Path.of("doc.pdf"))
-PdfIO.scoped.writeAll(Path.of("out.pdf"), bytes)
+// ZIO-shaped file I/O
+PdfIO.readAll(Path.of("doc.pdf")).flatMap(bytes => PdfIO.writeAll(Path.of("out.pdf"), bytes))
 
-// B) ZIO-based: streaming, ZIO-shaped lifetime
-val stream: ZStream[Any, Throwable, Byte] = PdfIO.zio.reader(Path.of("big.pdf"))
-val sink:   ZSink[Any, Throwable, Byte, Byte, Long] = PdfIO.zio.writer(Path.of("out.pdf"))
+val stream: ZStream[Any, Throwable, Byte] = PdfIO.reader(Path.of("big.pdf"))
+val sink:   ZSink[Any, Throwable, Byte, Byte, Long] = PdfIO.writer(Path.of("out.pdf"))
 
+PdfEngine.decode(Path.of("doc.pdf")).provide(PdfEngine.live)
 stream.via(PdfStream.decode()).runDrain      // file handle closed by ZStream's scope
 ```
 
 When to use which:
 
-- **`PdfIO.scoped.{readAll, writeAll}`** — small/medium PDFs where you want the strongest possible "did I forget to close this?" guarantee. The `$` macro forbids the file handle from escaping the scoped block, so the InputStream/OutputStream is forced to be consumed inline. Returns pure data (`Chunk[Byte]`, `Long`); side effect is the file I/O.
-- **`PdfIO.zio.{reader, writer}`** — large files, async workflows, and anything that wants `ZStream` composition past the function boundary. Standard `ZIO.scoped` lifetime; the stream value flows freely through ZIO-shaped code.
+- **`PdfIO.{readAll, writeAll}`** — small/medium PDFs as `Chunk[Byte]`.
+- **`PdfIO.{reader, writer}`** — large files, async workflows, and anything that wants `ZStream` composition past the function boundary. Standard `ZIO.scoped` lifetime; the stream value flows freely through ZIO-shaped code.
+- **`PdfEngine`** — path decode, stream, validate, digest, policy, text extract.
 
-`PdfIOSpec` proves both work:
+`PdfIOSpec` proves the I/O surface:
 
-- Round-trip via either API
-- **Resource finalizer runs even when the scoped block throws** (counter test: the close-counter increments to 1 even though `RuntimeException("boom")` propagates out of `Scope.global.scoped`)
-- `Resource.flatMap` composes two file handles, finalized in LIFO order
-- `PdfIO.zio.reader` streams a 1 MiB file without materialising it
-- A real PDF round-trips end-to-end: `PdfIO.zio.reader → PdfStream.decode → Decoded.{DataObj, ContentObj, Meta}`
+- Round-trip via `readAll` / `writeAll`
+- `PdfIO.reader` streams a 1 MiB file without materialising it
+- A real PDF round-trips end-to-end via `PdfEngine.decode`
 
 ### Why both APIs
 
@@ -821,7 +819,7 @@ For this codebase, no. `ZStream` / `ZPipeline` / `ZChannel` *is* the streaming s
 
 - `ZPureLog.drainToZio` (`ZIO.log`) — could move to a synchronous `Logger` trait wrapped in `Resource`.
 - `StatefulPipe.applyEffect`'s `onDone` hook — same, but it's optional.
-- `PdfIO.zio.{reader, writer}` — could move to `Scope` if every consumer agreed to call `scoped { ... }` synchronously, but that defeats the streaming use case.
+- `PdfIO.{reader, writer}` — could move to `Scope` if every consumer agreed to call `scoped { ... }` synchronously, but that defeats the streaming use case.
 
 So `zio-blocks-scope` is a **complementary** primitive, not a replacement. We use it where it fits (synchronous file I/O with the strongest possible compile-time guarantees) and stay on `ZIO` for the streaming and async sites where `Scope`'s constraints would be too strict.
 
