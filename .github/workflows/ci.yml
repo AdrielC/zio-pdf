@@ -1,4 +1,4 @@
-# Continuous integration — Gitea Actions (Tybera) + GitHub Actions compatible.
+# Continuous integration on GitHub Actions.
 name: CI
 
 on:
@@ -33,10 +33,6 @@ jobs:
 
       - name: Install sbt
         run: |
-          # Tybera Gitea runners need HOME=/root; GitHub Actions must not override HOME.
-          if [[ "${{ github.server_url }}" != "https://github.com" ]]; then
-            export HOME=/root
-          fi
           if ! command -v sbt >/dev/null 2>&1; then
             curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
             chmod +x /usr/local/bin/cs

@@ -22,15 +22,28 @@ import zio.stream.{ZChannel, ZPipeline}
 
 object StreamingDecode {
 
+  private val MaxInputWindowBytes = 64 * 1024
+
   /** @param inlineMaxBytes
     *   Raw stream payloads of this size or smaller are materialised
     *   once on `ContentObjStart.inlinePayload`; larger streams chunk.
     */
-  final case class Config(inlineMaxBytes: Long)
+  final case class Config(
+    inlineMaxBytes: Long,
+    emitObjectEnds: Boolean = false,
+    maxCarryBytes: Option[Int] = None,
+    emitContentEvents: Boolean = true
+  ) {
+    require(inlineMaxBytes >= 0L, "inlineMaxBytes must be non-negative")
+    require(maxCarryBytes.forall(_ > 0), "maxCarryBytes must be positive when defined")
+  }
 
   object Config {
     val default: Config = Config(inlineMaxBytes = 256 * 1024L)
   }
+
+  final case class CarryLimitExceeded(maxBytes: Int, observedBytes: Long)
+      extends RuntimeException(s"PDF parser carry exceeded configured limit of $maxBytes bytes (observed $observedBytes)")
 
   private type HeaderEvent = PdfByteLexer.HeaderEvent
   import PdfByteLexer.HeaderEvent
@@ -39,7 +52,7 @@ object StreamingDecode {
 
   private[pdf] sealed trait State
   private[pdf] final case class WaitingHeader(carry: BitVector) extends State
-  private[pdf] final case class ForwardingBytes(remaining: Long, carry: BitVector) extends State
+  private[pdf] final case class ForwardingBytes(index: Obj.Index, remaining: Long, carry: BitVector) extends State
   private[pdf] final case class BufferingBytes(
     obj: Obj,
     bytesTotal: Int,
@@ -47,8 +60,8 @@ object StreamingDecode {
     carry: BitVector,
     acc: Array[Byte]
   ) extends State
-  private[pdf] final case class SkippingStreamPayload(remaining: Long, carry: BitVector) extends State
-  private[pdf] final case class ConsumingTrailer(carry: BitVector) extends State
+  private[pdf] final case class SkippingStreamPayload(index: Obj.Index, remaining: Long, carry: BitVector) extends State
+  private[pdf] final case class ConsumingTrailer(index: Obj.Index, carry: BitVector) extends State
 
   private def headerToEvent(
     cfg: Config,
@@ -73,16 +86,19 @@ object StreamingDecode {
       if (suppress)
         streamLen match {
           case None =>
-            (Chunk.empty, ConsumingTrailerNoStream(remainingBits))
+            (Chunk.empty, ConsumingTrailerNoStream(obj.index, remainingBits))
           case Some(length) =>
-            (Chunk.empty, SkippingStreamPayload(length, remainingBits))
+            (Chunk.empty, SkippingStreamPayload(obj.index, length, remainingBits))
         }
       else
         streamLen match {
           case None =>
-            (Chunk.single(StreamingDecoded.DataObj(obj)), ConsumingTrailerNoStream(remainingBits))
+            (Chunk.single(StreamingDecoded.DataObj(obj)), ConsumingTrailerNoStream(obj.index, remainingBits))
           case Some(length) =>
-            if (length <= cfg.inlineMaxBytes && length <= Int.MaxValue && length > 0L)
+            if !cfg.emitContentEvents then
+              if length == 0L then (Chunk.empty, ConsumingTrailer(obj.index, remainingBits))
+              else (Chunk.empty, ForwardingBytes(obj.index, length, remainingBits))
+            else if (length <= cfg.inlineMaxBytes && length <= Int.MaxValue && length > 0L)
               (
                 Chunk.empty,
                 BufferingBytes(
@@ -96,17 +112,17 @@ object StreamingDecode {
             else if (length == 0L)
               (
                 Chunk.single(StreamingDecoded.ContentObjStart(obj, 0L, Some(BitVector.empty))),
-                ConsumingTrailer(remainingBits)
+                ConsumingTrailer(obj.index, remainingBits)
               )
             else
               (
                 Chunk.single(StreamingDecoded.ContentObjStart(obj, length, None)),
-                ForwardingBytes(length, remainingBits)
+                ForwardingBytes(obj.index, length, remainingBits)
               )
         }
   }
 
-  private[pdf] final case class ConsumingTrailerNoStream(carry: BitVector) extends State
+  private[pdf] final case class ConsumingTrailerNoStream(index: Obj.Index, carry: BitVector) extends State
 
   private val endobjTrailer: _root_.scodec.Codec[Unit] = IndirectObj.endobj
 
@@ -114,7 +130,7 @@ object StreamingDecode {
     state: State,
     carry: BitVector
   ): Either[BitVector, Either[Throwable, BitVector]] = state match {
-    case ConsumingTrailer(_) =>
+    case ConsumingTrailer(_, _) =>
       streamTrailer.decode(carry) match {
         case Attempt.Successful(DecodeResult(_, rest))      => Right(Right(rest))
         case Attempt.Failure(_: Err.InsufficientBits)        => Left(carry)
@@ -123,7 +139,7 @@ object StreamingDecode {
         case Attempt.Failure(other) =>
           Right(Left(new RuntimeException(s"stream trailer: ${other.messageWithContext}")))
       }
-    case ConsumingTrailerNoStream(_) =>
+    case ConsumingTrailerNoStream(_, _) =>
       endobjTrailer.decode(carry) match {
         case Attempt.Successful(DecodeResult(_, rest))      => Right(Right(rest))
         case Attempt.Failure(_: Err.InsufficientBits)        => Left(carry)
@@ -139,26 +155,32 @@ object StreamingDecode {
     cfg: Config,
     state: State,
     dup: DuplicateFilterState.Mutable,
+    bytesSeen: Long,
     in: Chunk[StreamingDecoded] = Chunk.empty
   ): (Chunk[StreamingDecoded], State) = state match {
 
-    case fb @ ForwardingBytes(remaining, carry) =>
+    case fb @ ForwardingBytes(index, remaining, carry) =>
       if (remaining == 0L)
-        stepAll(cfg, ConsumingTrailer(carry), dup, in :+ StreamingDecoded.ContentObjEnd)
+        val nextEvents = if cfg.emitContentEvents then in :+ StreamingDecoded.ContentObjEnd else in
+        stepAll(cfg, ConsumingTrailer(index, carry), dup, bytesSeen, nextEvents)
       else if (carry.isEmpty)
         (in, fb)
       else {
         val carryBytes = carry.bytes
         val take       = math.min(remaining, carryBytes.size).toInt
-        val emitArr    = new Array[Byte](take)
-        carryBytes.copyToArray(emitArr, 0, 0L, take)
-        val emit       = Chunk.fromArray(emitArr)
         val rest       = carry.drop(take.toLong * 8)
+        val nextEvents =
+          if cfg.emitContentEvents then
+            val emitArr = new Array[Byte](take)
+            carryBytes.copyToArray(emitArr, 0, 0L, take)
+            in :+ StreamingDecoded.ContentObjBytes(Chunk.fromArray(emitArr))
+          else in
         stepAll(
           cfg,
-          ForwardingBytes(remaining - take.toLong, rest),
+          ForwardingBytes(index, remaining - take.toLong, rest),
           dup,
-          in :+ StreamingDecoded.ContentObjBytes(emit)
+          bytesSeen,
+          nextEvents
         )
       }
 
@@ -166,7 +188,7 @@ object StreamingDecode {
       if (filled == bytesTotal) {
         val ev =
           StreamingDecoded.ContentObjStart(obj, bytesTotal.toLong, Some(BitVector(acc)))
-        stepAll(cfg, ConsumingTrailer(carry), dup, in :+ ev)
+        stepAll(cfg, ConsumingTrailer(obj.index, carry), dup, bytesSeen, in :+ ev)
       }
       else if (carry.isEmpty)
         (in, buf)
@@ -180,33 +202,39 @@ object StreamingDecode {
           i += 1
         }
         val rest = carry.drop(take.toLong * 8)
-        stepAll(cfg, BufferingBytes(obj, bytesTotal, filled + take, rest, acc), dup, in)
+        stepAll(cfg, BufferingBytes(obj, bytesTotal, filled + take, rest, acc), dup, bytesSeen, in)
       }
 
-    case sb @ SkippingStreamPayload(remaining, carry) =>
+    case sb @ SkippingStreamPayload(index, remaining, carry) =>
       if (remaining == 0L)
-        stepAll(cfg, ConsumingTrailer(carry), dup, in)
+        stepAll(cfg, ConsumingTrailer(index, carry), dup, bytesSeen, in)
       else if (carry.isEmpty)
         (in, sb)
       else {
         val carryBytes = carry.bytes
         val take       = math.min(remaining, carryBytes.size).toInt
         val rest       = carry.drop(take.toLong * 8)
-        stepAll(cfg, SkippingStreamPayload(remaining - take.toLong, rest), dup, in)
+        stepAll(cfg, SkippingStreamPayload(index, remaining - take.toLong, rest), dup, bytesSeen, in)
       }
 
     case ct: (ConsumingTrailer | ConsumingTrailerNoStream) =>
-      val carry = ct match {
-        case ConsumingTrailer(c)         => c
-        case ConsumingTrailerNoStream(c) => c
+      val (index, carry) = ct match {
+        case ConsumingTrailer(i, c)         => (i, c)
+        case ConsumingTrailerNoStream(i, c) => (i, c)
       }
       tryConsumeTrailer(ct, carry) match {
         case Left(needMore) =>
           (in, ct match {
-            case _: ConsumingTrailer         => ConsumingTrailer(needMore)
-            case _: ConsumingTrailerNoStream => ConsumingTrailerNoStream(needMore)
+            case _: ConsumingTrailer         => ConsumingTrailer(index, needMore)
+            case _: ConsumingTrailerNoStream => ConsumingTrailerNoStream(index, needMore)
           })
-        case Right(Right(rest)) => stepAll(cfg, WaitingHeader(rest), dup, in)
+        case Right(Right(rest)) =>
+          val withBoundary =
+            if cfg.emitObjectEnds then
+              val nextByteOffset = Math.subtractExact(bytesSeen, rest.bytes.size)
+              in :+ StreamingDecoded.ObjectEnd(index, nextByteOffset)
+            else in
+          stepAll(cfg, WaitingHeader(rest), dup, bytesSeen, withBoundary)
         case Right(Left(err))   => throw err
       }
 
@@ -217,22 +245,9 @@ object StreamingDecode {
         case PdfByteLexer.LexResult.Ok(event, rest) =>
           val restBits = if (rest.isEmpty) BitVector.empty else rest.bits
           val (events, next) = headerToEvent(cfg, event, restBits, dup)
-          stepAll(cfg, next, dup, in ++ events)
+          stepAll(cfg, next, dup, bytesSeen, in ++ events)
       }
   }
-
-  private def feed(
-    cfg: Config,
-    state: State,
-    dup: DuplicateFilterState.Mutable,
-    chunk: Chunk[Byte]
-  ): (Chunk[StreamingDecoded], State) =
-    chunk.materialize match {
-      case Chunk.ByteArray(arr, off, len) =>
-        feedBytes(cfg, state, dup, arr, off, len)
-      case _ =>
-        feedBytes(cfg, state, dup, chunk.toArray, 0, chunk.size)
-    }
 
   private def feedBytes(
     cfg: Config,
@@ -240,7 +255,8 @@ object StreamingDecode {
     dup: DuplicateFilterState.Mutable,
     buf: Array[Byte],
     offset: Int,
-    length: Int
+    length: Int,
+    bytesSeen: Long
   ): (Chunk[StreamingDecoded], State) = {
     val incoming =
       if (offset == 0 && length == buf.length) BitVector.view(buf)
@@ -249,22 +265,64 @@ object StreamingDecode {
       if (c.isEmpty) incoming else c ++ incoming
     val newCarry = state match {
       case WaitingHeader(c)              => appendCarry(c)
-      case ForwardingBytes(r, c)         => appendCarry(c)
+      case ForwardingBytes(_, _, c)      => appendCarry(c)
       case BufferingBytes(_, _, _, c, _) => appendCarry(c)
-      case SkippingStreamPayload(r, c)   => appendCarry(c)
-      case ConsumingTrailer(c)           => appendCarry(c)
-      case ConsumingTrailerNoStream(c)   => appendCarry(c)
+      case SkippingStreamPayload(_, _, c) => appendCarry(c)
+      case ConsumingTrailer(_, c)         => appendCarry(c)
+      case ConsumingTrailerNoStream(_, c) => appendCarry(c)
     }
     val withCarry: State = state match {
       case WaitingHeader(c)            => WaitingHeader(newCarry)
-      case ForwardingBytes(r, _)       => ForwardingBytes(r, newCarry)
+      case ForwardingBytes(i, r, _)    => ForwardingBytes(i, r, newCarry)
       case BufferingBytes(o, t, f, _, a) => BufferingBytes(o, t, f, newCarry, a)
-      case SkippingStreamPayload(r, _) => SkippingStreamPayload(r, newCarry)
-      case _: ConsumingTrailer         => ConsumingTrailer(newCarry)
-      case _: ConsumingTrailerNoStream => ConsumingTrailerNoStream(newCarry)
+      case SkippingStreamPayload(i, r, _) => SkippingStreamPayload(i, r, newCarry)
+      case ConsumingTrailer(i, _)         => ConsumingTrailer(i, newCarry)
+      case ConsumingTrailerNoStream(i, _) => ConsumingTrailerNoStream(i, newCarry)
     }
-    try stepAll(cfg, withCarry, dup)
+    try {
+      val result = stepAll(cfg, withCarry, dup, bytesSeen)
+      cfg.maxCarryBytes.foreach { max =>
+        val carryBytes = stateCarry(result._2).bytes.size
+        if carryBytes > max.toLong then throw CarryLimitExceeded(max, carryBytes)
+      }
+      val retainedState =
+        if cfg.maxCarryBytes.isDefined then compactStateCarry(result._2)
+        else result._2
+      (result._1, retainedState)
+    }
     catch { case _: NoSuchElementException => sys.error("unreachable") }
+  }
+
+  private def stateCarry(state: State): BitVector = state match {
+    case WaitingHeader(carry)                       => carry
+    case ForwardingBytes(_, _, carry)               => carry
+    case BufferingBytes(_, _, _, carry, _)          => carry
+    case SkippingStreamPayload(_, _, carry)         => carry
+    case ConsumingTrailer(_, carry)                 => carry
+    case ConsumingTrailerNoStream(_, carry)         => carry
+  }
+
+  private def compactStateCarry(state: State): State = {
+    val carry = stateCarry(state)
+    if (carry.isEmpty) state
+    else {
+      val bytes = carry.bytes
+      val owned = new Array[Byte](bytes.size.toInt)
+      var index = 0
+      while (index < owned.length) {
+        owned(index) = bytes(index.toLong)
+        index += 1
+      }
+      val compact = BitVector.view(owned)
+      state match {
+        case WaitingHeader(_)                         => WaitingHeader(compact)
+        case ForwardingBytes(index, remaining, _)    => ForwardingBytes(index, remaining, compact)
+        case BufferingBytes(obj, total, filled, _, a) => BufferingBytes(obj, total, filled, compact, a)
+        case SkippingStreamPayload(index, remaining, _) => SkippingStreamPayload(index, remaining, compact)
+        case ConsumingTrailer(index, _)               => ConsumingTrailer(index, compact)
+        case ConsumingTrailerNoStream(index, _)       => ConsumingTrailerNoStream(index, compact)
+      }
+    }
   }
 
   /** Mutable parse state + xref/version accumulators (used by [[pipeline]] and sync drivers). */
@@ -272,14 +330,19 @@ object StreamingDecode {
     state: State,
     dupFilter: DuplicateFilterState.Mutable,
     xrefs: List[Xref],
-    version: Option[Version]
+    version: Option[Version],
+    bytesSeen: Long
   )
 
   private def initial: FinalState =
-    FinalState(WaitingHeader(BitVector.empty), DuplicateFilterState.initial, Nil, None)
+    FinalState(WaitingHeader(BitVector.empty), DuplicateFilterState.initial, Nil, None, 0L)
 
   /** Starting state for a decode run (fresh duplicate filter, empty carry). */
   def initialFinalState: FinalState = initial
+
+  /** Bytes currently retained for incomplete structural parsing. */
+  private[pdf] def structuralCarryBytes(fs: FinalState): Long =
+    stateCarry(fs.state).bytes.size
 
   /**
    * Synchronous byte step: feed one chunk through the streaming state machine
@@ -294,7 +357,23 @@ object StreamingDecode {
       case Chunk.ByteArray(arr, off, len) =>
         stepChunkBytes(config, fs, arr, off, len)
       case _ =>
-        stepChunkBytes(config, fs, chunk.toArray, 0, chunk.size)
+        var parser   = fs
+        var offset   = 0
+        val emitted  = Chunk.newBuilder[StreamingDecoded]
+        while (offset < chunk.length) {
+          val length = math.min(MaxInputWindowBytes, chunk.length - offset)
+          val window = new Array[Byte](length)
+          var index  = 0
+          while (index < length) {
+            window(index) = chunk(offset + index)
+            index += 1
+          }
+          val (events, next) = stepChunkBytes(config, parser, window, 0, length)
+          emitted ++= events
+          parser = next
+          offset += length
+        }
+        (emitted.result(), parser)
     }
 
   /** Zero-copy slice when the caller already owns a read buffer. */
@@ -305,8 +384,9 @@ object StreamingDecode {
     offset: Int,
     length: Int
   ): (Chunk[StreamingDecoded], FinalState) = {
-    val (out, nextState) = feedBytes(config, fs.state, fs.dupFilter, buf, offset, length)
-    val updatedBase      = fs.copy(state = nextState)
+    val nextBytesSeen    = Math.addExact(fs.bytesSeen, length.toLong)
+    val (out, nextState) = feedBytes(config, fs.state, fs.dupFilter, buf, offset, length, nextBytesSeen)
+    val updatedBase      = fs.copy(state = nextState, bytesSeen = nextBytesSeen)
     val updated          = out.foldLeft(updatedBase)(updateAccumulators)
     (out, updated)
   }

@@ -11,6 +11,8 @@ package zio.pdf
 import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
 import _root_.scodec.bits.ByteVector
 
+import java.nio.charset.StandardCharsets
+
 private[pdf] object PdfByteLexer {
 
   sealed trait HeaderEvent
@@ -34,7 +36,6 @@ private[pdf] object PdfByteLexer {
       Version.codec.map(HeaderEvent.V(_)),
       summon[_root_.scodec.Codec[Xref]].map(HeaderEvent.X(_)),
       StartXref.codec.map(HeaderEvent.S(_)),
-      IndirectObj.headerOnly.map(HeaderEvent.H(_)),
       (Comment.start ~> Comment.line).map(HeaderEvent.C(_)),
       Decoder { bits =>
         if (bits.size < 8L) Attempt.failure(Err.InsufficientBits(8L, bits.size, Nil))
@@ -93,6 +94,44 @@ private[pdf] object PdfByteLexer {
       None
 
   private val pdfMagic: ByteVector = ByteVector.view("%PDF-".getBytes)
+  private val streamKeyword: ByteVector = ByteVector.view("stream".getBytes(StandardCharsets.US_ASCII))
+
+  /** Decode through the object dictionary, then recognise a stream marker
+    * directly. The following line ending must be LF or CRLF, and a CR split
+    * across input chunks remains in carry until it can be disambiguated.
+    */
+  private def tryIndirectObject(bytes: ByteVector): Option[LexResult] =
+    if (bytes.isEmpty || !isDigit(bytes(0))) None
+    else
+      IndirectObj.preStream.decode(bytes.bits) match
+        case Attempt.Successful(DecodeResult(obj, remainder)) =>
+          val rest   = remainder.bytes
+          val offset = skipWs(rest, 0)
+          val tail   = rest.drop(offset)
+          if (tail.startsWith(streamKeyword)) then
+            val afterKeyword = streamKeyword.size.toInt
+            val newline =
+              if tail.size <= afterKeyword then 0
+              else
+                tail(afterKeyword) match
+                  case '\n' => 1
+                  case '\r' if tail.size == afterKeyword + 1 => 0
+                  case '\r' if tail(afterKeyword + 1) == '\n' => 2
+                  case _ => 0
+            if newline == 0 then Some(LexResult.NeedMore)
+            else
+              Content.streamLength(obj.data) match
+                case Attempt.Successful(length) =>
+                  Some(
+                    LexResult.Ok(
+                      HeaderEvent.H(IndirectObj.IndirectObjHeader(obj, Some(length))),
+                      tail.drop(afterKeyword + newline)
+                    )
+                  )
+                case Attempt.Failure(_) => Some(LexResult.NeedMore)
+          else if streamKeyword.take(tail.size) == tail then Some(LexResult.NeedMore)
+          else Some(LexResult.Ok(HeaderEvent.H(IndirectObj.IndirectObjHeader(obj, None)), tail))
+        case Attempt.Failure(_) => None
 
   private def tryVersion(bytes: ByteVector): Option[LexResult] = {
     if (!bytes.startsWith(pdfMagic)) None
@@ -153,5 +192,6 @@ private[pdf] object PdfByteLexer {
     tryWhitespace(bytes)
       .orElse(tryVersion(bytes))
       .orElse(tryComment(bytes))
+      .orElse(tryIndirectObject(bytes))
       .getOrElse(scodecDecode(bytes))
 }

@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Tybera zio-pdf repo
-    url: https://git.tybera.net/Tybera/zio-pdf
-    about: Canonical source, CI, and releases
+  - name: zio-pdf discussions
+    url: https://github.com/AdrielC/zio-pdf/discussions
+    about: Ask questions and discuss usage
   - name: CHANGELOG
-    url: https://git.tybera.net/Tybera/zio-pdf/src/branch/main/CHANGELOG.md
+    url: https://github.com/AdrielC/zio-pdf/blob/main/CHANGELOG.md
     about: Release history and migration notes

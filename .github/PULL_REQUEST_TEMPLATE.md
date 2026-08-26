@@ -1,6 +1,6 @@
 ## Summary
 
-<!-- What changed and why? Link Tybera issue if applicable. -->
+<!-- What changed and why? Link the GitHub issue if applicable. -->
 
 ## Test plan
 

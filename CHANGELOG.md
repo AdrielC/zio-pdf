@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.0-RC5] - 2026-08-25
+
+### Added
+
+- `PdfObjectScanner`, a dependency-clean incremental API that emits complete indirect-object boundaries without copying content-stream payloads
+- configurable structural carry limits with typed `CarryLimit` and `Malformed` failures
+- exact `Long` source offsets, including logical offsets beyond 1 TiB
+- signed Maven Central release workflow, package audit, and external-consumer execution proof
+
+### Changed
+
+- `StreamingDecode` can emit object-end boundaries while suppressing content events for raw structural scanning
+- ZIO 2.1.26, Scala 3.8.4, current ZIO Blocks schema/stream modules, MediaType 0.0.51, scodec-bits 1.2.5, and Kyo 1.0.0-RC4
+- public coordinates are now `io.github.adrielc %% zio-pdf`
+
+### Safety
+
+- parser carry can be hard-bounded independently of declared content-stream payloads
+- stream payloads are skipped by declared length in boundary mode
+- high-level APIs that return complete decoded collections remain explicitly materializing APIs and are not presented as the arbitrary-size ingest path
+
 ## [0.2.0-RC1] — 2026-08-04
 
 First release candidate of the ZIO / Scala 3 rewrite (formerly fs2-pdf).

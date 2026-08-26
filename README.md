@@ -1,19 +1,24 @@
 # zio-pdf (formerly fs2-pdf)
 
-> **Status: 0.2.0-RC1** — Internal Tybera library (ZIO 2 / Scala 3).  
-> **Interim forge:** [github.com/AdrielC/zio-pdf](https://github.com/AdrielC/zio-pdf) until `git.tybera.net` is back; canonical target remains Tybera.
-> ([releases](https://git.tybera.net/Tybera/zio-pdf/releases) ·
-> [CI](https://git.tybera.net/Tybera/zio-pdf/actions) ·
-> [packages](https://git.tybera.net/Tybera/zio-pdf/packages) ·
-> [CONTRIBUTING.md](https://git.tybera.net/Tybera/zio-pdf/src/branch/main/CONTRIBUTING.md))
->
-> Ports the archived fs2-pdf design onto **ZIO 2 / Scala 3** with fused mmap decode
-> (`PdfEngine`) and composable byte pipelines (`PdfStream`). Maven: `com.tybera %% zio-pdf`.
+[![CI](https://github.com/AdrielC/zio-pdf/actions/workflows/ci.yml/badge.svg)](https://github.com/AdrielC/zio-pdf/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+zio-pdf brings the archived fs2-pdf design to ZIO 2 and Scala 3. It provides composable byte pipelines, incremental raw PDF events, a bounded structural object scanner, and file-oriented decoding helpers.
+
+This GitHub repository is the standalone public source and release project used by downstream libraries such as Graviton. The build has no private resolvers or internal-only dependencies.
+
+Published coordinates:
+
+```scala
+libraryDependencies += "io.github.adrielc" %% "zio-pdf" % "0.2.0-RC5"
+```
+
+This is pre-1.0 software. Use `PdfObjectScanner` or raw `PdfStream.streamingDecode()` when bounded raw-byte handling matters. High-level APIs that return a complete `Chunk[Decoded]`, `Chunk[Element]`, or full embedded payload necessarily materialize those returned values and are not the arbitrary-size ingest path.
 
 ## Start here
 
 ```bash
-git clone https://git.tybera.net/Tybera/zio-pdf.git && cd zio-pdf
+git clone https://github.com/AdrielC/zio-pdf.git && cd zio-pdf
 sbt examples/run                              # decode xref-stream.pdf end-to-end
 sbt "testOnly zio.pdf.PdfEngineSpec"          # PdfEngine façade
 sbt "testOnly zio.pdf.PdfHyperdriveSpec"      # sync hyperdrive vs stream parity
@@ -26,7 +31,8 @@ sbt "benchFs2/Jmh/run -i 5 -wi 3 .*HeadToHeadBench.*"
 
 | Path | What it is |
 |------|------------|
-| `zio.pdf` (`PdfEngine`, `PdfStream`, `PdfIO`) | **Product** — path decode via `PdfEngine`; byte pipes via `PdfStream`; file I/O via `PdfIO` (Hyperdrive is internal) |
+| `zio.pdf.PdfObjectScanner` | **Bounded structure API** — incremental object offsets, declared stream skipping, configurable carry ceiling, no payload copies |
+| `zio.pdf` (`PdfEngine`, `PdfStream`, `PdfIO`) | **Decode API** — path decode via `PdfEngine`; byte pipes via `PdfStream`; file I/O via `PdfIO` (Hyperdrive is internal) |
 | `zio.scodec.stream` | **Codec engine** — `StreamDecoder`, `PureDecoder`, `ZChannel` |
 | `zio.scan` | **Hot byte scan** — `InlineByteScan` (compile-time fuse), `BytePipeline`, `BlocksPureByteScan` |
 | `scan-kyo/` (`zio.pdf.scan`) | **Scan algebra** (Kyo) — CDC, fanout, fusion experiments; not in root artifact |
@@ -35,14 +41,37 @@ sbt "benchFs2/Jmh/run -i 5 -wi 3 .*HeadToHeadBench.*"
 
 Diagnostics: pass `enableDiagnostics = true` on decode/IO entry points (uses `ZPureLog`, not a separate `Log` trait).
 
-## What this branch contains
+## Bounded PDF object scanning
 
-- **Scala 3.8.3** (the latest 3.8.x release).
-- **ZIO 2.1.25** with `zio-streams`, `zio-prelude` 1.0.0-RC47.
-- **Kyo 1.0-RC1** (`kyo-data`, `kyo-kernel`, `kyo-prelude`, `kyo-core`)
+`PdfObjectScanner` is the integration surface for content-addressable storage and other arbitrary-size byte pipelines. It consumes existing upstream chunks, skips declared stream payloads by length, emits only structural offsets, and fails when non-payload parser carry exceeds its configured ceiling.
+
+```scala
+import zio.*
+import zio.pdf.PdfObjectScanner
+import zio.pdf.io.PdfIO
+
+val config = PdfObjectScanner.Config(maxCarryBytes = 1024 * 1024)
+
+val boundaries =
+  PdfIO.reader(path)
+    .chunks
+    .mapAccumZIO(PdfObjectScanner.initial) { (cursor, bytes) =>
+      ZIO.fromEither(PdfObjectScanner.step(config, cursor, bytes))
+        .map { case (next, emitted) => (next, emitted) }
+    }
+    .flattenChunks
+```
+
+The scanner does not copy or decode content-stream payloads. Its memory contract covers parser carry, not the rest of an application's stream graph. Consumers should preserve chunked I/O and apply their own hard bounds to emitted blocks, queues, decompression, and any high-level decoded values.
+
+## What the public release contains
+
+- **Scala 3.8.4**.
+- **ZIO 2.1.26** with `zio-streams`, `zio-prelude` 1.0.0-RC47.
+- **Kyo 1.0.0-RC4** (`kyo-data`, `kyo-kernel`, `kyo-prelude`, `kyo-core`)
   for the algebraic-effect runtime used by the Scan algebra.
-- **`zio-blocks-schema` 0.0.33** for schema-derived codecs (smoke-tested).
-- **scodec-core 2.3.3** + **scodec-bits 1.2.4**.
+- **ZIO Blocks schema, streams, and chunk 0.017**, plus MediaType and ring buffer 0.0.51.
+- **scodec-core 2.3.3** + **scodec-bits 1.2.5**.
 - A **ZIO port of `scodec.stream.StreamDecoder`** (the file from the
   original prompt) implemented on top of `ZChannel`.
 - A **Graviton Scan algebra** under `zio.pdf.scan` -- a free symmetric
