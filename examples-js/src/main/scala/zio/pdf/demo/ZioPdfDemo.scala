@@ -114,11 +114,48 @@ object ZioPdfDemo:
           }
       }
 
+    val browserEffect =
+      effect.mapError(browserTransformError)
+
     Unsafe.unsafe { implicit unsafe =>
       Runtime.default.unsafe
-        .runToFuture(effect.provide(PdfEngine.live))
+        .runToFuture(browserEffect.provide(PdfEngine.live))
         .toJSPromise
     }
+
+  private def browserTransformError(error: Throwable): Throwable =
+    val message = error match
+      case PdfTransform.Error.IncompatibleFont(_, _, field) =>
+        val mismatch = field match
+          case "DW" | "W" | "DW2" | "W2" | "Widths" => "different glyph widths"
+          case "Encoding"                                 => "different character encodings"
+          case "ToUnicode"                                => "different Unicode mappings"
+          case "CIDToGIDMap"                              => "different character-to-glyph mappings"
+          case "CIDSystemInfo"                            => "different CID character collections"
+          case "Subtype" | "DescendantFonts/Subtype"    => "different font formats"
+          case _                                          => s"incompatible /$field font data"
+        s"These fonts use $mismatch, so swapping them could change the document's text or layout. " +
+          "Choose another replacement font or turn off font replacement. No output PDF was created."
+      case PdfTransform.Error.MetricsUnavailable(_, _, _) =>
+        "This PDF does not expose enough font metrics to prove a safe replacement. " +
+          "Choose another font pair or turn off font replacement. No output PDF was created."
+      case PdfTransform.Error.UnsupportedFontSubtype(_, _, _, _) =>
+        "This font requires glyph re-encoding and embedding, which Replace existing fonts does not perform. " +
+          "Choose another font pair or turn off font replacement. No output PDF was created."
+      case PdfTransform.Error.InvalidToUnicode(_, _) =>
+        "This font's Unicode map could not be verified, so zio-pdf refused to change the document. " +
+          "Choose another font pair or turn off font replacement. No output PDF was created."
+      case PdfTransform.Error.CompositeFontDataUnavailable(_, _) =>
+        "This composite font does not contain enough linked font data to prove a safe replacement. " +
+          "Choose another font pair or turn off font replacement. No output PDF was created."
+      case PdfTransform.Error.AmbiguousTargetFont(_, _) =>
+        "This font name points to more than one replacement resource. Choose an unambiguous font. " +
+          "No output PDF was created."
+      case PdfTransform.Error.SourceFontNotFound(_) | PdfTransform.Error.TargetFontNotFound(_) =>
+        "The selected font resource is no longer available in this document. Run inspection again and choose another font."
+      case _ => Option(error.getMessage).getOrElse("The PDF pipeline could not run.")
+
+    new IllegalArgumentException(message, error)
 
   private def tokenStats[A](pages: Chunk[PdfTransform.text.PageTokens[A]]): (Int, Long) =
     (pages.length, pages.foldLeft(0L)((total, page) => total + page.tokens.length.toLong))

@@ -930,6 +930,7 @@ dd {
 .transform-plan[data-state="running"] .plan-badge { border-color: var(--amber); color: var(--amber); }
 .transform-plan[data-state="complete"] .plan-badge { border-color: var(--mint); color: var(--mint); }
 .transform-plan[data-state="error"] .plan-badge { border-color: var(--danger); color: var(--danger); }
+.transform-plan[data-state="error"] .transform-actions p { color: var(--danger); }
 
 .citation-card {
   display: grid;
