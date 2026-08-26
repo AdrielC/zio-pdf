@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Changed
+
+- The Scala.js workbench renders the first page from bounded PDF.js range requests while the ZIO PDF evidence scan runs independently in a cancellable worker.
+- Browser scan progress now reports actual bytes consumed instead of phase-only activity.
+- Page dictionaries may omit a direct `/MediaBox` when geometry is inherited from their `/Pages` ancestor, as permitted by the PDF page tree.
+
 ## [0.2.0-RC6] — 2026-08-25
 
 Bounded-memory PDF infrastructure for the JVM and browser, released as a verified pair of signed Maven Central artifacts.

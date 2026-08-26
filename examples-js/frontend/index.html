@@ -3,45 +3,138 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b100e" />
-    <title>zio-pdf browser workspace</title>
+    <meta name="theme-color" content="#07110d" />
+    <meta
+      name="description"
+      content="Inspect, validate, and extract evidence from PDFs locally with ZIO PDF on Scala.js."
+    />
+    <title>ZIO PDF | Local Browser Workbench</title>
   </head>
   <body>
+    <a class="skip-link" href="#file-input">Skip to PDF selection</a>
     <main class="app-shell" id="workbench" data-run="idle">
-      <header class="topbar">
-        <a class="brand" href="#top" aria-label="zio-pdf browser workspace home">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <span>zio-pdf</span>
+      <header class="topbar" id="top">
+        <a class="brand" href="#top" aria-label="ZIO PDF browser workbench home">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span translate="no">zio-pdf</span>
         </a>
-        <div class="runtime-status"><span class="runtime-dot" aria-hidden="true"></span> local browser runtime</div>
+        <nav class="project-nav" aria-label="Project links">
+          <a href="https://github.com/AdrielC/zio-pdf" target="_blank" rel="noreferrer">Source</a>
+          <a href="https://javadoc.io/doc/io.github.adrielc/zio-pdf_3/latest/index.html" target="_blank" rel="noreferrer">API</a>
+          <span class="runtime-status"><span class="runtime-dot" aria-hidden="true"></span>Scala.js ready</span>
+        </nav>
       </header>
 
-      <section class="workspace" id="top" aria-label="PDF review workspace">
+      <section class="intro" aria-labelledby="workspace-title">
+        <div>
+          <h1 id="workspace-title">See the page. Stream the evidence.</h1>
+          <p>
+            Preview one page at a time, then run a single-pass structural scan without sending the document to a server.
+          </p>
+        </div>
+        <ul class="runtime-facts" aria-label="Runtime properties">
+          <li><i data-lucide="shield-check" aria-hidden="true"></i>File stays in this tab</li>
+          <li><i data-lucide="gauge" aria-hidden="true"></i>Bounded preview reads</li>
+          <li><i data-lucide="waves" aria-hidden="true"></i>Worker-based streaming scan</li>
+        </ul>
+      </section>
+
+      <section class="intake-panel" aria-labelledby="intake-title">
+        <div class="intake-heading">
+          <h2 id="intake-title">Open a PDF</h2>
+          <p>Choose a local file. The first page and the evidence scan run independently.</p>
+        </div>
+
+        <label class="drop-zone" id="drop-zone" for="file-input">
+          <i data-lucide="file-up" aria-hidden="true"></i>
+          <span>
+            <strong id="drop-title">Choose a PDF</strong>
+            <small id="drop-copy">or drop one here</small>
+          </span>
+          <input id="file-input" name="pdf" type="file" accept="application/pdf,.pdf" autocomplete="off" />
+        </label>
+
+        <dl class="file-facts" id="file-facts" hidden>
+          <div><dt>File</dt><dd id="file-name"></dd></div>
+          <div><dt>Size</dt><dd id="file-size"></dd></div>
+          <div><dt>Source</dt><dd id="source-status">Blob stream</dd></div>
+        </dl>
+
+        <div class="scan-command">
+          <button class="analyze-button" id="analyze-button" type="button" disabled>
+            <i data-lucide="scan-search" aria-hidden="true"></i>
+            <span id="analyze-button-label">Run Evidence Scan</span>
+          </button>
+          <p class="input-status" id="input-status" role="status" aria-live="polite">
+            Choose a PDF to start a local preview.
+          </p>
+          <div class="scan-progress" id="scan-progress-wrap" hidden>
+            <div>
+              <span id="scan-progress-label">Streaming bytes</span>
+              <span id="scan-progress-detail">0%</span>
+            </div>
+            <progress id="scan-progress" max="100" value="0">0%</progress>
+          </div>
+        </div>
+
+        <section class="scan-flow" aria-label="Evidence scan stages" id="scan-flow">
+          <span data-stage="source">Blob stream</span>
+          <span data-stage="decode">fused decode</span>
+          <span data-stage="evidence">merged evidence</span>
+          <span data-stage="report">report</span>
+        </section>
+      </section>
+
+      <section class="workspace" aria-label="PDF review workspace">
         <section class="preview-pane" aria-labelledby="preview-title">
           <header class="preview-toolbar">
             <div>
-              <p class="eyebrow">document view</p>
-              <h1 id="preview-title">Open document</h1>
+              <h2 id="preview-title">Document Preview</h2>
+              <p>PDF.js requests bounded ranges and renders only the page you are viewing.</p>
             </div>
-            <div class="preview-state" id="preview-state" data-state="idle">
+            <div class="preview-state" id="preview-state" data-state="idle" aria-live="polite">
               <span id="preview-page">No file</span>
-              <span id="preview-engine">pdfme preview</span>
+              <span id="preview-engine">Waiting for a PDF</span>
             </div>
           </header>
 
           <div class="preview-stage" id="preview-stage" data-state="empty">
             <div class="preview-empty" id="preview-empty">
               <i data-lucide="panel-top-open" aria-hidden="true"></i>
-              <strong>Choose a document to begin</strong>
-              <span>The rendered page stays beside the scan.</span>
+              <strong>Your first page appears here</strong>
+              <span>Previewing does not wait for the full evidence scan.</span>
             </div>
-            <div class="preview-host" id="preview-host" hidden aria-label="PDF page preview"></div>
+            <div class="preview-host" id="preview-host" hidden aria-label="PDF page preview">
+              <div class="preview-controls" aria-label="Page preview controls">
+                <div class="page-controls">
+                  <button id="preview-previous" type="button" aria-label="Previous page" title="Previous page" disabled>
+                    <i data-lucide="chevron-left" aria-hidden="true"></i>
+                  </button>
+                  <span id="preview-page-control">Page 1</span>
+                  <button id="preview-next" type="button" aria-label="Next page" title="Next page" disabled>
+                    <i data-lucide="chevron-right" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <div class="zoom-controls">
+                  <button id="preview-zoom-out" type="button" aria-label="Zoom out" title="Zoom out" disabled>
+                    <i data-lucide="minus" aria-hidden="true"></i>
+                  </button>
+                  <span id="preview-zoom-label">Fit</span>
+                  <button id="preview-zoom-in" type="button" aria-label="Zoom in" title="Zoom in" disabled>
+                    <i data-lucide="plus" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="preview-scroll" id="preview-scroll">
+                <canvas id="preview-canvas" aria-label="Rendered PDF page"></canvas>
+              </div>
+            </div>
             <section class="citation-layer" id="citation-layer" aria-label="Page citation marker" hidden>
               <button class="citation-pin" id="citation-pin" type="button" title="Open page evidence" aria-label="Open page evidence" aria-expanded="false">
                 <span id="citation-pin-label">C01</span>
               </button>
             </section>
-            <div class="preview-error" id="preview-error" hidden>
+            <div class="preview-error" id="preview-error" role="alert" hidden>
               <i data-lucide="circle-alert" aria-hidden="true"></i>
               <strong>Preview unavailable</strong>
               <span id="preview-error-message"></span>
@@ -52,53 +145,165 @@
         <aside class="review-rail" aria-labelledby="review-title">
           <header class="rail-heading">
             <div>
-              <p class="eyebrow">review rail</p>
-              <h2 id="review-title">Inspect document</h2>
+              <h2 id="review-title">Evidence & Transforms</h2>
+              <p>Review the scan first, then inspect a typed transform plan.</p>
             </div>
             <button class="icon-button" id="reset-button" type="button" title="Clear selected file" aria-label="Clear selected file" disabled>
-              <i data-lucide="rotate-ccw"></i>
+              <i data-lucide="rotate-ccw" aria-hidden="true"></i>
             </button>
           </header>
 
-          <label class="drop-zone" id="drop-zone" for="file-input">
-            <i data-lucide="file-up" aria-hidden="true"></i>
-            <strong id="drop-title">Choose a PDF</strong>
-            <span id="drop-copy">or drop one here</span>
-            <input id="file-input" type="file" accept="application/pdf,.pdf" />
-          </label>
-
-          <dl class="file-facts" id="file-facts" hidden>
-            <div><dt>file</dt><dd id="file-name"></dd></div>
-            <div><dt>size</dt><dd id="file-size"></dd></div>
-            <div><dt>source</dt><dd id="source-status">Blob stream</dd></div>
-          </dl>
-
-          <div class="scan-command">
-            <button class="analyze-button" id="analyze-button" type="button" disabled>
-              <i data-lucide="scan-search" aria-hidden="true"></i>
-              <span>Run scan</span>
-            </button>
-            <p class="input-status" id="input-status" role="status">Choose a PDF to open its preview.</p>
+          <div class="empty-result" id="empty-state">
+            <i data-lucide="scan-line" aria-hidden="true"></i>
+            <p>Run the evidence scan to inspect structure, policy, native text, fonts, and a streaming SHA-256 digest.</p>
           </div>
 
-          <section class="scan-flow" aria-label="Scan execution" id="scan-flow">
-            <span data-stage="source">Blob stream</span>
-            <span data-stage="decode">fused decode</span>
-            <span data-stage="evidence">merged evidence</span>
-            <span data-stage="report">report</span>
+          <section class="report" id="report" hidden aria-live="polite">
+            <header class="result-heading">
+              <div>
+                <h3 id="report-title">Inspection Complete</h3>
+                <p>One fused traversal, summarized below.</p>
+              </div>
+              <span class="report-state" id="report-state">idle</span>
+            </header>
+
+            <dl class="scan-summary">
+              <div><dt>Preflight</dt><dd id="preflight-result"></dd></div>
+              <div><dt>Validation</dt><dd id="validation-result"></dd></div>
+              <div><dt>Policy</dt><dd id="policy-result"></dd></div>
+              <div><dt>Objects</dt><dd id="objects-result"></dd></div>
+              <div><dt>Fused scan</dt><dd id="elapsed-result"></dd></div>
+            </dl>
+
+            <section class="observations" aria-labelledby="observations-title">
+              <div class="section-heading">
+                <h3 id="observations-title">Observations</h3>
+                <span id="digest-result"></span>
+              </div>
+              <ul id="observation-list"></ul>
+            </section>
+
+            <section class="text-preview" id="text-preview" aria-labelledby="text-preview-title" hidden>
+              <div class="section-heading">
+                <h3 id="text-preview-title">Native Text Sample</h3>
+                <span id="text-preview-meta"></span>
+              </div>
+              <pre id="text-preview-value"></pre>
+            </section>
+
+            <section class="ocr-panel" id="ocr-panel" aria-labelledby="ocr-title" hidden>
+              <div class="section-heading">
+                <h3 id="ocr-title">Image-only Recovery</h3>
+                <span id="ocr-status" aria-live="polite"></span>
+              </div>
+              <button class="ocr-button" id="ocr-button" type="button">
+                <i data-lucide="text-search" aria-hidden="true"></i>
+                <span>Recognize Current Page</span>
+              </button>
+              <pre id="ocr-value"></pre>
+            </section>
           </section>
+
+          <div class="error-state" id="error-state" role="alert" hidden>
+            <i data-lucide="triangle-alert" aria-hidden="true"></i>
+            <p id="error-message"></p>
+          </div>
+
+          <details class="transform-plan" id="transform-plan" data-state="waiting">
+            <summary>
+              <span>
+                <strong id="transform-plan-title">Typed Transform Plan</strong>
+                <small>Compose named operations and inspect the compiled Scala.js plan.</small>
+              </span>
+              <span class="plan-badge" id="plan-badge">pending</span>
+            </summary>
+            <div class="transform-plan-body">
+              <fieldset class="plan-controls" id="plan-controls">
+                <legend>Program leaves</legend>
+                <label class="toggle-control">
+                  <input id="plan-remap" type="checkbox" checked />
+                  <span>Remap existing fonts</span>
+                </label>
+                <div class="font-bindings" id="font-bindings">
+                  <label>From<input id="plan-source-font" name="source-font" value="SourceFace" autocomplete="off" spellcheck="false" /></label>
+                  <button class="swap-fonts" id="swap-fonts" type="button" title="Swap selected mapping" aria-label="Swap selected mapping">
+                    <i data-lucide="arrow-right-left" aria-hidden="true"></i>
+                  </button>
+                  <label>To<input id="plan-target-font" name="target-font" value="TargetFace" autocomplete="off" spellcheck="false" /></label>
+                </div>
+                <label class="toggle-control">
+                  <input id="plan-tokenize" type="checkbox" checked />
+                  <span>Tokenize resolved text</span>
+                </label>
+                <label class="tokenizer-select">Tokenizer
+                  <select id="plan-tokenizer" name="tokenizer">
+                    <option value="characters">Characters</option>
+                    <option value="words">Words</option>
+                  </select>
+                </label>
+                <button class="compile-plan" id="compile-plan" type="button">Compile Plan</button>
+              </fieldset>
+              <section class="mapping-route" id="mapping-route" aria-labelledby="mapping-route-title" hidden>
+                <div class="section-heading">
+                  <div>
+                    <h3 id="mapping-route-title">Selected Mapping</h3>
+                    <p class="mapping-route-copy" id="mapping-route-copy"></p>
+                  </div>
+                  <span class="mapping-route-state" id="mapping-route-state"></span>
+                </div>
+                <div class="mapping-lane">
+                  <div class="mapping-endpoint" data-role="source">
+                    <span>source resource</span>
+                    <strong id="mapping-source-name"></strong>
+                    <small id="mapping-source-detail"></small>
+                  </div>
+                  <div class="mapping-gate">
+                    <i data-lucide="shield-check" aria-hidden="true"></i>
+                    <span>execution gate</span>
+                    <small>encoding · CID metrics · ToUnicode</small>
+                  </div>
+                  <div class="mapping-endpoint" data-role="target">
+                    <span>target resource</span>
+                    <strong id="mapping-target-name"></strong>
+                    <small id="mapping-target-detail"></small>
+                  </div>
+                </div>
+              </section>
+              <section class="font-inventory" id="font-inventory" aria-labelledby="font-inventory-title" hidden>
+                <div class="section-heading">
+                  <div>
+                    <h3 id="font-inventory-title">Document Font Resources</h3>
+                    <p class="font-inventory-copy">Choose a real resource for either side of the remap.</p>
+                  </div>
+                  <span id="font-inventory-summary"></span>
+                </div>
+                <label class="font-filter">Find resource
+                  <span><i data-lucide="search" aria-hidden="true"></i><input id="font-filter" name="font-filter" type="search" placeholder="Font, subtype, or object…" autocomplete="off" /></span>
+                </label>
+                <ul class="font-inventory-list" id="font-inventory-list"></ul>
+                <p class="font-inventory-note">Rebindable candidates still require glyph-code, metrics, and ToUnicode compatibility when the transform runs.</p>
+              </section>
+              <ol class="plan-nodes" id="plan-nodes">
+                <li><span>01</span><strong>Compile the Scala.js bridge to inspect this plan.</strong></li>
+              </ol>
+              <dl class="plan-profile" id="plan-profile" hidden>
+                <div><dt>Scope</dt><dd id="plan-scope"></dd></div>
+                <div><dt>Content</dt><dd id="plan-content"></dd></div>
+              </dl>
+              <pre class="plan-source"><code id="plan-source">PdfTransform.fonts.replaceExisting("SourceFace", "TargetFace")
+  &gt;&gt;&gt; PdfTransform.text.tokenize(Tokenizer.characters)</code></pre>
+            </div>
+          </details>
 
           <section class="citation-card" id="citation-card" aria-label="Page evidence" hidden>
             <header>
               <div>
-                <p class="eyebrow">page evidence</p>
                 <strong id="citation-page-label"></strong>
+                <span>Page evidence</span>
               </div>
-              <div class="citation-card-actions">
-                <button class="citation-nav" id="citation-close" type="button" title="Hide page evidence" aria-label="Hide page evidence">
-                  <i data-lucide="x" aria-hidden="true"></i>
-                </button>
-              </div>
+              <button class="citation-nav" id="citation-close" type="button" title="Hide page evidence" aria-label="Hide page evidence">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
             </header>
             <div class="citation-reference">
               <strong id="citation-ordinal"></strong>
@@ -110,152 +315,13 @@
               <span id="citation-bounds"></span>
             </footer>
           </section>
-
-          <section class="transform-plan" id="transform-plan" data-state="waiting" aria-labelledby="transform-plan-title">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow" id="transform-plan-title">Typed transform plan</p>
-                <p class="transform-plan-copy">Compose named leaves, then inspect the actual compiled plan.</p>
-              </div>
-              <span class="plan-badge" id="plan-badge">pending</span>
-            </div>
-            <fieldset class="plan-controls" id="plan-controls">
-              <legend>Program leaves</legend>
-              <label class="toggle-control">
-                <input id="plan-remap" type="checkbox" checked />
-                <span>Remap existing fonts</span>
-              </label>
-              <div class="font-bindings" id="font-bindings">
-                <label>from<input id="plan-source-font" value="SourceFace" autocomplete="off" /></label>
-                <button class="swap-fonts" id="swap-fonts" type="button" title="Swap selected mapping" aria-label="Swap selected mapping">
-                  <i data-lucide="arrow-right-left" aria-hidden="true"></i>
-                </button>
-                <label>to<input id="plan-target-font" value="TargetFace" autocomplete="off" /></label>
-              </div>
-              <label class="toggle-control">
-                <input id="plan-tokenize" type="checkbox" checked />
-                <span>Tokenize resolved text</span>
-              </label>
-              <label class="tokenizer-select">tokenizer
-                <select id="plan-tokenizer">
-                  <option value="characters">characters</option>
-                  <option value="words">words</option>
-                </select>
-              </label>
-              <button class="compile-plan" id="compile-plan" type="button">Compile plan</button>
-            </fieldset>
-            <section class="mapping-route" id="mapping-route" aria-labelledby="mapping-route-title" hidden>
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow" id="mapping-route-title">Selected mapping</p>
-                  <p class="mapping-route-copy" id="mapping-route-copy"></p>
-                </div>
-                <span class="mapping-route-state" id="mapping-route-state"></span>
-              </div>
-              <div class="mapping-lane">
-                <div class="mapping-endpoint" data-role="source">
-                  <span>source resource</span>
-                  <strong id="mapping-source-name"></strong>
-                  <small id="mapping-source-detail"></small>
-                </div>
-                <div class="mapping-gate">
-                  <i data-lucide="shield-check" aria-hidden="true"></i>
-                  <span>execution gate</span>
-                  <small>encoding · CID metrics · ToUnicode</small>
-                </div>
-                <div class="mapping-endpoint" data-role="target">
-                  <span>target resource</span>
-                  <strong id="mapping-target-name"></strong>
-                  <small id="mapping-target-detail"></small>
-                </div>
-              </div>
-            </section>
-            <section class="font-inventory" id="font-inventory" aria-labelledby="font-inventory-title" hidden>
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow" id="font-inventory-title">Document font resources</p>
-                  <p class="font-inventory-copy">Choose a real resource for either side of the remap.</p>
-                </div>
-                <span id="font-inventory-summary"></span>
-              </div>
-              <label class="font-filter">find resource
-                <span><i data-lucide="search" aria-hidden="true"></i><input id="font-filter" type="search" placeholder="font, subtype, or object" autocomplete="off" /></span>
-              </label>
-              <ul class="font-inventory-list" id="font-inventory-list"></ul>
-              <p class="font-inventory-note">Rebindable candidates still require a glyph-code, metrics, and ToUnicode compatibility check when the transform runs.</p>
-            </section>
-            <ol class="plan-nodes" id="plan-nodes">
-              <li><span>01</span><strong>Compile the Scala.js bridge to inspect this plan.</strong></li>
-            </ol>
-            <dl class="plan-profile" id="plan-profile" hidden>
-              <div><dt>scope</dt><dd id="plan-scope"></dd></div>
-              <div><dt>content</dt><dd id="plan-content"></dd></div>
-            </dl>
-            <pre class="plan-source"><code id="plan-source">PdfTransform.fonts.replaceExisting("SourceFace", "TargetFace")
-  >>> PdfTransform.text.tokenize(Tokenizer.characters)</code></pre>
-          </section>
-
-          <div class="empty-result" id="empty-state">
-            <i data-lucide="scan-line" aria-hidden="true"></i>
-            <p>Run the scan to map the document beside its rendered pages.</p>
-          </div>
-
-          <section class="report" id="report" hidden aria-live="polite">
-            <header class="result-heading">
-              <div>
-                <p class="eyebrow">scan result</p>
-                <h3 id="report-title">Inspection complete</h3>
-              </div>
-              <span class="report-state" id="report-state">idle</span>
-            </header>
-
-            <dl class="scan-summary">
-              <div><dt>preflight</dt><dd id="preflight-result"></dd></div>
-              <div><dt>validation</dt><dd id="validation-result"></dd></div>
-              <div><dt>policy</dt><dd id="policy-result"></dd></div>
-              <div><dt>objects</dt><dd id="objects-result"></dd></div>
-              <div><dt>fused scan</dt><dd id="elapsed-result"></dd></div>
-            </dl>
-
-            <section class="observations" aria-labelledby="observations-title">
-              <div class="section-heading">
-                <p class="eyebrow" id="observations-title">observations</p>
-                <span id="digest-result"></span>
-              </div>
-              <ul id="observation-list"></ul>
-            </section>
-
-            <section class="text-preview" id="text-preview" aria-labelledby="text-preview-title" hidden>
-              <div class="section-heading">
-                <p class="eyebrow" id="text-preview-title">text sample</p>
-                <span id="text-preview-meta"></span>
-              </div>
-              <pre id="text-preview-value"></pre>
-            </section>
-
-            <section class="ocr-panel" id="ocr-panel" aria-labelledby="ocr-title" hidden>
-              <div class="section-heading">
-                <p class="eyebrow" id="ocr-title">image-only recovery</p>
-                <span id="ocr-status"></span>
-              </div>
-              <button class="ocr-button" id="ocr-button" type="button">
-                <i data-lucide="text-search" aria-hidden="true"></i>
-                <span>Recognize current page</span>
-              </button>
-              <pre id="ocr-value"></pre>
-            </section>
-          </section>
-
-          <div class="error-state" id="error-state" hidden>
-            <i data-lucide="triangle-alert" aria-hidden="true"></i>
-            <p id="error-message"></p>
-          </div>
         </aside>
       </section>
 
-      <footer>
-        <span><i data-lucide="shield-check" aria-hidden="true"></i> inspection streams from Blob</span>
-        <span><i data-lucide="scan-line" aria-hidden="true"></i> preview rendered locally by pdfme</span>
+      <footer class="page-footer">
+        <span><i data-lucide="shield-check" aria-hidden="true"></i>Document bytes stay local</span>
+        <span><i data-lucide="waves" aria-hidden="true"></i>Evidence streams through ZIO PDF</span>
+        <span><i data-lucide="gauge" aria-hidden="true"></i>Preview slices capped at 1 MiB</span>
       </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>

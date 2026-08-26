@@ -75,7 +75,10 @@ declare module "zio-pdf-demo" {
 export const ZioPdfDemo: {
   analyze(input: Uint8Array): Promise<Analysis>;
   analyzeBlob(input: Blob): Promise<Analysis>;
-  analyzeBlobWithProgress(input: Blob, progress: (phase: string) => void): Promise<Analysis>;
+  analyzeBlobWithProgress(
+    input: Blob,
+    progress: (phase: string, loadedBytes: number, totalBytes: number) => void
+  ): Promise<Analysis>;
   inspectTransformPlan(
     remapExistingFonts: boolean,
     sourceFont: string,

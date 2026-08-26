@@ -92,6 +92,20 @@ object ElementsSpec extends ZIOSpecDefault {
         contents.nonEmpty,
         contents.forall(_ == Element.ContentKind.General)
       )
+    },
+    test("classifies pages whose MediaBox is inherited from the page tree") {
+      val data = Prim.dict(
+        "Type"   -> Prim.Name("Page"),
+        "Parent" -> Prim.Ref(2, 0)
+      )
+      val result = Elements.classifyOne(Decoded.DataObj(Obj(Obj.Index(3, 0), data)))
+
+      assertTrue(
+        result.exists {
+          case Element.Data(_, Element.DataKind.Page(value)) => value.mediaBox.isEmpty
+          case _                                             => false
+        }
+      )
     }
   )
 }

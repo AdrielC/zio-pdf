@@ -8,28 +8,34 @@ package zio.pdf
 import _root_.scodec.{Attempt, Err}
 import _root_.scodec.bits.BitVector
 
-/** Page geometry, mandatory in `/Type /Page` dicts. */
+/** Page geometry resolved directly from a page dictionary. */
 final case class MediaBox(x: BigDecimal, y: BigDecimal, w: BigDecimal, h: BigDecimal)
 
-/** A `/Type /Page` object with its required `/MediaBox`. */
-final case class Page(index: Obj.Index, data: Prim.Dict, mediaBox: MediaBox)
+/**
+ * A `/Type /Page` object.
+ *
+ * `/MediaBox` is inheritable through the page tree, so its absence on the leaf
+ * is valid. Consumers that require geometry must resolve it through `/Parent`.
+ */
+final case class Page(index: Obj.Index, data: Prim.Dict, mediaBox: Option[MediaBox])
 
 object Page {
+  /** Source-compatible constructor for pages that carry direct geometry. */
+  def apply(index: Obj.Index, data: Prim.Dict, mediaBox: MediaBox): Page =
+    new Page(index, data, Some(mediaBox))
+
   def fromData(index: Obj.Index): Prim => Attempt[Page] = {
     case Prim.tpe("Page", data) =>
-      Prim.Dict.path("MediaBox")(data) {
-        // A PDF MediaBox is a four-element array [llx lly urx ury] of
-        // numbers. Guard keeps the partial function honest -- if the
-        // shape doesn't match, `Prim.Dict.path`'s `.lift` returns None
-        // and the outer machinery reports the error.
-        case Prim.Array(elems)
+      data.data.get("MediaBox") match
+        case None => Attempt.successful(Page(index, data, None))
+        case Some(Prim.Array(elems))
             if elems.length == 4
               && elems.forall(_.isInstanceOf[Prim.Number]) =>
           val Vector(x, y, w, h) = elems.iterator
             .collect { case Prim.Number(n) => n }
             .toVector: @unchecked
-          Page(index, data, MediaBox(x, y, w, h))
-      }
+          Attempt.successful(Page(index, data, Some(MediaBox(x, y, w, h))))
+        case Some(_) => Attempt.failure(Err("invalid MediaBox on Page object"))
     case _ =>
       Attempt.failure(Err("not a Page object"))
   }
