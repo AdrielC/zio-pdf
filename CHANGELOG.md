@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## [0.2.0-RC6] — 2026-08-25
+
+Bounded-memory PDF infrastructure for the JVM and browser, released as a verified pair of signed Maven Central artifacts.
+
 ### Added
 
 - `PdfObjectScanner`, a dependency-clean incremental API that emits complete indirect-object boundaries without copying content-stream payloads
@@ -25,6 +29,7 @@ All notable changes to this project are documented here.
 - experimental byte-scan and local pure-interpreter code now lives only in the unpublished benchmark module
 - FastCDC now processes arbitrarily large upstream chunks through a fixed `maxSize` buffer and bounded input windows
 - published modules no longer require downstream projects to compile in Scala experimental mode
+- release automation publishes and verifies the JVM and Scala.js coordinates in the same Maven Central deployment
 
 ### Safety
 

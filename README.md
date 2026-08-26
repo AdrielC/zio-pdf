@@ -14,11 +14,11 @@ That distinction makes the raw path suitable for very large uploads while keepin
 
 ## Project status
 
-The source, tests, browser demo, POM metadata, signed-release workflow, and independent-consumer check are public. Maven Central coordinates are intentionally shown with `<version>` until the first tag has been published and read back from Central.
+Release `0.2.0-RC6` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
 
 ```scala
-libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "<version>" // JVM
-libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "<version>" // Scala.js
+libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.0-RC6" // JVM
+libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.0-RC6" // Scala.js
 ```
 
 Only the JVM and Scala.js `zio-pdf` artifacts are publishable. Examples, benchmarks, the browser application, and the Kyo comparison module are build-only projects.
@@ -253,9 +253,7 @@ Production invariants are recorded in [`docs/PRODUCTION_INVARIANTS.md`](docs/PRO
 
 ## Release process
 
-Tags matching `v*` run the complete test and package proof before `sbt-ci-release` signs and uploads both JVM and Scala.js artifacts. The workflow fails if Sonatype or PGP credentials are absent. A GitHub release is created only after the Maven publication job succeeds.
-
-After publication, verify both coordinates directly from Maven Central before replacing `<version>` in this README.
+Tags matching `v*` run the complete test and package proof before `sbt-ci-release` signs and uploads both JVM and Scala.js artifacts. The workflow fails if Sonatype or PGP credentials are absent. It reads both coordinates back from Maven Central before creating the GitHub release.
 
 ## License
 
