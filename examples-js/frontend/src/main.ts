@@ -738,6 +738,7 @@ function syncPlanControls(): void {
   if (!hasOperation) transformStatus.textContent = "Select at least one pipeline step.";
   else if (remapEnabled && candidates.length < 2) transformStatus.textContent = "This PDF needs two unambiguous font resources to test replacement.";
   else if (remapEnabled && !remapReady) transformStatus.textContent = "Choose different source and replacement fonts.";
+  else if (remapEnabled) transformStatus.textContent = "Ready to verify. No output is created unless this font pair passes.";
   else transformStatus.textContent = "Ready to run. Browser transforms are capped at 64 MiB.";
 }
 
@@ -819,11 +820,11 @@ function renderMappingRoute(): void {
   mappingSourceDetail.textContent = endpointDescription(sourceName, source);
   mappingTargetName.textContent = targetName;
   mappingTargetDetail.textContent = endpointDescription(targetName, target);
-  mappingRouteState.textContent = remapDisabled ? "disabled" : candidatePair ? "ready" : "select fonts";
+  mappingRouteState.textContent = remapDisabled ? "disabled" : candidatePair ? "check required" : "select fonts";
   mappingRouteCopy.textContent = remapDisabled
     ? "Enable font replacement to add this step."
     : candidatePair
-    ? "Ready to test."
+    ? "Run verifies encoding, glyph widths, and Unicode mapping before changing the PDF."
     : "Choose different testable source and replacement fonts.";
   renderIcons();
 }
@@ -1086,8 +1087,14 @@ async function executeTransform(): Promise<void> {
     if (generation !== transformGeneration) return;
     if (error instanceof DOMException && error.name === "AbortError") return;
     transformPlan.dataset.state = "error";
-    planBadge.textContent = "Rejected";
-    transformStatus.textContent = error instanceof Error ? error.message : "The pipeline could not run.";
+    planBadge.textContent = "Blocked";
+    const message = error instanceof Error ? error.message : "The pipeline could not run.";
+    transformStatus.textContent = message;
+    if (planRemap.checked) {
+      mappingRoute.dataset.state = "unresolved";
+      mappingRouteState.textContent = "incompatible";
+      mappingRouteCopy.textContent = "This pair cannot be safely rebound. Choose another replacement font.";
+    }
   } finally {
     if (generation === transformGeneration) {
       runTransformButton.textContent = "Run Pipeline";
