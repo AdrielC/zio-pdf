@@ -3,7 +3,7 @@ package zio.pdf.io
 import java.nio.file.Files
 
 import zio.*
-import zio.pdf.PdfEngine
+import zio.pdf.{ByteLimit, PdfEngine}
 import zio.stream.*
 import zio.test.*
 
@@ -30,6 +30,17 @@ object PdfIOSpec extends ZIOSpecDefault {
         n    <- PdfIO.reader(path).runCount
         _    <- ZIO.attemptBlocking(Files.delete(path))
       } yield assertTrue(n == size.toLong)
+    },
+    test("readAtMost fails before collecting a file beyond its typed bound") {
+      val limit = ByteLimit.fromBytes(1024L).toOption.get
+      for {
+        path <- ZIO.attemptBlocking(Files.createTempFile("zio-pdf-bounded-", ".bin"))
+        _    <- ZStream.fromIterable(0 until 2048).map(_.toByte).run(PdfIO.writer(path))
+        exit <- PdfIO.readAtMost(path, limit).exit
+        _    <- ZIO.attemptBlocking(Files.delete(path))
+      } yield assertTrue(
+        exit.causeOption.exists(_.failureOption.contains(PdfIO.ReadLimitExceeded(path, limit, 2048L)))
+      )
     },
     test("PdfEngine.decode on xref-stream.pdf") {
       val path = java.nio.file.Path.of("src/test/resources/xref-stream.pdf")

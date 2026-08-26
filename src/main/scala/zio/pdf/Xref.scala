@@ -82,7 +82,7 @@ object Xref extends XrefCodec {
 private[pdf] trait XrefCodec {
   import _root_.scodec.codecs.{choice, listOfN, provide, byte}
   import Newline.{crlf, lf, newline}
-  import Whitespace.{nlWs, skipWs, space, ws}
+  import Whitespace.{horizontalWs, nlWs, skipWs, space, ws}
   import Text.{ascii, str, stringOf}
 
   def offset: Codec[String]     = stringOf(10).withContext("offset") <~ space.withContext("offset space")
@@ -126,7 +126,8 @@ private[pdf] trait XrefCodec {
       .xmap({ case (i, t) => Xref.Entry(i, t) }, e => (e.index, e.`type`))
 
   def range: Codec[(Long, Int)] =
-    (ascii.long.withContext("offset") <~ ws) :: (ascii.int.withContext("size") <~ newline)
+    (ascii.long.withContext("offset") <~ ws) ::
+      (ascii.int.withContext("size") <~ horizontalWs <~ newline)
 
   def trailerDict: Codec[Trailer] =
     Prim.Codec_Dict

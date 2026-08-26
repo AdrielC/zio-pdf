@@ -1,29 +1,35 @@
+import org.scalajs.linker.interface.ModuleKind
+import org.scalajs.sbtplugin.ScalaJSPlugin
+
 val zioVersion                 = "2.1.26"
 val zioPreludeVersion          = "1.0.0-RC47"
 val zioBlocksSchemaVersion     = "0.017"
 val zioBlocksMediaTypeVersion  = "0.0.51"
 val zioBlocksRingbufferVersion = "0.0.51"
-val zioBlocksStreamsVersion    = "0.017"
 val zioBlocksChunkVersion      = "0.017"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.5"
 val kyoVersion                 = "1.0.0-RC4"
+val scalaJsDomVersion          = "2.8.1"
+val scalaJavaTimeVersion       = "2.7.0"
 
 ThisBuild / organization      := "io.github.adrielc"
 ThisBuild / scalaVersion      := "3.8.4"
 ThisBuild / description       := "Streaming PDF parsing and structural boundary scanning for ZIO and Scala 3"
 ThisBuild / versionScheme     := Some("early-semver")
 ThisBuild / fork              := true
+ThisBuild / Test / fork               := false
+ThisBuild / Test / parallelExecution  := false
 ThisBuild / publishMavenStyle := true
 ThisBuild / pomIncludeRepository := { _ => false }
 ThisBuild / Test / publishArtifact := false
 ThisBuild / licenses          := List(
-  "Apache-2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0.txt")
+  "Apache-2.0" -> uri("https://www.apache.org/licenses/LICENSE-2.0.txt")
 )
-ThisBuild / homepage          := Some(url("https://github.com/AdrielC/zio-pdf"))
+ThisBuild / homepage          := Some(uri("https://github.com/AdrielC/zio-pdf"))
 ThisBuild / scmInfo           := Some(
   ScmInfo(
-    url("https://github.com/AdrielC/zio-pdf"),
+    uri("https://github.com/AdrielC/zio-pdf"),
     "scm:git:https://github.com/AdrielC/zio-pdf.git",
     Some("scm:git:git@github.com:AdrielC/zio-pdf.git")
   )
@@ -34,7 +40,7 @@ ThisBuild / developers        := List(
     "AdrielC",
     "Adriel Casellas",
     "adrielcasellas@gmail.com",
-    url("https://github.com/AdrielC")
+    uri("https://github.com/AdrielC")
   )
 )
 
@@ -47,7 +53,8 @@ ThisBuild / scalacOptions ++= List(
   "-Wunused:locals",
   "-Wunused:privates",
   "-Wunused:explicits",
-  "-Wvalue-discard"
+  "-Wvalue-discard",
+  "-Werror"
 )
 
 lazy val root = (project in file("."))
@@ -59,15 +66,102 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio-prelude"       % zioPreludeVersion,
       "dev.zio"   %% "zio-blocks-schema"     % zioBlocksSchemaVersion,
       "dev.zio"   %% "zio-blocks-mediatype"  % zioBlocksMediaTypeVersion,
-      "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
-      "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
       "dev.zio"   %% "zio-blocks-chunk"      % zioBlocksChunkVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
+      "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion % Test,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt"      % zioVersion % Test
     ),
+    // ZIOSpecDefault creates a generated main for every spec. Choosing a
+    // representative entry point keeps sbt 2 from warning while `test` still
+    // delegates discovery to ZIO Test.
+    Test / mainClass := Some("zio.pdf.PdfEngineSpec"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+private val jsExcludedSourcePaths = Set(
+  "zio/blocks/pure/Env.scala",
+  "zio/blocks/pure/Pure.scala",
+  "zio/blocks/pure/Stack.scala",
+  "zio/blocks/pure/Support.scala",
+  "zio/pdf/EvidenceDigestPlatform.scala",
+  "zio/pdf/FilterEncode.scala",
+  "zio/pdf/FlateDecode.scala",
+  "zio/pdf/HyperdriveStream.scala",
+  "zio/pdf/PdfEngine.scala",
+  "zio/pdf/PdfHyperdrive.scala",
+  "zio/pdf/Tiff.scala",
+  "zio/pdf/io/PdfIO.scala",
+  "zio/pdf/pipe/ByteDigest.scala",
+  "zio/pdf/pipe/ByteFeed.scala",
+  "zio/pdf/pipe/DecodePipeline.scala",
+  "zio/pdf/pipe/FusedDecode.scala",
+  "zio/pdf/pipe/FusedElements.scala",
+  "zio/pdf/pipe/HyperFuse.scala",
+  "zio/pdf/pipe/IngestPipeline.scala",
+  "zio/scan/BlocksPureByteScan.scala",
+  "zio/scan/BytePipeline.scala",
+  "zio/scan/InlineByteScan.scala",
+  "zio/scodec/schema/ScodecDeriver.scala"
+)
+
+private def jsSharedSources(base: File): Seq[File] = {
+  val sourceRoot = base / "src" / "main" / "scala"
+  (sourceRoot ** "*.scala").get().filter { source =>
+    IO.relativize(sourceRoot, source).forall(path => !jsExcludedSourcePaths.contains(path))
+  }
+}
+
+/**
+ * Browser / Node.js artifact. Shared parser code continues to live in the
+ * primary source tree; JVM-only I/O, mmap, and crypto implementations are
+ * replaced by JS-specific sources under `js/src`.
+ */
+lazy val scalaJs = (project in file("js"))
+  .enablePlugins(ScalaJSPlugin)
+  .settings(
+    name := "zio-pdf",
+    libraryDependencies ++= List(
+      "dev.zio"      % "zio_sjs1_3"                   % zioVersion,
+      "dev.zio"      % "zio-streams_sjs1_3"           % zioVersion,
+      "dev.zio"      % "zio-prelude_sjs1_3"           % zioPreludeVersion,
+      "dev.zio"      % "zio-blocks-schema_sjs1_3"     % zioBlocksSchemaVersion,
+      "dev.zio"      % "zio-blocks-mediatype_sjs1_3"  % zioBlocksMediaTypeVersion,
+      "dev.zio"      % "zio-blocks-chunk_sjs1_3"      % zioBlocksChunkVersion,
+      "org.scodec"   % "scodec-core_sjs1_3"           % scodecCoreVersion,
+      "org.scodec"   % "scodec-bits_sjs1_3"           % scodecBitsVersion,
+      "org.scala-js" % "scalajs-dom_sjs1_3"           % scalaJsDomVersion,
+      // Required by ZIO's browser runtime once the Scala.js export is linked
+      // into an application rather than a test-only bundle.
+      "io.github.cquiroz" % "scala-java-time_sjs1_3" % scalaJavaTimeVersion,
+      "dev.zio"      % "zio-test_sjs1_3"              % zioVersion % Test,
+      "dev.zio"      % "zio-test-sbt_sjs1_3"          % zioVersion % Test
+    ),
+    Compile / unmanagedSources := {
+      val repo = (LocalRootProject / baseDirectory).value
+      jsSharedSources(repo) ++ ((baseDirectory.value / "src" / "main" / "scala") ** "*.scala").get()
+    },
+    Test / unmanagedSources := ((baseDirectory.value / "src" / "test" / "scala") ** "*.scala").get(),
+    Test / unmanagedResourceDirectories +=
+      (LocalRootProject / Test / resourceDirectory).value,
+    Test / fork := false,
+    scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+/** Scala.js export bridge consumed by the Vite browser workspace. */
+lazy val scalaJsFrontend = (project in file("examples-js"))
+  .enablePlugins(ScalaJSPlugin)
+  .dependsOn(scalaJs)
+  .settings(
+    name := "zio-pdf-scalajs-frontend",
+    publish / skip := true,
+    scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
+    Compile / fastLinkJS / scalaJSLinkerOutputDirectory :=
+      baseDirectory.value / "frontend" / "src" / "generated",
+    Compile / fullLinkJS / scalaJSLinkerOutputDirectory :=
+      baseDirectory.value / "frontend" / "src" / "generated"
   )
 
 /**
@@ -93,9 +187,11 @@ lazy val scanKyo = (project in file("scan-kyo"))
       "io.getkyo" %% "kyo-prelude" % kyoVersion,
       "io.getkyo" %% "kyo-core"    % kyoVersion,
       "io.getkyo" %% "kyo-zio"     % kyoVersion,
+      "io.getkyo" %% "kyo-parse"   % kyoVersion % Test,
       "dev.zio"   %% "zio-test"    % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt" % zioVersion % Test
     ),
+    Test / mainClass := Some("zio.pdf.scan.ScanSpec"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 
@@ -106,6 +202,14 @@ lazy val bench = (project in file("bench"))
     name              := "zio-pdf-bench",
     publish / skip    := true,
     Jmh / version     := "1.37",
+    libraryDependencies ++= List(
+      "dev.zio" %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
+      "dev.zio" %% "zio-test"              % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt"          % zioVersion % Test
+    ),
+    Test / fork := false,
+    Test / mainClass := Some("zio.pdf.bench.scan.BytePipelineSpec"),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     // Inline expansion of `zio.pdf.pipe` in forked JMH runs can fail class loading; keep fuse in PdfHyperdrive.
     Jmh / fork        := false,
     // Scala 3.8.4 JVM optimizer, scoped to sources and project packages.

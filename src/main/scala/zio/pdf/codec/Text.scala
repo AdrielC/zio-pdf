@@ -103,7 +103,7 @@ private[pdf] object Text {
   }
 
   def charsNoneOf(decoder: Codec[String])(chars: List[Char]): Codec[String] =
-    Codec(utf8, Decoder(takeCharsUntilAny(decoder)(chars) _))
+    Codec(utf8, Decoder(takeCharsUntilAny(decoder)(chars)))
 
   def stringOf(count: Int): Codec[String] =
     bytes(count).exmap(

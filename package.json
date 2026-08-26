@@ -1,0 +1,9 @@
+{
+  "name": "zio-pdf-js-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@noble/hashes": "2.3.0",
+    "pako": "3.0.1"
+  }
+}

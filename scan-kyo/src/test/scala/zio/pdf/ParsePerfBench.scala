@@ -3,7 +3,7 @@
  * vs `zio.prelude.fx.ZPure` via [[zio.scodec.stream.PureDecoder]].
  *
  * Lanes
- *   1. **Kyo** — `Parse.run` on `Text` (`separatedBy` / `repeat`).
+ *   1. **Kyo** — `Parse.runOrAbort` on strings (`separatedBy` / `repeat`).
  *   2. **scodec** — one strict `Decoder[Chunk[…]]` (single `toByteArray`, one pass).
  *   3. **ZPure** — `PureDecoder.once(same Decoder)` so scheduling is `ZPure`
  *      while the grammar lives in one scodec-shaped `Decoder` (the same
@@ -12,7 +12,7 @@
  *
  * scodec and ZPure deliberately share identical **whole-buffer** decoders so
  * neither pays an accidental O(n²) “copy the remainder per line” tax; Kyo
- * stays incremental on `Text` (its natural model).
+ * stays incremental on text (its natural model).
  *
  * Lower ms/iter is better. `@@ sequential` keeps stdout readable.
  */
@@ -23,7 +23,7 @@ import java.nio.charset.StandardCharsets
 
 import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
 import _root_.scodec.bits.BitVector
-import kyo.{Abort, Parse, Result as KResult, Text, *}
+import kyo.{Abort, Parse, Result as KResult, *}
 import zio.scodec.stream.PureDecoder
 import zio.test.*
 import zio.test.TestAspect.sequential
@@ -138,19 +138,19 @@ object ParsePerfBench extends ZIOSpecDefault {
   private val zpSimpleOnce: PureDecoder[Chunk[Int]]            = PureDecoder.once(allSimpleIntsDec)
   private val zpComplexOnce: PureDecoder[Chunk[(Int, Int)]]    = PureDecoder.once(allComplexObjsDec)
 
-  private val kyoSimple: Chunk[Int] < Parse =
-    Parse.separatedBy(Parse.int, Parse.char('\n'), allowTrailing = true)
+  private val kyoSimple: Chunk[Int] < Parse[Char] =
+    Parse.separatedBy(Parse.int, Parse.literal('\n'), allowTrailing = true)
 
-  private val kyoOneObj: (Int, Int) < Parse =
+  private val kyoOneObj: (Int, Int) < Parse[Char] =
     for
-      _ <- Parse.literal(Text("obj "))
+      _ <- Parse.literal("obj ")
       a <- Parse.int
-      _ <- Parse.char(' ')
+      _ <- Parse.literal(' ')
       b <- Parse.int
-      _ <- Parse.literal(Text(" R\n"))
+      _ <- Parse.literal(" R\n")
     yield (a, b)
 
-  private val kyoComplex: Chunk[(Int, Int)] < Parse =
+  private val kyoComplex: Chunk[(Int, Int)] < Parse[Char] =
     Parse.repeat(kyoOneObj)
 
   private def handSimpleCount(arr: Array[Byte]): Int = {
@@ -229,7 +229,7 @@ object ParsePerfBench extends ZIOSpecDefault {
       test("simple: many `int\\n` lines (~ASCII decimal + LF)") {
         println(s"\n=== simple int+LF (${simplePayload.length} chars) ===")
         val kyoMs = timeMillis("Kyo Parse.separatedBy(int, '\\n')                    ", 5) {
-          val r = Abort.run(Parse.run(Text(simplePayload))(kyoSimple)).eval
+          val r = Abort.run(Parse.runOrAbort(simplePayload)(kyoSimple)).eval
           r match {
             case KResult.Success(c) =>
               require(c.length == simpleLines)
@@ -261,7 +261,7 @@ object ParsePerfBench extends ZIOSpecDefault {
       test("complex: many `obj gen num R\\n` lines (PDF-ish indirect ref)") {
         println(s"\n=== complex obj lines (${complexPayload.length} chars) ===")
         val kyoMs = timeMillis("Kyo Parse.repeat(obj / gen / R line)             ", 5) {
-          val r = Abort.run(Parse.run(Text(complexPayload))(kyoComplex)).eval
+          val r = Abort.run(Parse.runOrAbort(complexPayload)(kyoComplex)).eval
           r match {
             case KResult.Success(c) => require(c.length == complexLines)
             case other              => throw new MatchError(other)

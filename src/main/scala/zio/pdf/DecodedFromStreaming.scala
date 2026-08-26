@@ -18,6 +18,11 @@ import zio.stream.ZPipeline
 
 object DecodedFromStreaming {
 
+  final case class MaterializedStreamLimitExceeded(objectNumber: Long, declared: Long, maxBytes: Long)
+      extends RuntimeException(
+        s"content stream $objectNumber declares $declared bytes, above the configured $maxBytes-byte materialization limit"
+      )
+
   /** Pre-sized buffer for chunked content streams (avoids Chunk concatenation). */
   private[pdf] final case class StreamBuf(obj: Obj, bytes: Array[Byte], filled: Int)
 
@@ -31,6 +36,10 @@ object DecodedFromStreaming {
 
   private val acc0: Acc = accInitial
 
+  /** Copy the in-flight content-stream buffer for an independent checkpoint. */
+  private[pdf] def snapshot(acc: Acc): Acc =
+    acc.copy(collect = acc.collect.map(buf => buf.copy(bytes = buf.bytes.clone())))
+
   private def fromAttempt[A](a: Attempt[A]): Either[Throwable, A] =
     a match {
       case Attempt.Successful(v) => Right(v)
@@ -38,7 +47,7 @@ object DecodedFromStreaming {
     }
 
   private def appendChunk(bytes: Array[Byte], filled: Int, c: Chunk[Byte]): Either[Throwable, Int] =
-    c.materialize match {
+    c match {
       case Chunk.ByteArray(arr, off, len) =>
         val space = bytes.length - filled
         if (len > space)
@@ -62,7 +71,11 @@ object DecodedFromStreaming {
    * Core imperative step — shared by [[foldSync]] and the streaming
    * [[pipeline]] (via ZPure wrapper).
    */
-  private[pdf] def applyStep(s: Acc, ev: StreamingDecoded): Either[Throwable, (Chunk[Decoded], Acc)] =
+  private[pdf] def applyStep(
+    s: Acc,
+    ev: StreamingDecoded,
+    maxMaterializedStreamBytes: ByteLimit = StreamingDecode.Config.default.maxMaterializedStreamBytes
+  ): Either[Throwable, (Chunk[Decoded], Acc)] =
     ev match {
       case m: StreamingDecoded.Meta =>
         val mergedXrefs = m.xrefs ++ s.embeddedXrefs.reverse
@@ -79,7 +92,7 @@ object DecodedFromStreaming {
         Right((Chunk.empty, s))
 
       case StreamingDecoded.ContentObjStart(obj, _, Some(bits)) =>
-        fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits)).map {
+        fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits, maxMaterializedStreamBytes)).map {
           case Left(xref)  => (Chunk.empty, s.copy(embeddedXrefs = xref :: s.embeddedXrefs))
           case Right(rows) => (Chunk.fromIterable(rows), s)
         }
@@ -89,8 +102,17 @@ object DecodedFromStreaming {
           case None =>
             if (length < 0L || length > Int.MaxValue)
               Left(new IllegalStateException(s"invalid stream length: $length"))
+            else if (length > maxMaterializedStreamBytes.toLong)
+              Left(MaterializedStreamLimitExceeded(obj.index.number, length, maxMaterializedStreamBytes.toLong))
             else if (length == 0L)
-              fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, _root_.scodec.bits.BitVector.empty))
+              fromAttempt(
+                Decode.expandStreamPayload(
+                  obj.index,
+                  obj.data,
+                  _root_.scodec.bits.BitVector.empty,
+                  maxMaterializedStreamBytes
+                )
+              )
                 .map {
                   case Left(xref)  => (Chunk.empty, s.copy(embeddedXrefs = xref :: s.embeddedXrefs))
                   case Right(rows) => (Chunk.fromIterable(rows), s)
@@ -117,7 +139,7 @@ object DecodedFromStreaming {
               Left(new IllegalStateException(s"short content stream: expected ${bytes.length} got $filled"))
             else {
               val bits = _root_.scodec.bits.BitVector(bytes)
-              fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits)).map {
+              fromAttempt(Decode.expandStreamPayload(obj.index, obj.data, bits, maxMaterializedStreamBytes)).map {
                 case Left(xref)  => (Chunk.empty, Acc(None, xref :: s.embeddedXrefs))
                 case Right(rows) => (Chunk.fromIterable(rows), Acc(None, s.embeddedXrefs))
               }
@@ -130,13 +152,18 @@ object DecodedFromStreaming {
   /**
    * Fold streaming events into `emit` — no per-batch [[Chunk]].
    * `emit` is `inline` so HyperFuse sink spines can beta-reduce the
-   * consumer into this loop (see [[zio.scan.InlineByteScan]]).
+   * consumer into this loop through a monomorphic callback.
    */
-  inline def foldEventsAcc(acc: Acc, events: Chunk[StreamingDecoded], inline emit: Decoded => Unit): Acc = {
+  inline def foldEventsAcc(
+    acc: Acc,
+    events: Chunk[StreamingDecoded],
+    maxMaterializedStreamBytes: ByteLimit,
+    inline emit: Decoded => Unit
+  ): Acc = {
     var s  = acc
     val it = events.iterator
     while it.hasNext do
-      applyStep(s, it.next()) match {
+      applyStep(s, it.next(), maxMaterializedStreamBytes) match {
         case Left(err) => throw err
         case Right((chunk, next)) =>
           val dit = chunk.iterator
@@ -147,11 +174,15 @@ object DecodedFromStreaming {
   }
 
   /**
-   * Synchronous fold with no ZPure interpreter — used by [[zio.pdf.PdfHyperdrive]].
+   * Synchronous fold with no ZPure interpreter — used by `PdfHyperdrive`.
    */
-  def foldSync(acc: Acc, chunk: Chunk[StreamingDecoded]): (Chunk[Decoded], Acc) = {
+  def foldSync(
+    acc: Acc,
+    chunk: Chunk[StreamingDecoded],
+    maxMaterializedStreamBytes: ByteLimit = StreamingDecode.Config.default.maxMaterializedStreamBytes
+  ): (Chunk[Decoded], Acc) = {
     val builder = Chunk.newBuilder[Decoded]
-    val next    = foldEventsAcc(acc, chunk, d => builder += d)
+    val next    = foldEventsAcc(acc, chunk, maxMaterializedStreamBytes, d => builder += d)
     (builder.result(), next)
   }
 
@@ -164,9 +195,13 @@ object DecodedFromStreaming {
    * Synchronous fold of one [[StreamingDecoded]] chunk; returns emitted
    * [[Decoded]] values and next [[Acc]].
    */
-  def foldChunk(acc: Acc, chunk: Chunk[StreamingDecoded]): (Chunk[Decoded], Either[Throwable, Acc]) =
+  def foldChunk(
+    acc: Acc,
+    chunk: Chunk[StreamingDecoded],
+    maxMaterializedStreamBytes: ByteLimit = StreamingDecode.Config.default.maxMaterializedStreamBytes
+  ): (Chunk[Decoded], Either[Throwable, Acc]) =
     try {
-      val (decoded, next) = foldSync(acc, chunk)
+      val (decoded, next) = foldSync(acc, chunk, maxMaterializedStreamBytes)
       (decoded, Right(next))
     } catch {
       case err: Throwable => (Chunk.empty, Left(err))
@@ -177,10 +212,12 @@ object DecodedFromStreaming {
     try Right(finalizeSync(acc))
     catch { case err: Throwable => Left(err) }
 
-  val pipeline: ZPipeline[Any, Throwable, StreamingDecoded, Decoded] =
+  def pipeline(
+    maxMaterializedStreamBytes: ByteLimit = StreamingDecode.Config.default.maxMaterializedStreamBytes
+  ): ZPipeline[Any, Throwable, StreamingDecoded, Decoded] =
     StatefulPipe.fromSync[StreamingDecoded, Acc, Decoded](
       acc0,
       finalizeAcc,
-      applyStep
+      (acc, event) => applyStep(acc, event, maxMaterializedStreamBytes)
     )
 }

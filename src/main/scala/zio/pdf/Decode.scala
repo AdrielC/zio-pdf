@@ -54,9 +54,10 @@ object Decode {
   private[pdf] def expandStreamPayload(
     index: Obj.Index,
     data: Prim,
-    rawStream: _root_.scodec.bits.BitVector
+    rawStream: _root_.scodec.bits.BitVector,
+    maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
   ): Attempt[Either[Xref, List[Decoded]]] =
-    analyzeStream(index, data)(rawStream, Content.uncompress(rawStream)(data))
+    analyzeStream(index, data)(rawStream, Content.uncompress(rawStream, maxOutputBytes)(data))
 
   private def applyStep(s: State, ev: TopLevel): Either[Throwable, (Chunk[Decoded], State)] =
     ev match {
@@ -67,8 +68,11 @@ object Decode {
           case Attempt.Failure(cause)             =>
             Left(new RuntimeException(s"extract stream objects: ${cause.messageWithContext}"))
         }
-      case TopLevel.IndirectObjT(IndirectObj(Obj(_, Prim.Dict(d)), None)) if d.contains("Linearized") =>
-        Right((Chunk.empty, s))
+      // Keep the linearization dictionary in the decoded timeline. Earlier
+      // versions treated it as encoder-only metadata, which made a genuine
+      // `/Linearized` declaration invisible to composable preflight plans.
+      case TopLevel.IndirectObjT(IndirectObj(obj @ Obj(_, Prim.Dict(d)), None)) if d.contains("Linearized") =>
+        Right((Chunk.single(Decoded.DataObj(obj)), s))
       case TopLevel.IndirectObjT(IndirectObj(obj, None)) =>
         Right((Chunk.single(Decoded.DataObj(obj)), s))
       case TopLevel.VersionT(version) =>

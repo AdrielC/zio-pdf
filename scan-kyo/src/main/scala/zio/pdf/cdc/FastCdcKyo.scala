@@ -30,12 +30,11 @@ object FastCdcKyo {
     def go(carry: Array[Byte], off: Int): Unit < Emit[Array[Byte]] =
       if (off < arr.length) {
         val end             = math.min(off + chunkSize, arr.length)
-        val slice           = java.util.Arrays.copyOfRange(arr, off, end)
-        val merged          = FastCdc.mergeArrays(carry, slice)
-        val (emitted, rest) = FastCdc.drainToArrays(merged, flushTail = false, cfg)
+        val merged          = FastCdcSupport.append(carry, arr, off, end)
+        val (emitted, rest) = FastCdcSupport.drain(merged, flushTail = false, cfg)
         flushEmitted(emitted, 0, go(rest, end))
       } else {
-        val (emitted, _) = FastCdc.drainToArrays(carry, flushTail = true, cfg)
+        val (emitted, _) = FastCdcSupport.drain(carry, flushTail = true, cfg)
         flushEmitted(emitted, 0, ())
       }
 

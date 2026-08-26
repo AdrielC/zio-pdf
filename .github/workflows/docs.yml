@@ -1,0 +1,91 @@
+name: Publish Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples-js/**"
+      - "js/**"
+      - "src/**"
+      - "build.sbt"
+      - "project/**"
+      - "README.md"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docs-pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  JAVA_OPTS: ""
+  SBT_OPTS: -Dsbt.supershell=false
+
+jobs:
+  build:
+    name: Build browser docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: sbt
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install sbt
+        shell: bash
+        run: |
+          if ! command -v sbt >/dev/null 2>&1; then
+            curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
+            chmod +x /usr/local/bin/cs
+            /usr/local/bin/cs install sbt
+          fi
+          echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
+
+      - name: Build browser docs
+        env:
+          DOCS_BASE: /zio-pdf/
+        run: |
+          npm ci
+          npm --prefix examples-js/frontend ci
+          npm --prefix examples-js/frontend run build
+
+      - name: Verify docs artifact
+        run: |
+          test -f examples-js/frontend/dist/index.html
+          test -d examples-js/frontend/dist/assets
+          grep -qF '/zio-pdf/assets/' examples-js/frontend/dist/index.html
+          test -z "$(grep -RIl 'Syntax error in text' examples-js/frontend/dist || true)"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: examples-js/frontend/dist
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

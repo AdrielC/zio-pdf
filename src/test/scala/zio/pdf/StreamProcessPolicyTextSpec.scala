@@ -4,7 +4,7 @@
 
 package zio.pdf
 
-import _root_.scodec.Attempt
+import _root_.scodec.{Attempt, Err}
 import _root_.scodec.bits.BitVector
 import zio.*
 import zio.prelude.Validation
@@ -136,6 +136,21 @@ object StreamProcessPolicyTextSpec extends ZIOSpecDefault {
       )
     },
 
+    test("mapUncompressedContent reports callback failures in the stream error channel") {
+      val expected = new IllegalArgumentException("transform rejected content")
+      for {
+        bytes <- minimalPdfBytes
+        exit <- ZStream
+                  .fromChunk(Chunk.fromArray(bytes))
+                  .via(PdfStream.mapUncompressedContent()(_ => throw expected))
+                  .runDrain
+                  .exit
+      } yield assertTrue(
+        exit.causeOption.exists(_.failureOption.contains(expected)),
+        exit.causeOption.forall(_.dieOption.isEmpty)
+      )
+    },
+
     test("PdfPolicy.strict flags OpenAction JavaScript") {
       for {
         bytes  <- jsPdfBytes
@@ -222,6 +237,52 @@ object StreamProcessPolicyTextSpec extends ZIOSpecDefault {
       assertTrue(TextExtract.extractFromBits(contentPayload).contains("hi"))
     },
 
+    test("TextExtract resolves page font ToUnicode CMaps including bfchar and bfrange") {
+      val pageIndex = Obj.Index(3L, 0)
+      val contentIndex = Obj.Index(4L, 0)
+      val fontIndex = Obj.Index(5L, 0)
+      val cmapIndex = Obj.Index(6L, 0)
+      val page = Page(
+        pageIndex,
+        Prim.dict(
+          "Contents" -> Prim.Ref(contentIndex.number, contentIndex.generation),
+          "Resources" -> Prim.dict("Font" -> Prim.dict("F1" -> Prim.Ref(fontIndex.number, fontIndex.generation)))
+        ),
+        MediaBox(0, 0, 612, 792)
+      )
+      val cmap =
+        """/CIDInit /ProcSet findresource begin
+          |2 beginbfchar
+          |<01> <0041>
+          |<02> <0042>
+          |endbfchar
+          |1 beginbfrange
+          |<03> <04> <0043>
+          |endbfrange
+          |end""".stripMargin
+      val elements = Chunk(
+        Element.Data(Obj(pageIndex, page.data), Element.DataKind.Page(page)),
+        Element.Data(
+          Obj(fontIndex, Prim.dict("Type" -> Prim.Name("Font"), "ToUnicode" -> Prim.Ref(cmapIndex.number, cmapIndex.generation))),
+          Element.DataKind.General
+        ),
+        Element.Content(
+          Obj(contentIndex, Prim.Dict.empty),
+          BitVector.empty,
+          Uncompressed.now(BitVector("BT /F1 12 Tf <01020304> Tj ET".getBytes)),
+          Element.ContentKind.General
+        ),
+        Element.Content(
+          Obj(cmapIndex, Prim.Dict.empty),
+          BitVector.empty,
+          Uncompressed.now(BitVector(cmap.getBytes)),
+          Element.ContentKind.General
+        )
+      )
+
+      assertTrue(TextExtract.fromElements(elements) == Chunk(PageText(pageIndex.number, "ABCD")))
+    },
+
     test("TextExtract.fromElements on written PDF") {
       for {
         bytes <- minimalPdfBytes
@@ -231,6 +292,50 @@ object StreamProcessPolicyTextSpec extends ZIOSpecDefault {
         pages.size == 1,
         pages.head.text.contains("hi")
       )
+    },
+
+    test("TextExtract tolerates a page stream that cannot be decompressed") {
+      val pageIndex = Obj.Index(3L, 0)
+      val streamIndex = Obj.Index(4L, 0)
+      val page = Page(
+        pageIndex,
+        Prim.dict("Contents" -> Prim.Ref(streamIndex.number, streamIndex.generation)),
+        MediaBox(0, 0, 612, 792)
+      )
+      val unreadableIfInflated = Uncompressed.lazily(
+        Attempt.failure(Err("fontless artwork must not be inflated for literal text extraction"))
+      )
+      val elements = Chunk(
+        Element.Data(Obj(pageIndex, page.data), Element.DataKind.Page(page)),
+        Element.Content(
+          Obj(streamIndex, Prim.dict("Filter" -> Prim.Name("FlateDecode"))),
+          BitVector.empty,
+          unreadableIfInflated,
+          Element.ContentKind.General
+        )
+      )
+
+      assertTrue(TextExtract.fromElements(elements) == Chunk(PageText(pageIndex.number, "")))
+    },
+
+    test("Elements classifies Flate image XObjects independently of export codec") {
+      val image = Decoded.ContentObj(
+        Obj(
+          Obj.Index(7L, 0),
+          Prim.dict(
+            "Subtype" -> Prim.Name("Image"),
+            "Filter"  -> Prim.Name("FlateDecode"),
+            "Width"   -> Prim.Number(BigDecimal(1)),
+            "Height"  -> Prim.Number(BigDecimal(1))
+          )
+        ),
+        BitVector.empty,
+        Uncompressed.now(BitVector.empty)
+      )
+      val codec = Elements.classifyOne(image).toOption.collect {
+        case Element.Content(_, _, _, Element.ContentKind.Image(found)) => found.codec
+      }
+      assertTrue(codec.contains(Image.Codec.Flate))
     },
 
     test("PdfStream.extractText pipeline") {

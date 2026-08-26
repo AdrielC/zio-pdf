@@ -9,5 +9,5 @@ package zio.scodec.stream
 
 import _root_.scodec.Err
 
-/** Wraps a scodec [[Err]] in a [[Throwable]] so it can flow through ZIO error channels. */
+/** Wraps a scodec `Err` in a `Throwable` so it can flow through ZIO error channels. */
 final case class CodecError(err: Err) extends Exception(err.messageWithContext)

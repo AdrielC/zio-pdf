@@ -176,13 +176,27 @@ object AssemblePdf {
     }
   }
 
+  /** Mutable, allocation-light fold used by fused path callbacks. */
+  private[pdf] final class Accumulator {
+    private var state: State = emptyState
+
+    def add(decoded: Decoded): Unit =
+      state = step(state, decoded)
+
+    def result: Validation[AssemblyError, ValidatedPdf] =
+      consPdf(state)
+  }
+
+  private[pdf] def accumulator(): Accumulator =
+    new Accumulator
+
   /** Run `decoded` to completion and assemble the result. */
-  def apply(decoded: ZStream[Any, Throwable, Decoded]): ZIO[Any, Throwable, Validation[AssemblyError, ValidatedPdf]] =
+  def apply[R](decoded: ZStream[R, Throwable, Decoded]): ZIO[R, Throwable, Validation[AssemblyError, ValidatedPdf]] =
     decoded
       .runFold(emptyState)(step)
       .map(consPdf)
 
-  /** Assemble from an in-memory chunk (same fold as [[apply]], no [[ZStream]]). */
+  /** Assemble from an in-memory chunk (same fold as [[apply]], no `ZStream`). */
   def fromChunk(decoded: Chunk[Decoded]): Validation[AssemblyError, ValidatedPdf] =
     consPdf(decoded.foldLeft(emptyState)(step))
 }

@@ -31,7 +31,7 @@
  *
  *   - `ingest3Stage{Direct,Reg}`         -- BombGuard >>> CountBytes
  *                                            >>> Hash(SHA-256). The
- *                                            canonical Graviton
+ *                                            canonical CAS ingest
  *                                            sequential ingest shape.
  *                                            Three stateful primitives
  *                                            in series.
@@ -148,13 +148,13 @@ class ComplexScanBench {
     Scan.test[Byte, Byte](_ % 2 == 0)(evenArm)(oddArm)
   }
 
-  /** The "full Graviton ingest": `bombGuard >>> (count &&& hash &&&
+  /** A full CAS ingest: `bombGuard >>> (count &&& hash &&&
     * fastCdc)`. This is the maximally-realistic shape -- one byte
     * stream broadcast to a counter, a SHA-256, and a content-defined
     * chunker. FastCDC pulls its weight (a Rabin-style rolling hash
     * per byte), so this lane measures whether the streaming overhead
     * shows up next to a real per-byte workload. */
-  private val gravitonFullIngest: FreeScan[Byte, ((Byte, Byte), kyo.Chunk[Byte])] = {
+  private val casFullIngest: FreeScan[Byte, ((Byte, Byte), kyo.Chunk[Byte])] = {
     val guard = Scan.bombGuard(maxBytes = 1L << 30)
     val arm   = (Scan.countBytes &&& Scan.hash(HashAlgo.Sha256)) &&&
                   Scan.fastCdc(min = 4 * 1024, avg = 16 * 1024, max = 64 * 1024)
@@ -182,7 +182,7 @@ class ComplexScanBench {
   private val foldLong: FreeScan[Byte, Long] =
     Scan.fold[Byte, Long](0L)((acc, _) => acc + 1L)
 
-  /** Graviton-style 3-stage sequential ingest. */
+  /** Three-stage sequential CAS ingest. */
   private val ingestSeq: FreeScan[Byte, Byte] =
     Scan.bombGuard(maxBytes = 1L << 30) >>>
       Scan.countBytes                    >>>
@@ -221,57 +221,57 @@ class ComplexScanBench {
   // 32-stage pure spine (fuses).
   @Benchmark
   def deepPureSpineDirect: Vector[Int] =
-    Scan.runDirect[Byte, Int, Any](deepPure, bytesSeq)._2
+    deepPure.runSinglePass(bytesSeq)._2
 
   @Benchmark
   def deepPureSpineReg: Vector[Int] =
-    Scan.runDirectReg[Byte, Int, Any](deepPure, bytesSeq)._2
+    deepPure.runRegistered(bytesSeq)._2
 
   // 16-stage non-fusable spine.
   @Benchmark
   def deepMixedSpineDirect: Vector[Int] =
-    Scan.runDirect[Byte, Int, Any](deepMixed, bytesSeq)._2
+    deepMixed.runSinglePass(bytesSeq)._2
 
   @Benchmark
   def deepMixedSpineReg: Vector[Int] =
-    Scan.runDirectReg[Byte, Int, Any](deepMixed, bytesSeq)._2
+    deepMixed.runRegistered(bytesSeq)._2
 
-  // Graviton-style 3-stage sequential ingest.
+  // Three-stage sequential CAS ingest.
   @Benchmark
   def ingest3StageDirect: Long = {
-    val (sig, _) = Scan.runDirect[Byte, Byte, Any](ingestSeq, bytesSeq)
+    val (sig, _) = ingestSeq.runSinglePass(bytesSeq)
     sig.leftoverSeq.size.toLong
   }
 
   @Benchmark
   def ingest3StageReg: Long = {
-    val (sig, _) = Scan.runDirectReg[Byte, Byte, Any](ingestSeq, bytesSeq)
+    val (sig, _) = ingestSeq.runRegistered(bytesSeq)
     sig.leftoverSeq.size.toLong
   }
 
   // Stateful fanout (register lane falls back to legacy).
   @Benchmark
   def ingestFanoutDirect: Long = {
-    val (sig, _) = Scan.runDirect[Byte, (Byte, Byte), Any](ingestFanout, bytesSeq)
+    val (sig, _) = ingestFanout.runSinglePass(bytesSeq)
     sig.leftoverSeq.size.toLong
   }
 
   @Benchmark
   def ingestFanoutReg: Long = {
-    val (sig, _) = Scan.runDirectReg[Byte, (Byte, Byte), Any](ingestFanout, bytesSeq)
+    val (sig, _) = ingestFanout.runRegistered(bytesSeq)
     sig.leftoverSeq.size.toLong
   }
 
   // 8-deep fold spine.
   @Benchmark
   def deepFoldSpineDirect: Long = {
-    val (sig, _) = Scan.runDirect[Byte, Long, Any](deepFold, bytesSeq)
+    val (sig, _) = deepFold.runSinglePass(bytesSeq)
     sig.leftoverSeq.headOption.getOrElse(0L)
   }
 
   @Benchmark
   def deepFoldSpineReg: Long = {
-    val (sig, _) = Scan.runDirectReg[Byte, Long, Any](deepFold, bytesSeq)
+    val (sig, _) = deepFold.runRegistered(bytesSeq)
     sig.leftoverSeq.headOption.getOrElse(0L)
   }
 
@@ -282,24 +282,22 @@ class ComplexScanBench {
   // 64-stage pure spine (fuses).
   @Benchmark
   def deepPureSpine64Direct: Vector[Int] =
-    Scan.runDirect[Byte, Int, Any](deepPure64, bytesSeq)._2
+    deepPure64.runSinglePass(bytesSeq)._2
 
   @Benchmark
   def deepPureSpine64Reg: Vector[Int] =
-    Scan.runDirectReg[Byte, Int, Any](deepPure64, bytesSeq)._2
+    deepPure64.runRegistered(bytesSeq)._2
 
   // Nested fanout (two levels).
   @Benchmark
   def nestedFanoutDirect: Long = {
-    val (sig, _) =
-      Scan.runDirect[Byte, ((Int, Int), Long), Any](nestedFanout, bytesSeq)
+    val (sig, _) = nestedFanout.runSinglePass(bytesSeq)
     sig.leftoverSeq.size.toLong
   }
 
   @Benchmark
   def nestedFanoutReg: Long = {
-    val (sig, _) =
-      Scan.runDirectReg[Byte, ((Int, Int), Long), Any](nestedFanout, bytesSeq)
+    val (sig, _) = nestedFanout.runRegistered(bytesSeq)
     sig.leftoverSeq.size.toLong
   }
 
@@ -309,36 +307,28 @@ class ComplexScanBench {
 
   @Benchmark
   def choiceRoutingDirect: Long = {
-    val (sig, _) = Scan.runDirect[Byte, Byte, Any](choiceRouting, choiceInputs)
+    val (sig, _) = choiceRouting.runSinglePass(choiceInputs)
     sig.leftoverSeq.size.toLong
   }
 
   @Benchmark
   def choiceRoutingReg: Long = {
-    val (sig, _) = Scan.runDirectReg[Byte, Byte, Any](choiceRouting, choiceInputs)
+    val (sig, _) = choiceRouting.runRegistered(choiceInputs)
     sig.leftoverSeq.size.toLong
   }
 
-  // Full Graviton ingest: BombGuard >>> (Count &&& Hash &&& FastCDC).
+  // Full CAS ingest: BombGuard >>> (Count &&& Hash &&& FastCDC).
   // FastCDC is the per-byte expensive stage here; we still run on the
   // full 256 KiB to keep the comparison fair across runners.
   @Benchmark
-  def gravitonFullDirect: Long = {
-    val (sig, _) =
-      Scan.runDirect[Byte, ((Byte, Byte), kyo.Chunk[Byte]), Any](
-        gravitonFullIngest,
-        bytesSeq
-      )
+  def casFullDirect: Long = {
+    val (sig, _) = casFullIngest.runSinglePass(bytesSeq)
     sig.leftoverSeq.size.toLong
   }
 
   @Benchmark
-  def gravitonFullReg: Long = {
-    val (sig, _) =
-      Scan.runDirectReg[Byte, ((Byte, Byte), kyo.Chunk[Byte]), Any](
-        gravitonFullIngest,
-        bytesSeq
-      )
+  def casFullReg: Long = {
+    val (sig, _) = casFullIngest.runRegistered(bytesSeq)
     sig.leftoverSeq.size.toLong
   }
 

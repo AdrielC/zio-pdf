@@ -1,15 +1,12 @@
 /*
- * Composed hyperdrive pipelines — volga / [[Pipe]] arrows as plain fused functions.
+ * Composed in-memory decode pipelines — volga / [[Pipe]] arrows as plain
+ * fused functions. File paths are driven incrementally by [[FusedDecoder]].
  *
  * Sequential stages use `>>>`; fan-out of independent views uses `<>` / `&&&`
  * (see [[PipeCat]] for the full CartesianCat instance).
  */
 
 package zio.pdf.pipe
-
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
-import java.nio.file.{Path, StandardOpenOption}
 
 import zio.Chunk
 import zio.pdf.{Decoded, Element, Elements, StreamingDecoded}
@@ -31,37 +28,6 @@ private[pdf] object DecodePipeline {
   def fromBytes(cfg: Cfg = Cfg()): Pipe[Array[Byte], Chunk[Decoded]] =
     sliceWhole >>> Pipe(slice => FusedDecode.decodeSlice(slice, cfg))
 
-  val mmapRead: Pipe[Path, MappedByteBuffer] =
-    Pipe { path =>
-      val channel = FileChannel.open(path, StandardOpenOption.READ)
-      try {
-        val size = channel.size()
-        require(size <= Int.MaxValue, s"file too large for hyperdrive mmap: $size bytes")
-        channel.map(FileChannel.MapMode.READ_ONLY, 0L, size)
-      } finally
-        channel.close()
-    }
-
-  private def sliceFromMapped(mapped: MappedByteBuffer): Slice =
-    if mapped.hasArray then
-      Slice(
-        mapped.array(),
-        mapped.arrayOffset() + mapped.position(),
-        mapped.remaining()
-      )
-    else
-      val dup = mapped.duplicate()
-      val arr = new Array[Byte](dup.remaining())
-      dup.get(arr)
-      Slice(arr, 0, arr.length)
-
-  val bytesFromMapped: Pipe[MappedByteBuffer, Slice] = Pipe(sliceFromMapped)
-
-  val readSliceMmap: Pipe[Path, Slice] =
-    mmapRead >>> bytesFromMapped
-
-  def readSlice(cfg: Cfg = Cfg()): Pipe[Path, Slice] = readSliceMmap
-
   def decodeSlice(cfg: Cfg = Cfg()): Pipe[Slice, Chunk[Decoded]] =
     Pipe(slice => FusedDecode.decodeSlice(slice, cfg))
 
@@ -74,29 +40,8 @@ private[pdf] object DecodePipeline {
   def elementsSliceSink(cfg: Cfg = Cfg()): (Slice, Element => Unit) => Long =
     (slice, sink) => FusedElements.decodeSliceSink(slice, cfg)(sink)
 
-  def fromPathMmap(cfg: Cfg = Cfg()): Pipe[Path, Chunk[Decoded]] =
-    readSliceMmap >>> decodeSlice(cfg)
-
-  def fromPathSink(cfg: Cfg = Cfg()): (Path, Decoded => Unit) => Long =
-    (path, sink) => decodeSliceSink(cfg)(readSlice(cfg).run(path), sink)
-
-  def fromPathMmapSink(cfg: Cfg = Cfg()): (Path, Decoded => Unit) => Long =
-    (path, sink) => decodeSliceSink(cfg)(readSliceMmap.run(path), sink)
-
-  def elementsFromPathSink(cfg: Cfg = Cfg()): (Path, Element => Unit) => Long =
-    (path, sink) => elementsSliceSink(cfg)(readSlice(cfg).run(path), sink)
-
-  def fromPath(cfg: Cfg = Cfg()): Pipe[Path, Chunk[Decoded]] =
-    readSlice(cfg) >>> decodeSlice(cfg)
-
   def elementsFromBytes(cfg: Cfg = Cfg()): Pipe[Array[Byte], Chunk[Element]] =
     sliceWhole >>> elementsSlice(cfg)
-
-  def elementsFromPathMmap(cfg: Cfg = Cfg()): Pipe[Path, Chunk[Element]] =
-    readSliceMmap >>> elementsSlice(cfg)
-
-  def elementsFromPath(cfg: Cfg = Cfg()): Pipe[Path, Chunk[Element]] =
-    readSlice(cfg) >>> elementsSlice(cfg)
 
   /** Two-phase elements (decode timeline then classify) — parity / debug only. */
   def elementsStagedFromBytes(cfg: Cfg = Cfg()): Pipe[Array[Byte], Chunk[Element]] =

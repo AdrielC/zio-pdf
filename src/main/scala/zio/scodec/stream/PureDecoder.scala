@@ -64,7 +64,7 @@ final case class PureDecoder[+A](
     }
   }
 
-  /** Decode strictly and unwrap into an [[Attempt]] over the emitted chunk. */
+  /** Decode strictly and unwrap into an `Attempt` over the emitted chunk. */
   def attemptStrict(bits: BitVector): Attempt[DecodeResult[Chunk[A]]] =
     decodeStrict(bits) match {
       case Right(r)              => Attempt.successful(r)
@@ -196,7 +196,7 @@ object PureDecoder {
   /** Decoder that produces nothing and signals it needs more bits. */
   val needMore: PureDecoder[Nothing] = PureDecoder(ZPure.succeed(Status.NeedMore))
 
-  /** Decoder that fails immediately with the given scodec [[Err]]. */
+  /** Decoder that fails immediately with the given scodec `Err`. */
   def fail(err: Err): PureDecoder[Nothing] = PureDecoder(ZPure.fail(CodecError(err)))
 
   /** Decoder that emits `a` and is done. */
@@ -213,7 +213,7 @@ object PureDecoder {
   }
 
   /**
-   * Decode exactly one `A` using the supplied scodec [[Decoder]].
+   * Decode exactly one `A` using the supplied scodec `Decoder`.
    * Insufficient bits is reported via [[Status.NeedMore]] (no
    * failure). Other decode errors are reported via the error channel
    * if `failOnErr`, otherwise the decoder finishes with
@@ -224,7 +224,7 @@ object PureDecoder {
 
   /**
    * Repeatedly decode `A` values using the supplied scodec
-   * [[Decoder]]. As long as the buffer can produce a value, this
+   * `Decoder`. As long as the buffer can produce a value, this
    * decoder loops in pure-state and emits each one through the log.
    */
   def many[A](decoder: Decoder[A], failOnErr: Boolean = true): PureDecoder[A] =

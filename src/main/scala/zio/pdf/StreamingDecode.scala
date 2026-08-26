@@ -32,10 +32,15 @@ object StreamingDecode {
     inlineMaxBytes: Long,
     emitObjectEnds: Boolean = false,
     maxCarryBytes: Option[Int] = None,
-    emitContentEvents: Boolean = true
+    emitContentEvents: Boolean = true,
+    maxMaterializedStreamBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
   ) {
     require(inlineMaxBytes >= 0L, "inlineMaxBytes must be non-negative")
     require(maxCarryBytes.forall(_ > 0), "maxCarryBytes must be positive when defined")
+    require(
+      inlineMaxBytes <= maxMaterializedStreamBytes.toLong,
+      "inlineMaxBytes must not exceed maxMaterializedStreamBytes"
+    )
   }
 
   object Config {
@@ -44,6 +49,17 @@ object StreamingDecode {
 
   final case class CarryLimitExceeded(maxBytes: Int, observedBytes: Long)
       extends RuntimeException(s"PDF parser carry exceeded configured limit of $maxBytes bytes (observed $observedBytes)")
+
+  final case class UnresolvedIndirectStreamLength(index: Obj.Index, reference: Prim.Ref)
+      extends RuntimeException(
+        s"stream object ${index.number} has indirect /Length ${reference.number} ${reference.generation} R; resolve it through xref random access before boundary scanning"
+      )
+
+  final case class InvalidDeclaredStreamLength(index: Obj.Index, detail: String)
+      extends RuntimeException(s"stream object ${index.number} has no usable direct /Length: $detail")
+
+  final case class UnexpectedEndOfInput(context: String, remainingBytes: Long)
+      extends RuntimeException(s"unexpected end of PDF input while $context ($remainingBytes bytes remain)")
 
   private type HeaderEvent = PdfByteLexer.HeaderEvent
   import PdfByteLexer.HeaderEvent
@@ -127,7 +143,7 @@ object StreamingDecode {
   private val endobjTrailer: _root_.scodec.Codec[Unit] = IndirectObj.endobj
 
   private def tryConsumeTrailer(
-    state: State,
+    state: ConsumingTrailer | ConsumingTrailerNoStream,
     carry: BitVector
   ): Either[BitVector, Either[Throwable, BitVector]] = state match {
     case ConsumingTrailer(_, _) =>
@@ -148,7 +164,6 @@ object StreamingDecode {
         case Attempt.Failure(other) =>
           Right(Left(new RuntimeException(s"endobj trailer: ${other.messageWithContext}")))
       }
-    case _ => sys.error("not a trailer state")
   }
 
   private def stepAll(
@@ -239,9 +254,14 @@ object StreamingDecode {
       }
 
     case wh @ WaitingHeader(carry) =>
-      PdfByteLexer.next(carry.bytes) match {
+      PdfByteLexer.next(
+        carry.bytes,
+        allowRawDictionaryStream = cfg.emitObjectEnds && !cfg.emitContentEvents
+      ) match {
         case PdfByteLexer.LexResult.NeedMore =>
           (in, wh)
+        case PdfByteLexer.LexResult.Failed(error) =>
+          throw error
         case PdfByteLexer.LexResult.Ok(event, rest) =>
           val restBits = if (rest.isEmpty) BitVector.empty else rest.bits
           val (events, next) = headerToEvent(cfg, event, restBits, dup)
@@ -279,18 +299,15 @@ object StreamingDecode {
       case ConsumingTrailer(i, _)         => ConsumingTrailer(i, newCarry)
       case ConsumingTrailerNoStream(i, _) => ConsumingTrailerNoStream(i, newCarry)
     }
-    try {
-      val result = stepAll(cfg, withCarry, dup, bytesSeen)
-      cfg.maxCarryBytes.foreach { max =>
-        val carryBytes = stateCarry(result._2).bytes.size
-        if carryBytes > max.toLong then throw CarryLimitExceeded(max, carryBytes)
-      }
-      val retainedState =
-        if cfg.maxCarryBytes.isDefined then compactStateCarry(result._2)
-        else result._2
-      (result._1, retainedState)
+    val result = stepAll(cfg, withCarry, dup, bytesSeen)
+    cfg.maxCarryBytes.foreach { max =>
+      val carryBytes = stateCarry(result._2).bytes.size
+      if carryBytes > max.toLong then throw CarryLimitExceeded(max, carryBytes)
     }
-    catch { case _: NoSuchElementException => sys.error("unreachable") }
+    val retainedState =
+      if cfg.maxCarryBytes.isDefined then compactStateCarry(result._2)
+      else result._2
+    (result._1, retainedState)
   }
 
   private def stateCarry(state: State): BitVector = state match {
@@ -340,9 +357,44 @@ object StreamingDecode {
   /** Starting state for a decode run (fresh duplicate filter, empty carry). */
   def initialFinalState: FinalState = initial
 
+  /** Fail closed when the source ends inside a token, payload, or object trailer. */
+  def validateFinalState(fs: FinalState): Either[UnexpectedEndOfInput, Unit] =
+    fs.state match
+      case WaitingHeader(carry) if carry.isEmpty => Right(())
+      case WaitingHeader(carry) => Left(UnexpectedEndOfInput("reading a top-level token", carry.bytes.size))
+      case ForwardingBytes(_, remaining, _) => Left(UnexpectedEndOfInput("forwarding a stream payload", remaining))
+      case BufferingBytes(_, total, filled, _, _) =>
+        Left(UnexpectedEndOfInput("buffering a stream payload", total.toLong - filled.toLong))
+      case SkippingStreamPayload(_, remaining, _) =>
+        Left(UnexpectedEndOfInput("skipping a stream payload", remaining))
+      case ConsumingTrailer(_, carry) =>
+        Left(UnexpectedEndOfInput("reading endstream/endobj", carry.bytes.size))
+      case ConsumingTrailerNoStream(_, carry) =>
+        Left(UnexpectedEndOfInput("reading endobj", carry.bytes.size))
+
   /** Bytes currently retained for incomplete structural parsing. */
   private[pdf] def structuralCarryBytes(fs: FinalState): Long =
     stateCarry(fs.state).bytes.size
+
+  /**
+   * Copy every mutable buffer in a parser cursor so a resumed decode cannot
+   * mutate the checkpoint it started from.
+   */
+  private[pdf] def snapshotFinalState(fs: FinalState): FinalState =
+    fs.copy(
+      state = snapshotState(fs.state),
+      dupFilter = DuplicateFilterState.snapshot(fs.dupFilter)
+    )
+
+  private def snapshotState(state: State): State = state match {
+    case WaitingHeader(carry) => WaitingHeader(carry)
+    case ForwardingBytes(index, remaining, carry) => ForwardingBytes(index, remaining, carry)
+    case BufferingBytes(obj, bytesTotal, filled, carry, acc) =>
+      BufferingBytes(obj, bytesTotal, filled, carry, acc.clone())
+    case SkippingStreamPayload(index, remaining, carry) => SkippingStreamPayload(index, remaining, carry)
+    case ConsumingTrailer(index, carry)                  => ConsumingTrailer(index, carry)
+    case ConsumingTrailerNoStream(index, carry)          => ConsumingTrailerNoStream(index, carry)
+  }
 
   /**
    * Synchronous byte step: feed one chunk through the streaming state machine
@@ -353,7 +405,7 @@ object StreamingDecode {
     fs: FinalState,
     chunk: Chunk[Byte]
   ): (Chunk[StreamingDecoded], FinalState) =
-    chunk.materialize match {
+    chunk match {
       case Chunk.ByteArray(arr, off, len) =>
         stepChunkBytes(config, fs, arr, off, len)
       case _ =>
@@ -396,7 +448,8 @@ object StreamingDecode {
    * trailing [[StreamingDecoded.Meta]] (same as [[pipeline]]'s channel).
    */
   def finalizeToMeta(enableDiagnostics: Boolean, fs: FinalState): ZIO[Any, Throwable, Chunk[StreamingDecoded]] =
-    ZPureLog.drainToZio(finalizeToMetaDiagnostics(enableDiagnostics, fs)) *>
+    ZIO.fromEither(validateFinalState(fs)) *>
+      ZPureLog.drainToZio(finalizeToMetaDiagnostics(enableDiagnostics, fs)) *>
       ZIO.succeed(finalizeToMetaChunk(fs))
 
   /** Trailing [[StreamingDecoded.Meta]] chunk (no diagnostics). */
@@ -407,7 +460,7 @@ object StreamingDecode {
     Chunk.single(StreamingDecoded.Meta(xs, sanitised, fs.version))
   }
 
-  /** Diagnostic lines from [[ZPure.log]] when duplicate suppression ran. */
+  /** Diagnostic lines from `ZPure.log` when duplicate suppression ran. */
   def finalizeToMetaDiagnostics(enableDiagnostics: Boolean, fs: FinalState): Chunk[ZPureLogEntry] =
     if (enableDiagnostics && fs.dupFilter.duplicateCount > 0)
       ZPureLog.lines(
@@ -417,6 +470,7 @@ object StreamingDecode {
 
   /** Same as [[finalizeToMeta]] without ZIO (diagnostics go to stderr when enabled). */
   def finalizeToMetaSync(enableDiagnostics: Boolean, fs: FinalState): Chunk[StreamingDecoded] = {
+    validateFinalState(fs).fold(throw _, identity)
     ZPureLog.drainSync(finalizeToMetaDiagnostics(enableDiagnostics, fs))
     finalizeToMetaChunk(fs)
   }

@@ -35,7 +35,7 @@ class PdfHyperdriveBench {
     bytes = is.readAllBytes()
     is.close()
     pdfPath = Files.createTempFile("hyperdrive-bench-", ".pdf")
-    Files.write(pdfPath, bytes)
+    Files.write(pdfPath, bytes): Unit
   }
 
   @TearDown(Level.Trial)

@@ -13,7 +13,7 @@
 
 package zio.pdf
 
-import _root_.scodec.bits.{BitVector, ByteVector}
+import _root_.scodec.bits.ByteVector
 import zio.*
 import zio.stream.*
 import zio.test.*
@@ -125,6 +125,68 @@ object StreamObjSpec extends ZIOSpecDefault {
         }
         assertTrue(streamFour.isDefined, matched)
       }
+    },
+
+    test("rejects a streaming payload whose emitted bytes disagree with /Length") {
+      val incorrectLength: Part[Trailer] = Part.StreamObj(
+        index = Obj.Index(4, 0),
+        data = Prim.dict(),
+        length = payloadSize.toLong + 1L,
+        payload = patternStream
+      )
+      val partStream: ZStream[Any, Nothing, Part[Trailer]] =
+        ZStream(
+          Part.Obj(catalog),
+          Part.Obj(pages),
+          Part.Obj(page),
+          incorrectLength,
+          Part.Meta(trailer): Part[Trailer]
+        )
+
+      partStream.via(WritePdf.parts).runDrain.either.map { result =>
+        assertTrue(
+          result match {
+            case Left(WritePdf.StreamLengthMismatch(4L, declared, actual)) =>
+              declared == payloadSize.toLong + 1L && actual == payloadSize.toLong
+            case _ => false
+          }
+        )
+      }
+    },
+
+    test("rejects payload bytes beyond /Length before forwarding the overflowing chunk") {
+      val tooLong: Part[Trailer] = Part.StreamObj(
+        index = Obj.Index(4, 0),
+        data = Prim.dict(),
+        length = 3L,
+        payload = ZStream.fromChunk(Chunk[Byte](1, 2, 3, 4))
+      )
+      val partStream = ZStream(
+        Part.Obj(catalog),
+        Part.Obj(pages),
+        Part.Obj(page),
+        tooLong,
+        Part.Meta(trailer): Part[Trailer]
+      )
+
+      partStream.via(WritePdf.parts).runFold(0L)(_ + _.size).exit.map { exit =>
+        assertTrue(
+          exit.causeOption.exists(_.failureOption.contains(WritePdf.StreamLengthMismatch(4L, 3L, 4L)))
+        )
+      }
+    },
+
+    test("rejects negative lengths and non-dictionary stream headers with typed errors") {
+      val negative = Part.StreamObj(Obj.Index(4, 0), Prim.dict(), -1L, ZStream.empty)
+      val nonDict  = Part.StreamObj(Obj.Index(4, 0), Prim.Name("invalid"), 0L, ZStream.empty)
+
+      for {
+        negativeExit <- ZStream(negative, Part.Meta(trailer): Part[Trailer]).via(WritePdf.parts).runDrain.exit
+        nonDictExit  <- ZStream(nonDict, Part.Meta(trailer): Part[Trailer]).via(WritePdf.parts).runDrain.exit
+      } yield assertTrue(
+        negativeExit.causeOption.exists(_.failureOption.contains(WritePdf.InvalidStreamLength(4L, -1L))),
+        nonDictExit.causeOption.exists(_.failureOption.contains(WritePdf.StreamDictionaryRequired(4L)))
+      )
     },
 
     test("encoder can ingest a 10 MiB stream without materialising it") {

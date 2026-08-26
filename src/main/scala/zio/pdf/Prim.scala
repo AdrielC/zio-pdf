@@ -37,7 +37,7 @@ object Prim extends PrimCodec {
     * Once this lands, every downstream facility becomes available
     * without extra code:
     *   - JSON / CBOR / Avro / Protobuf codecs (via
-    *     `Schema.getInstance(format)` or `.jsonCodec`);
+    *     `Schema.derive(format.deriver)`);
     *   - Optics (`Schema#lens`, `Schema#prism`, `Schema#traversal`)
     *     for policy expressions over the parsed PDF model;
     *   - `DynamicValue` for schema-less inspection;
@@ -282,7 +282,7 @@ object Prim extends PrimCodec {
 
 private[pdf] trait PrimCodec {
   import _root_.scodec.codecs.{lazily, optional, recover}
-  import Whitespace.{skipWs, space, ws}
+  import Whitespace.{skipTrivia, space, ws}
   import Codecs.{bracketChar, opt}
   import Text.{ascii, char, ranges, str}
 
@@ -320,7 +320,7 @@ private[pdf] trait PrimCodec {
       case other           => Codecs.fail(s"invalid number: $num ($other)")
     }
 
-  val Codec_Number: Codec[Prim.Number] =
+  private val encodedNumber: Codec[Prim.Number] =
     (
       opt(using char('-')) :: ascii.digits1 :: optional(recover(char('.')), ascii.digits1)
     ).xmap[((Option[Unit], String), Option[String])](
@@ -330,6 +330,36 @@ private[pdf] trait PrimCodec {
       a => Attempt.fromTry(Try(BigDecimal(formatNumber(a)))).map(Prim.Number(_)),
       splitNumber
     )
+
+  /** PDF permits real literals such as `.5`, `-.5`, and `+1.0`. */
+  private val decodeNumber: Decoder[Prim.Number] = Decoder { bits =>
+    val input = bits.bytes
+    var at    = 0L
+
+    if at < input.size && (input(at) == '-'.toByte || input(at) == '+'.toByte) then at += 1L
+
+    val integerStart = at
+    while at < input.size && input(at) >= '0'.toByte && input(at) <= '9'.toByte do at += 1L
+    val hasInteger = at > integerStart
+
+    var hasFraction = false
+    if at < input.size && input(at) == '.'.toByte then {
+      at += 1L
+      val fractionStart = at
+      while at < input.size && input(at) >= '0'.toByte && input(at) <= '9'.toByte do at += 1L
+      hasFraction = at > fractionStart
+    }
+
+    if !hasInteger && !hasFraction then Attempt.failure(_root_.scodec.Err("invalid PDF number"))
+    else {
+      val rendered = new String(input.take(at).toArray, java.nio.charset.StandardCharsets.US_ASCII)
+      Attempt
+        .fromTry(Try(BigDecimal(rendered)))
+        .map(value => _root_.scodec.DecodeResult(Prim.Number(value), input.drop(at).bits))
+    }
+  }
+
+  val Codec_Number: Codec[Prim.Number] = Codec(encodedNumber, decodeNumber)
 
   /** Find the closing `)` for a literal string, taking nested
     * unescaped parens and backslash escapes into account. */
@@ -366,10 +396,10 @@ private[pdf] trait PrimCodec {
   val Codec_HexStr: Codec[Prim.HexStr] =
     bracketChar('<', '>')(hexChar).xmap(Prim.HexStr(_), _.data)
 
-  private def trim[A](inner: Codec[A]): Codec[A] = skipWs ~> inner <~ skipWs
+  private def trim[A](inner: Codec[A]): Codec[A] = skipTrivia ~> inner <~ skipTrivia
 
   val Codec_Array: Codec[Prim.Array] =
-    (skipWs ~> Many.bracket(trim(char('[')), trim(char(']')))(lazily(trim(Codec_Prim)) <~ ws))
+    (skipTrivia ~> Many.bracket(trim(char('[')), trim(char(']')))(lazily(trim(Codec_Prim)) <~ ws))
       .xmap(
         (l: List[Prim])          => Prim.Array(zio.blocks.chunk.Chunk.fromIterable(l)),
         (a: Prim.Array)           => a.data.toList
@@ -386,7 +416,7 @@ private[pdf] trait PrimCodec {
     nameString.xmap(Prim.Name(_), _.data).withContext("name")
 
   private val dictElem: Codec[(String, Prim)] =
-    (Whitespace.skipWs ~> nameString.withContext("dict key") ::
+    (Whitespace.skipTrivia ~> nameString.withContext("dict key") ::
       (ws ~> trim(lazily(Codec_Prim)).withContext("dict value")))
       .withContext("dict elem")
 
@@ -394,7 +424,7 @@ private[pdf] trait PrimCodec {
     trim(str("<<")).withContext("dict<<")
 
   private val dictEndMarker: Codec[Unit] =
-    (Whitespace.skipWs ~> trim(str(">>"))).withContext("dict>>")
+    (Whitespace.skipTrivia ~> trim(str(">>"))).withContext("dict>>")
 
   val Codec_Dict: Codec[Prim.Dict] =
     Many.bracket(dictStartMarker, dictEndMarker)(dictElem)

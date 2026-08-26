@@ -49,8 +49,48 @@ private[pdf] object Whitespace {
   val skipWs: Codec[Unit] =
     multiWhitespace(provide(()))
 
+  /** Horizontal PDF whitespace, used where a line ending is structural. */
+  val horizontalWs: Codec[Unit] =
+    Codec(
+      Codecs.byte(spaceByte),
+      Decoder { bits =>
+        val bytes = bits.bytes
+        val prefix = bytes.takeWhile(byte => byte == spaceByte || byte == '\t'.toByte)
+        Attempt.successful(DecodeResult((), bytes.drop(prefix.size).bits))
+      }
+    )
+
+  /** PDF object trivia: whitespace plus any `%` line comments. */
+  val skipTrivia: Codec[Unit] =
+    Codec(
+      provide(()),
+      Decoder { bits =>
+        val bytes = bits.bytes
+        var index = 0L
+        var continue = true
+        def startsEofMarker(at: Long): Boolean =
+          bytes.size - at >= 5L &&
+            bytes(at) == '%'.toByte &&
+            bytes(at + 1L) == '%'.toByte &&
+            bytes(at + 2L) == 'E'.toByte &&
+            bytes(at + 3L) == 'O'.toByte &&
+            bytes(at + 4L) == 'F'.toByte
+        while continue && index < bytes.size do
+          while index < bytes.size && bytes(index).toChar.isWhitespace do index += 1L
+          if index < bytes.size && bytes(index) == '%'.toByte && !startsEofMarker(index) then
+            index += 1L
+            while index < bytes.size && bytes(index) != '\n'.toByte && bytes(index) != '\r'.toByte do index += 1L
+          else continue = false
+        Attempt.successful(DecodeResult((), bytes.drop(index).bits))
+      }
+    )
+
   val whitespaceAsNewline: Codec[Unit] =
     multiWhitespaceByte(lfByte)
+
+  /** Encode a newline and decode any PDF object trivia. */
+  val triviaAsNewline: Codec[Unit] =
+    Codec(whitespaceAsNewline, skipTrivia)
 
   val space: Codec[Unit] =
     Codecs.byte(' ')

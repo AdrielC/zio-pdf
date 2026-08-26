@@ -23,6 +23,10 @@ private[pdf] object DuplicateFilterState {
 
   def initial: Mutable = new Mutable(new ju.BitSet, updateMode = false, duplicateCount = 0)
 
+  /** Copy the duplicate table for an independent decoder checkpoint. */
+  def snapshot(m: Mutable): Mutable =
+    new Mutable(m.seen.clone().asInstanceOf[ju.BitSet], m.updateMode, m.duplicateCount)
+
   /** @return true if this indirect object should be suppressed */
   def shouldSuppress(m: Mutable, objNum: Long): Boolean =
     if (m.updateMode) false

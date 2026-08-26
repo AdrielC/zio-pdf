@@ -36,14 +36,14 @@ object AdvancedCompositionSpec extends ZIOSpecDefault {
   // -------- helpers --------
 
   private def runD[I, O](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, Any], Vector[O]) =
-    Scan.runDirect[I, O, Any](scan, inputs)
+    scan.run(inputs)
 
   private def runK[I, O](scan: FreeScan[I, O], inputs: Seq[I])(using
       pollTag: Tag[Poll[I]],
       emitTag: Tag[Emit[O]],
       frame: Frame
   ): (ScanDone[O, Any], Chunk[O]) =
-    Scan.runKyo[I, O, Any](scan, inputs).eval
+    scan.runKyo(inputs).eval
 
   /** Both runners must produce the same output sequence. */
   private def agree[I, O](scan: FreeScan[I, O], inputs: Seq[I])(using

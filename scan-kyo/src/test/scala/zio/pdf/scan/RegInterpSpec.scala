@@ -4,11 +4,11 @@
  * For every scan shape that the register lane is supposed to cover
  * (spine of Map / Filter / Take / Drop / Fold / Hash / CountBytes /
  * BombGuard / FixedChunk / FastCDC, plus pure Arr), we run the same
- * inputs through `Scan.runDirect` (legacy stepper) and
- * `Scan.runDirectReg` and assert that the visible outputs agree.
+ * inputs through `scan.runSinglePass` (legacy stepper) and
+ * `scan.runRegistered` and assert that the visible outputs agree.
  *
  * For shapes the register lane intentionally does *not* handle
- * (Fanout/Choice), we still assert agreement -- `runDirectReg` falls
+ * (Fanout/Choice), we still assert agreement -- `scan.runRegistered` falls
  * back to the legacy path for those, so it must produce the same
  * results.
  */
@@ -20,15 +20,9 @@ import zio.test.*
 object RegInterpSpec extends ZIOSpecDefault {
 
   private def agree[I, O](scan: FreeScan[I, O], inputs: Iterable[I]): TestResult = {
-    val (legacySig, legacyOut) = Scan.runDirect[I, O, Any](scan, inputs)
-    val (regSig,    regOut)    = Scan.runDirectReg[I, O, Any](scan, inputs)
-    val sigKindMatches =
-      (legacySig, regSig) match {
-        case (ScanDone.Success(_), ScanDone.Success(_)) => true
-        case (ScanDone.Stop(_),    ScanDone.Stop(_))    => true
-        case (ScanDone.Failure(_, _), ScanDone.Failure(_, _)) => true
-        case _ => false
-      }
+    val (legacySig, legacyOut) = scan.runSinglePass(inputs)
+    val (regSig,    regOut)    = scan.runRegistered(inputs)
+    val sigKindMatches = legacySig.getClass == regSig.getClass
     assertTrue(legacyOut == regOut) && assertTrue(sigKindMatches)
   }
 
@@ -115,10 +109,9 @@ object RegInterpSpec extends ZIOSpecDefault {
         inputs = (0 until 1024).map(_.toByte)
       )
       // Long-typed fold: leftover carries the final accumulator.
-      val (_, legacy) = Scan.runDirect[Byte, Long, Any](
-        Scan.fold[Byte, Long](0L)((n, _) => n + 1L),
-        (0 until 1024).map(_.toByte)
-      )
+      val (_, legacy) = Scan
+        .fold[Byte, Long](0L)((n, _) => n + 1L)
+        .runSinglePass((0 until 1024).map(_.toByte))
       assertTrue(out == legacy)
     },
 
@@ -131,11 +124,11 @@ object RegInterpSpec extends ZIOSpecDefault {
       val fused = Scan.map[Int, Int](_ + 1) >>> Scan.map[Int, Int](_ * 2)
       val isSingleArr = fused match {
         case _: FreeScan.Arr[?, ?] => true
-        case _                     => false
+        case null                  => false
       }
       assertTrue(isSingleArr) &&
         assertTrue {
-          val (_, out) = Scan.run[Int, Int, Any](fused, Seq(10))
+          val (_, out) = fused.run(Seq(10))
           out == Vector((10 + 1) * 2)
         }
     },
@@ -144,7 +137,7 @@ object RegInterpSpec extends ZIOSpecDefault {
       val fused = Scan.map[Int, Int](_ + 1) >>> Scan.filter[Int](_ > 0)
       val isAndThen = fused match {
         case _: FreeScan.AndThen[?, ?, ?] => true
-        case _                            => false
+        case null                         => false
       }
       assertTrue(isAndThen)
     },
@@ -155,7 +148,7 @@ object RegInterpSpec extends ZIOSpecDefault {
       val fused = InlineFusion.fuse(a, b)
       val isSingleArr = fused match {
         case _: FreeScan.Arr[?, ?] => true
-        case _                     => false
+        case null                  => false
       }
       assertTrue(isSingleArr)
     }

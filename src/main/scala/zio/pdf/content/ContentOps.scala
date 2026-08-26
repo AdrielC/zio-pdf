@@ -24,6 +24,77 @@ object ContentToken {
 
 object ContentOps {
 
+  /**
+   * A deliberately conservative structural hint, not semantic table
+   * recognition. This lexical probe does not allocate a token tree for every
+   * general stream: PDFs often carry large non-page payloads. It skips strings,
+   * names, hex data, and comments, so text such as `(re Tj)` cannot be
+   * mistaken for drawing commands.
+   */
+  def looksLikeTable(bytes: Array[Byte]): Boolean = {
+    var rectangle = false
+    var text      = false
+    var i         = 0
+
+    def at(index: Int): Int = if index < bytes.length then bytes(index) & 0xff else -1
+    def isWhitespace(byte: Int): Boolean =
+      byte == ' ' || byte == '\n' || byte == '\r' || byte == '\t' || byte == '\f' || byte == 0
+    def isDelimiter(byte: Int): Boolean =
+      isWhitespace(byte) || byte == '(' || byte == ')' || byte == '<' || byte == '>' ||
+        byte == '[' || byte == ']' || byte == '{' || byte == '}' || byte == '/' || byte == '%'
+    def skipLiteral(start: Int): Int = {
+      var cursor = start + 1
+      var depth  = 1
+      while cursor < bytes.length && depth > 0 do
+        at(cursor) match {
+          case '\\' => cursor += 2
+          case '('  =>
+            depth += 1
+            cursor += 1
+          case ')'  =>
+            depth -= 1
+            cursor += 1
+          case _    => cursor += 1
+        }
+      cursor
+    }
+    def skipUntil(start: Int, end: Int): Int = {
+      var cursor = start
+      while cursor < bytes.length && at(cursor) != end do cursor += 1
+      math.min(cursor + 1, bytes.length)
+    }
+    def skipComment(start: Int): Int = {
+      var cursor = start
+      while cursor < bytes.length && at(cursor) != '\n' && at(cursor) != '\r' do cursor += 1
+      cursor
+    }
+
+    while i < bytes.length && !(rectangle && text) do
+      at(i) match {
+        case byte if isWhitespace(byte) => i += 1
+        case '%'                        => i = skipComment(i + 1)
+        case '('                        => i = skipLiteral(i)
+        case '<'                        => i = skipUntil(i + 1, '>')
+        case '/'                        =>
+          i += 1
+          while i < bytes.length && !isDelimiter(at(i)) do i += 1
+        case '\'' | '\"' =>
+          text = true
+          i += 1
+        case ')' | '>' | '[' | ']' | '{' | '}' => i += 1
+        case _ =>
+          val start = i
+          while i < bytes.length && !isDelimiter(at(i)) do i += 1
+          val length = i - start
+          if length == 2 && at(start) == 'r' && at(start + 1) == 'e' then rectangle = true
+          else if
+            length == 2 && at(start) == 'T' && (at(start + 1) == 'j' || at(start + 1) == 'J')
+          then text = true
+      }
+
+    rectangle && text
+  }
+
   def tokenize(bytes: Array[Byte]): List[ContentToken] = {
     val out = ArrayBuffer.empty[ContentToken]
     var i   = 0

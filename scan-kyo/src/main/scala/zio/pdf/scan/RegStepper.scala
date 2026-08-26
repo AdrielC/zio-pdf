@@ -38,6 +38,8 @@
 
 package zio.pdf.scan
 
+import scala.annotation.nowarn
+
 /** Mutable state arena for a register-based stepper.
   *
   * Two parallel arrays:
@@ -213,11 +215,13 @@ trait RegStepper[-I, +O, +E] {
   def end(regs: RegState, off: RegOff, out: RegOutBuffer): Int
 
   /** Leftover carried by the terminal signal. Default empty. */
+  @nowarn("msg=unused explicit parameter")
   def leftover(regs: RegState, off: RegOff): Seq[O] = Seq.empty
 
   /** Failure payload when `step`/`end` returns `RegSignal.Failure`. The
     * type parameter is the stepper's `E`; the runner widens to `E | Any`
     * because the legacy `Stepper` family historically used `Any` for the
     * error union. */
+  @nowarn("msg=unused explicit parameter")
   def failure(regs: RegState, off: RegOff): Option[E] = None
 }

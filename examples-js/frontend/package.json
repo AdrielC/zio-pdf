@@ -1,0 +1,26 @@
+{
+  "name": "zio-pdf-scalajs-frontend-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "link:dev": "cd ../.. && sbt -batch \"scalaJsFrontend/fastLinkJS\"",
+    "link:prod": "cd ../.. && sbt -batch \"scalaJsFrontend/fullLinkJS\"",
+    "dev": "npm run link:dev && vite",
+    "build": "npm run link:prod && tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.3.0",
+    "@pdfme/common": "^6.1.12",
+    "@pdfme/schemas": "^6.1.12",
+    "@pdfme/ui": "^6.1.12",
+    "lucide": "1.31.0",
+    "pako": "3.0.1",
+    "tesseract.js": "7.0.0"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vite": "8.2.1"
+  }
+}

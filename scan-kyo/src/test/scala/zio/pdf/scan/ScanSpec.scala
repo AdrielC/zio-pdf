@@ -16,7 +16,7 @@ object ScanSpec extends ZIOSpecDefault {
 
   /** Drive a `FreeScan` synchronously and project to `(signal, outputs)`. */
   private def runD[I, O](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, Any], Vector[O]) =
-    Scan.runDirect[I, O, Any](scan, inputs)
+    scan.run(inputs)
 
   /** Drive a `FreeScan` through Kyo and evaluate. */
   private def runK[I, O](scan: FreeScan[I, O], inputs: Seq[I])(using
@@ -24,7 +24,7 @@ object ScanSpec extends ZIOSpecDefault {
       emitTag: Tag[Emit[O]],
       frame: Frame
   ): (ScanDone[O, Any], Chunk[O]) =
-    Scan.runKyo[I, O, Any](scan, inputs).eval
+    scan.runKyo(inputs).eval
 
   /** Both runners agree on the final outputs (ignoring the signal). */
   private def agreeOnOutputs[I, O](scan: FreeScan[I, O], inputs: Seq[I])(using

@@ -1,20 +1,24 @@
 /*
  * Synchronous PDF decode — no `ZStream`, no `ZChannel`, no `Runtime`.
  *
- * Hot paths delegate to [[zio.pdf.pipe.FusedDecode]] (fused streaming +
- * expansion) and [[zio.pdf.pipe.DecodePipeline]] (composed I/O morphisms).
+ * Array inputs use [[zio.pdf.pipe.FusedDecode]]. Path inputs use
+ * [[FusedDecoder]] over one bounded reusable read buffer.
  * Callers should prefer [[PdfEngine]]; this object stays package-private.
  */
 
 package zio.pdf
 
-import java.nio.MappedByteBuffer
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
 
 import zio.Chunk
-import zio.pdf.pipe.DecodePipeline
 import zio.pdf.pipe.FusedDecode
 import zio.pdf.pipe.FusedDecode.Cfg
+
+import scala.annotation.tailrec
 
 private[pdf] object PdfHyperdrive {
 
@@ -24,6 +28,66 @@ private[pdf] object PdfHyperdrive {
     batchSize: Int
   ): Cfg =
     Cfg(enableDiagnostics, config, batchSize)
+
+  private def each[A](chunk: Chunk[A])(consume: A => Unit): Unit = {
+    val iterator = chunk.iterator
+    while iterator.hasNext do consume(iterator.next())
+  }
+
+  /** Fold one bounded reusable read buffer; consumers must not retain `bytes`. */
+  private def foldPathChunks[A](
+    path: Path,
+    chunkSize: Int,
+    initial: A
+  )(step: (A, Array[Byte], Int) => A): A = {
+    val effectiveChunkSize = FusedDecoder.normalizedChunkSize(chunkSize)
+    val channel            = FileChannel.open(path, StandardOpenOption.READ)
+    val buffer  = ByteBuffer.allocate(effectiveChunkSize)
+    try {
+      @tailrec
+      def loop(acc: A): A = {
+        buffer.clear()
+        channel.read(buffer) match {
+          case -1 => acc
+          case 0  => loop(acc)
+          case n  => loop(step(acc, buffer.array(), n))
+        }
+      }
+      loop(initial)
+    } finally channel.close()
+  }
+
+  private final case class PathDecodeState(decoder: FusedDecoder.State, count: Long)
+
+  private def orThrow[A](value: Either[Throwable, A]): A =
+    value.fold(throw _, identity)
+
+  private def decodePathSinkWithBytes(
+    path: Path,
+    enableDiagnostics: Boolean,
+    config: StreamingDecode.Config,
+    batchSize: Int,
+    onBytes: (Array[Byte], Int, Int) => Unit
+  )(sink: Decoded => Unit): Long = {
+    val state = foldPathChunks(path, batchSize, PathDecodeState(FusedDecoder.initial, 0L)) {
+      (current, bytes, length) =>
+      onBytes(bytes, 0, length)
+      val result = orThrow(
+        FusedDecoder.run(current.decoder, FusedDecoder.feedBytes(bytes, 0, length, config))
+      )
+      each(result.emitted)(sink)
+      PathDecodeState(result.next, current.count + result.emitted.size.toLong)
+    }
+    val tail = orThrow(FusedDecoder.run(state.decoder, FusedDecoder.finish(enableDiagnostics, config)))
+    each(tail.emitted)(sink)
+    state.count + tail.emitted.size.toLong
+  }
+
+  private def classify(decoded: Decoded): Element =
+    Elements.classifyOne(decoded) match {
+      case Left(error)  => throw error
+      case Right(value) => value
+    }
 
   /**
    * Full [[StreamingDecoded]] timeline in one synchronous pass.
@@ -76,20 +140,6 @@ private[pdf] object PdfHyperdrive {
       cfg(enableDiagnostics, config, batchSize)
     )
 
-  /**
-   * Decode from a memory-mapped buffer without copying when the mapping
-   * is array-backed (typical for file-backed maps on HotSpot).
-   */
-  def decodeSyncMapped(
-    mapped: MappedByteBuffer,
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Decoded] = {
-    val slice = DecodePipeline.bytesFromMapped.run(mapped)
-    FusedDecode.decodeSlice(slice, cfg(enableDiagnostics, config, batchSize))
-  }
-
   /** Full decode plus [[Elements]] classification in one synchronous pass. */
   def elementsSync(
     bytes: Array[Byte],
@@ -120,32 +170,24 @@ private[pdf] object PdfHyperdrive {
   ): Chunk[Element] =
     Elements.foldSync(decodeSync(bytes, enableDiagnostics, config, batchSize))
 
-  /** mmap triple-fused elements. */
-  def elementsSyncMapped(
-    mapped: MappedByteBuffer,
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Element] = {
-    val slice = DecodePipeline.bytesFromMapped.run(mapped)
-    zio.pdf.pipe.FusedElements.decodeSlice(slice, cfg(enableDiagnostics, config, batchSize))
-  }
-
   /**
-   * File decode with no `ZIO` — mmap, fused decode, close.
-   * Hot path for [[PdfEngine]] Live.
+   * File decode with one bounded reusable buffer. This collects only the
+   * requested decoded timeline, never an input-sized byte array.
    */
   def decodeFromPath(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Decoded] =
-    DecodePipeline.fromPath(cfg(enableDiagnostics, config, batchSize)).run(path)
+  ): Chunk[Decoded] = {
+    val builder = Chunk.newBuilder[Decoded]
+    val _       = decodeFromPathSink(path, enableDiagnostics, config, batchSize)(value => builder += value)
+    builder.result()
+  }
 
   /**
-   * mmap fused decode with a per-event sink — never builds `Chunk[Decoded]`.
-   * Raw bytes come from mmap; parse windows are batched by `batchSize`.
+   * Incremental fused decode with a per-event sink — never builds an
+   * input-sized byte array or decoded timeline.
    * Returns the number of [[Decoded]] values delivered to `sink`.
    */
   def decodeFromPathSink(
@@ -154,7 +196,7 @@ private[pdf] object PdfHyperdrive {
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
   )(sink: Decoded => Unit): Long =
-    DecodePipeline.fromPathSink(cfg(enableDiagnostics, config, batchSize))(path, sink)
+    decodePathSinkWithBytes(path, enableDiagnostics, config, batchSize, (_, _, _) => ())(sink)
 
   /**
    * In-memory [[decodeSyncSlice]] with a sink — no timeline [[Chunk]].
@@ -193,26 +235,20 @@ private[pdf] object PdfHyperdrive {
       cfg(enableDiagnostics, config, batchSize)
     )(sink)
 
-  /** mmap decode — default sync file path. */
-  def decodeFromPathMapped(
-    path: Path,
-    enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default,
-    batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Decoded] =
-    DecodePipeline.fromPathMmap(cfg(enableDiagnostics, config, batchSize)).run(path)
-
-  /** File elements — mmap read, triple-fused classify. */
+  /** File elements — incremental decode, expansion, and classification. */
   def elementsFromPath(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
-  ): Chunk[Element] =
-    DecodePipeline.elementsFromPath(cfg(enableDiagnostics, config, batchSize)).run(path)
+  ): Chunk[Element] = {
+    val builder = Chunk.newBuilder[Element]
+    val _       = elementsFromPathSink(path, enableDiagnostics, config, batchSize)(value => builder += value)
+    builder.result()
+  }
 
   /**
-   * mmap triple-fused classify with a per-event sink — never builds timelines.
+   * Incremental decode, expansion, and classify with a per-event sink.
    * Returns the number of [[Element]] values delivered to `sink`.
    */
   def elementsFromPathSink(
@@ -221,23 +257,24 @@ private[pdf] object PdfHyperdrive {
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
   )(sink: Element => Unit): Long =
-    DecodePipeline.elementsFromPathSink(cfg(enableDiagnostics, config, batchSize))(path, sink)
+    decodeFromPathSink(path, enableDiagnostics, config, batchSize)(decoded => sink(classify(decoded)))
 
-  /** Decode + SHA-256 in one fused scan (mmap). */
+  /** Decode + SHA-256 in one incremental scan. */
   def decodeAndDigestFromPath(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
   ): (Chunk[Decoded], Array[Byte]) = {
-    val r = zio.pdf.pipe.IngestPipeline.decodeAndDigest
-      .fromPath(cfg(enableDiagnostics, config, batchSize))
-      .run(path)
-    (r.decoded, r.digest)
+    val builder = Chunk.newBuilder[Decoded]
+    val (_, digest) = decodeAndDigestFromPathSink(path, enableDiagnostics, config, batchSize) { value =>
+      builder += value
+    }
+    (builder.result(), digest)
   }
 
   /**
-   * mmap decode + SHA-256 with a per-event sink — never materialises `Chunk[Decoded]`.
+   * Incremental decode + SHA-256 with a per-event sink.
    * Returns event count and the raw-file digest from the same fused scan.
    */
   def decodeAndDigestFromPathSink(
@@ -246,26 +283,47 @@ private[pdf] object PdfHyperdrive {
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
   )(sink: Decoded => Unit): (Long, Array[Byte]) = {
-    val r = zio.pdf.pipe.IngestPipeline.decodeAndDigest
-      .fromPathSink(cfg(enableDiagnostics, config, batchSize))(path, sink)
-    (r.count, r.digest)
+    val digest = MessageDigest.getInstance("SHA-256")
+    val count = decodePathSinkWithBytes(
+      path,
+      enableDiagnostics,
+      config,
+      batchSize,
+      (bytes, offset, length) => digest.update(bytes, offset, length)
+    )(sink)
+    (count, digest.digest())
   }
 
-  /** Triple-fused elements + SHA-256 in one scan. */
+  /** In-memory counterpart of [[decodeAndDigestFromPathSink]], without a decoded timeline. */
+  def decodeAndDigestSyncSink(
+    bytes: Array[Byte],
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    batchSize: Int = 10 * 1024 * 1024
+  )(sink: Decoded => Unit): (Long, Array[Byte]) = {
+    val result = zio.pdf.pipe.HyperFuse.fuseDecodedWithDigestSink(
+      FusedDecode.Slice(bytes, 0, bytes.length),
+      cfg(enableDiagnostics, config, batchSize)
+    )(sink)
+    (result.count, result.digest)
+  }
+
+  /** Incremental elements + SHA-256 in one scan. */
   def elementsAndDigestFromPath(
     path: Path,
     enableDiagnostics: Boolean = false,
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
   ): (Chunk[Element], Array[Byte]) = {
-    val r = zio.pdf.pipe.IngestPipeline.decodeAndDigest
-      .elementsFromPath(cfg(enableDiagnostics, config, batchSize))
-      .run(path)
-    (r.decoded, r.digest)
+    val builder = Chunk.newBuilder[Element]
+    val (_, digest) = elementsAndDigestFromPathSink(path, enableDiagnostics, config, batchSize) { value =>
+      builder += value
+    }
+    (builder.result(), digest)
   }
 
   /**
-   * mmap triple-fused classify + SHA-256 with a per-event sink.
+   * Incremental decode, classify, and SHA-256 with a per-event sink.
    * Returns event count and the raw-file digest from the same fused scan.
    */
   def elementsAndDigestFromPathSink(
@@ -274,18 +332,27 @@ private[pdf] object PdfHyperdrive {
     config: StreamingDecode.Config = StreamingDecode.Config.default,
     batchSize: Int = 10 * 1024 * 1024
   )(sink: Element => Unit): (Long, Array[Byte]) = {
-    val r = zio.pdf.pipe.IngestPipeline.decodeAndDigest
-      .elementsFromPathSink(cfg(enableDiagnostics, config, batchSize))(path, sink)
-    (r.count, r.digest)
+    val digest = MessageDigest.getInstance("SHA-256")
+    val count = decodePathSinkWithBytes(
+      path,
+      enableDiagnostics,
+      config,
+      batchSize,
+      (bytes, offset, length) => digest.update(bytes, offset, length)
+    )(decoded => sink(classify(decoded)))
+    (count, digest.digest())
   }
 
-  /** SHA-256 over raw file bytes — mmap + batched scan, no decode. */
+  /** SHA-256 over raw file bytes with one bounded reusable buffer. */
   def digestFromPath(
     path: Path,
     batchSize: Int = 10 * 1024 * 1024
   ): Array[Byte] = {
-    val c = Cfg(batchSize = batchSize)
-    zio.pdf.pipe.ByteDigest.digestSlice(DecodePipeline.readSlice(c).run(path), c)
+    val digest = MessageDigest.getInstance("SHA-256")
+    foldPathChunks(path, batchSize, digest) { (current, bytes, length) =>
+      current.update(bytes, 0, length)
+      current
+    }.digest()
   }
 
   def digestSync(bytes: Array[Byte], batchSize: Int = 10 * 1024 * 1024): Array[Byte] =

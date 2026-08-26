@@ -21,8 +21,8 @@ object Uncompressed {
 private[pdf] object Content {
 
   def extractObjectStream(stream: Uncompressed): Prim => Option[Attempt[ObjectStream]] = {
-    case Prim.tpe("ObjStm", _) =>
-      Some(stream.exec.flatMap(ObjectStream.codec.complete.decode).map(_.value))
+    case data @ Prim.tpe("ObjStm", _) =>
+      Some(stream.exec.flatMap(bits => ObjectStream.decode(bits, data)))
     case _ =>
       None
   }
@@ -31,14 +31,17 @@ private[pdf] object Content {
    * Expand `/Filter` (Name or Array). Image filters stay raw so
    * [[Elements]] can classify DCT/CCITT/JBIG2/JPX payloads.
    */
-  def uncompress(stream: BitVector): Prim => Uncompressed = data =>
+  def uncompress(
+    stream: BitVector,
+    maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
+  ): Prim => Uncompressed = data =>
     FilterDecode.filterNames(data) match {
       case Nil =>
         Uncompressed.now(stream)
       case names if names.forall(FilterDecode.passthrough.contains) =>
         Uncompressed.now(stream)
       case _ =>
-        Uncompressed.lazily(FilterDecode.applyChain(stream, data))
+        Uncompressed.lazily(FilterDecode.applyChain(stream, data, maxOutputBytes))
     }
 
   /**

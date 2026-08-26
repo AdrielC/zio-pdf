@@ -535,12 +535,15 @@ object PdfPolicy {
   def apply(policy: Policy)(pdf: Pdf): Validation[PolicyViolation, Unit] =
     eval(policy)(pdf)
 
-  def fromDecoded(
+  private[pdf] def fromAssembly(
     policy: Policy
-  )(decoded: zio.stream.ZStream[Any, Throwable, Decoded]): zio.ZIO[Any, Throwable, Validation[PolicyViolation, Unit]] =
-    AssemblePdf(decoded).map {
-      _.fold(_ => Validation.succeed(()), { case ValidatedPdf(pdf, _) => eval(policy)(pdf) })
-    }
+  )(assembled: Validation[AssemblyError, ValidatedPdf]): Validation[PolicyViolation, Unit] =
+    assembled.fold(_ => Validation.succeed(()), { case ValidatedPdf(pdf, _) => eval(policy)(pdf) })
+
+  def fromDecoded[R](
+    policy: Policy
+  )(decoded: zio.stream.ZStream[R, Throwable, Decoded]): zio.ZIO[R, Throwable, Validation[PolicyViolation, Unit]] =
+    AssemblePdf(decoded).map(fromAssembly(policy))
 
   def fromChunk(policy: Policy)(decoded: zio.Chunk[Decoded]): Validation[PolicyViolation, Unit] =
     AssemblePdf.fromChunk(decoded).fold(

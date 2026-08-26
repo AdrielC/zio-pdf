@@ -25,7 +25,7 @@ object ArrowKitchenSinkSpec extends ZIOSpecDefault {
   // ----- helpers -----
 
   private def runD[I, O](scan: FreeScan[I, O], inputs: Iterable[I]): (ScanDone[O, Any], Vector[O]) =
-    Scan.runDirect[I, O, Any](scan, inputs)
+    scan.run(inputs)
 
   private def agree[I, O](scan: FreeScan[I, O], inputs: Seq[I])(using
       pollTag: Tag[Poll[I]],
@@ -33,7 +33,7 @@ object ArrowKitchenSinkSpec extends ZIOSpecDefault {
       frame: Frame
   ): TestResult = {
     val (_, dOut) = runD(scan, inputs)
-    val (_, kOut) = Scan.runKyo[I, O, Any](scan, inputs).eval
+    val (_, kOut) = scan.runKyo(inputs).eval
     assertTrue(dOut == kOut.toVector)
   }
 

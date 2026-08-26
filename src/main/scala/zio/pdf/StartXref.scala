@@ -18,14 +18,14 @@ final case class StartXref(offset: Long)
 object StartXref {
 
   import Text.{ascii, str}
-  import Whitespace.nlWs
+  import Whitespace.{nlWs, triviaAsNewline}
 
   /** `%%EOF` followed by optional trailing whitespace / EOF. */
   val eof: Codec[Unit] =
     str("%%EOF") <~ optional(bitsRemaining, nlWs).unit(Some(()))
 
   given codec: Codec[StartXref] =
-    (str("startxref") ~> nlWs ~> ascii.long.withContext("startxref offset") <~ nlWs <~ eof)
+    (str("startxref") ~> triviaAsNewline ~> ascii.long.withContext("startxref offset") <~ triviaAsNewline <~ eof)
       .withContext("startxref")
       .xmap(StartXref(_), _.offset)
 }

@@ -43,6 +43,15 @@ object PdfObjectScanner {
     final case class Malformed(message: String, cause0: Throwable) extends Error {
       override def getCause: Throwable = cause0
     }
+
+    final case class IndirectLength(index: Obj.Index, reference: Prim.Ref) extends Error {
+      val message: String =
+        s"stream object ${index.number} uses indirect /Length ${reference.number} ${reference.generation} R; use an xref-resolving reader"
+    }
+
+    final case class UnexpectedEnd(context: String, remainingBytes: Long) extends Error {
+      val message: String = s"unexpected end of PDF input while $context ($remainingBytes bytes remain)"
+    }
   }
 
   final case class Boundary(index: Obj.Index, nextByteOffset: Long) {
@@ -54,6 +63,12 @@ object PdfObjectScanner {
   def initial: Cursor = new Cursor(StreamingDecode.initialFinalState)
 
   def bytesSeen(cursor: Cursor): Long = cursor.parser.bytesSeen
+
+  /** Validate that the source ended at a complete top-level boundary. */
+  def finish(cursor: Cursor): Either[Error, Unit] =
+    StreamingDecode.validateFinalState(cursor.parser).left.map { error =>
+      Error.UnexpectedEnd(error.context, error.remainingBytes)
+    }
 
   def step(
     config: Config,
@@ -84,6 +99,8 @@ object PdfObjectScanner {
     } catch {
       case StreamingDecode.CarryLimitExceeded(maxBytes, observedBytes) =>
         Left(Error.CarryLimit(maxBytes, observedBytes))
+      case StreamingDecode.UnresolvedIndirectStreamLength(index, reference) =>
+        Left(Error.IndirectLength(index, reference))
       case NonFatal(error) =>
         val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
         Left(Error.Malformed(s"Malformed or unsupported PDF structure: $detail", error))

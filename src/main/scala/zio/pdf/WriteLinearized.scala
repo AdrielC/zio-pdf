@@ -1,9 +1,8 @@
 /*
  * Port of fs2.pdf.WriteLinearized — linearization dictionary + first-page
- * xref encoding (Attempt-based). The legacy FS2 `pipe` that interleaved
- * this prefix with [[WritePdf.parts]] is not re-exposed yet: build bytes
- * with [[encodeLinearizedPrefix]] and concatenate with the tail encoded
- * via [[WritePdf.parts]] when you need the full linearized file layout.
+ * xref encoding. [[pipe]] is the streaming compatibility layout from fs2-pdf:
+ * it buffers only the declared first-page object prefix, then delegates the
+ * remaining parts to WritePdf's streaming encoder.
  */
 
 package zio.pdf
@@ -12,8 +11,20 @@ import _root_.scodec.{Attempt, Codec}
 import _root_.scodec.bits.ByteVector
 import zio.*
 import zio.pdf.codec.Codecs
+import zio.stream.{ZChannel, ZPipeline}
 
 object WriteLinearized {
+
+  final case class InvalidLayout(
+    firstPageCount: Int,
+    totalCount: Int,
+    fileSize: Long
+  ) extends RuntimeException(
+        s"invalid linearized layout: firstPageCount=$firstPageCount, totalCount=$totalCount, fileSize=$fileSize"
+      )
+
+  final case class MissingFirstPageObjects(expected: Int, actual: Int)
+      extends RuntimeException(s"linearized layout expected $expected first-page parts but received $actual")
 
   def objectNumber[A]: Part[A] => Attempt[Long] = {
     case Part.Obj(IndirectObj(Obj(Obj.Index(n, _), _), _)) => Attempt.successful(n)
@@ -166,4 +177,88 @@ object WriteLinearized {
         Chunk(lin, fp.xref) ++ Chunk.fromIterable(fp.data.toList)
       }
     }
+
+  /**
+   * fs2-pdf-compatible streaming layout writer.
+   *
+   * `firstPageCount`, `totalCount`, and `fileSize` are layout facts supplied
+   * by the caller. This method does not discover first-page dependencies or
+   * generate hint streams; callers that need complete ISO linearization need
+   * a planner that owns those semantics. It does guarantee that the version is
+   * emitted once, only the bounded first-page prefix is retained, and the tail
+   * is encoded incrementally with a generated final xref.
+   */
+  def pipe(
+    trailerData: Prim.Dict,
+    firstPageCount: Int,
+    totalCount: Int,
+    fileSize: Long
+  ): ZPipeline[Any, Throwable, Part[Trailer], ByteVector] =
+    ZPipeline.fromChannel(encodeLayout(trailerData, firstPageCount, totalCount, fileSize))
+
+  private def encodeLayout(
+    trailerData: Prim.Dict,
+    firstPageCount: Int,
+    totalCount: Int,
+    fileSize: Long
+  ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {
+    if firstPageCount <= 0 || totalCount < firstPageCount || fileSize < 0L then
+      ZChannel.fail(InvalidLayout(firstPageCount, totalCount, fileSize))
+    else {
+      def startTail(
+        headerSize: Long,
+        firstPage: Chunk[Part[Trailer]],
+        pending: Chunk[Part[Trailer]]
+      ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
+        encodeLinearizedPrefix(trailerData, totalCount, headerSize, fileSize, firstPage) match {
+          case _root_.scodec.Attempt.Failure(error) =>
+            ZChannel.fail(new RuntimeException(s"encoding linearized first page: ${error.messageWithContext}"))
+          case _root_.scodec.Attempt.Successful(prefix) =>
+            val prefixSize = prefix.foldLeft(0L)(_ + _.size)
+            val finalTrailer = Trailer(
+              BigDecimal(totalCount - firstPageCount),
+              trailerData,
+              trailerData("Root").collect { case root: Prim.Ref => root }
+            )
+            ZChannel.write(prefix) *>
+              WritePdf.tailEncoder(headerSize + prefixSize, pending, Some(finalTrailer))
+        }
+
+      def collectFirstPage(
+        headerSize: Long,
+        collected: Chunk[Part[Trailer]],
+        pending: Chunk[Part[Trailer]]
+      ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
+        if collected.size >= firstPageCount then startTail(headerSize, collected, pending)
+        else if pending.nonEmpty then {
+          val needed = firstPageCount - collected.size
+          collectFirstPage(headerSize, collected ++ pending.take(needed), pending.drop(needed))
+        } else {
+          ZChannel.readWithCause[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit](
+            chunk => collectFirstPage(headerSize, collected, chunk),
+            cause => ZChannel.refailCause(cause),
+            _ => ZChannel.fail(MissingFirstPageObjects(firstPageCount, collected.size))
+          )
+        }
+
+      def initial: ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
+        ZChannel.readWithCause[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit](
+          chunk =>
+            if chunk.isEmpty then initial
+            else {
+              WritePdf.encodeVersion(Some(chunk.head)) match {
+                case Left(message) => ZChannel.fail(new RuntimeException(message))
+                case Right((header, leftover)) =>
+                  val pending = leftover.fold[Chunk[Part[Trailer]]](chunk.drop(1))(part => part +: chunk.drop(1))
+                  ZChannel.write(Chunk.single(header)) *>
+                    collectFirstPage(header.size.toLong, Chunk.empty, pending)
+              }
+            },
+          cause => ZChannel.refailCause(cause),
+          _ => ZChannel.fail(MissingFirstPageObjects(firstPageCount, 0))
+        )
+
+      initial
+    }
+  }
 }
