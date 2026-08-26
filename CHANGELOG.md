@@ -8,6 +8,7 @@ All notable changes to this project are documented here.
 
 - The Scala.js workbench renders the first page from bounded PDF.js range requests while the ZIO PDF evidence scan runs independently in a cancellable worker.
 - Browser scan progress now reports actual bytes consumed instead of phase-only activity.
+- The workbench now inventories font resources from the uploaded PDF and runs selected font remapping and text tokenization through the real `PdfTransform` engine, with a downloadable result and fail-closed compatibility errors.
 - Page dictionaries may omit a direct `/MediaBox` when geometry is inherited from their `/Pages` ancestor, as permitted by the PDF page tree.
 
 ## [0.2.0-RC6] — 2026-08-25
