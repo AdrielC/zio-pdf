@@ -1,6 +1,5 @@
 /*
- * Spike: Kyo `Parse` on `Text` for ASCII/PDF-ish prefixes, then scodec on the byte tail.
- * Kyo 1.0 RC1 already ships `Parse.int` as `Parse.read` + `span` + `toIntOption` (same idea as a hand-rolled indexed parser).
+ * Spike: Kyo `Parse[Char]` on ASCII/PDF-ish prefixes, then scodec on the byte tail.
  */
 
 package zio.pdf
@@ -13,26 +12,26 @@ import zio.test.*
 object KyoParseSpikeSpec extends ZIOSpecDefault {
 
   /** Run a parser that must consume the full `input` string. */
-  private def runFull[A](input: String)(p: => A < Parse): KResult[ParseFailed, A] =
-    Abort.run(Parse.run(Text(input))(p)).eval
+  private def runFull[A](input: String)(p: => A < Parse[Char]): KResult[ParseError, A] =
+    Abort.run(Parse.runOrAbort(input)(Parse.entireInput(p))).eval
 
-  private val pdfVersion: (Int, Int) < Parse =
+  private val pdfVersion: (Int, Int) < Parse[Char] =
     for
-      _     <- Parse.literal(Text("%PDF-"))
+      _     <- Parse.literal("%PDF-")
       major <- Parse.int
-      _     <- Parse.char('.')
+      _     <- Parse.literal('.')
       minor <- Parse.int
     yield (major, minor)
 
-  private val startxrefOffset: Long < Parse =
+  private val startxrefOffset: Long < Parse[Char] =
     for
-      _ <- Parse.literal(Text("startxref"))
-      _ <- Parse.readWhile(c => c == '\n' || c == '\r' || c == ' ')
+      _ <- Parse.literal("startxref")
+      _ <- Parse.readWhile((c: Char) => c == '\n' || c == '\r' || c == ' ')
       n <- Parse.int
     yield n.toLong
 
   def spec: Spec[Any, Nothing] =
-    suite("Kyo Parse spike (native Text + layered scodec)")(
+    suite("Kyo Parse spike (typed text parser + layered scodec)")(
       test("Parse.int / full consume") {
         assertTrue(runFull("42")(Parse.int) == KResult.succeed(42))
       },
@@ -53,7 +52,7 @@ object KyoParseSpikeSpec extends ZIOSpecDefault {
         )
         val kyoPart =
           for
-            _ <- Parse.literal(Text("len"))
+            _ <- Parse.literal("len")
             n <- Parse.int
           yield n
         val r = runFull(s.take(asciiPrefix.length))(kyoPart)

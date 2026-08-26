@@ -10,6 +10,9 @@ import _root_.scodec.bits.BitVector
 
 private[pdf] object FilterDecode {
 
+  final case class OutputLimitExceeded(filter: String, maxBytes: Int, observedBytes: Long)
+      extends RuntimeException(s"$filter output exceeded the configured $maxBytes-byte limit at $observedBytes bytes")
+
   val passthrough: Set[String] =
     Set("DCTDecode", "CCITTFaxDecode", "JBIG2Decode", "JPXDecode", "Crypt")
 
@@ -33,29 +36,44 @@ private[pdf] object FilterDecode {
       case _ => Prim.Dict.empty
     }
 
-  def applyOne(name: String, stream: BitVector, parms: Prim): Attempt[BitVector] =
+  def applyOne(
+    name: String,
+    stream: BitVector,
+    parms: Prim,
+    maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
+  ): Attempt[BitVector] =
     name match {
       case "FlateDecode" =>
         // Wrap DecodeParms so FlateDecode.handleParams finds them.
-        FlateDecode(stream, Prim.dict("DecodeParms" -> parms))
+        FlateDecode(stream, Prim.dict("DecodeParms" -> parms), maxOutputBytes)
       case "ASCIIHexDecode"  => AsciiHexDecode(stream)
       case "ASCII85Decode"   => Ascii85Decode(stream)
-      case "RunLengthDecode" => RunLengthDecode(stream)
-      case "LZWDecode"       => LzwDecode(stream, parms)
+      case "RunLengthDecode" => RunLengthDecode(stream, maxOutputBytes)
+      case "LZWDecode"       => LzwDecode(stream, parms, maxOutputBytes)
       case other if passthrough.contains(other) =>
         Attempt.successful(stream)
       case other =>
         Attempt.failure(Err(s"unsupported stream filter: $other"))
     }
 
-  def applyChain(stream: BitVector, data: Prim): Attempt[BitVector] = {
+  def applyChain(
+    stream: BitVector,
+    data: Prim,
+    maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
+  ): Attempt[BitVector] = {
     val names = filterNames(data)
     if names.isEmpty then Attempt.successful(stream)
     else
       names.zipWithIndex.foldLeft[Attempt[BitVector]](Attempt.successful(stream)) {
         case (Attempt.Successful(cur), (name, idx)) =>
           if passthrough.contains(name) then Attempt.successful(cur)
-          else applyOne(name, cur, decodeParmsAt(data, idx))
+          else
+            applyOne(name, cur, decodeParmsAt(data, idx), maxOutputBytes).flatMap { output =>
+              val observed = output.bytes.size
+              if observed > maxOutputBytes.toLong then
+                Attempt.failure(Err(OutputLimitExceeded(name, maxOutputBytes.bytes, observed).getMessage))
+              else Attempt.successful(output)
+            }
         case (err, _) => err
       }
   }
@@ -147,7 +165,10 @@ private[pdf] object Ascii85Decode {
 }
 
 private[pdf] object RunLengthDecode {
-  def apply(stream: BitVector): Attempt[BitVector] = {
+  def apply(
+    stream: BitVector,
+    maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
+  ): Attempt[BitVector] = {
     val in  = stream.toByteArray
     val out = new scala.collection.mutable.ArrayBuffer[Byte](in.length * 2)
     var i   = 0
@@ -158,6 +179,10 @@ private[pdf] object RunLengthDecode {
       else if len < 128 then
         val copy = len + 1
         if i + copy > in.length then return Attempt.failure(Err("RunLengthDecode: truncated copy"))
+        if out.length.toLong + copy.toLong > maxOutputBytes.toLong then
+          return Attempt.failure(
+            Err(FilterDecode.OutputLimitExceeded("RunLengthDecode", maxOutputBytes.bytes, out.length.toLong + copy).getMessage)
+          )
         var k = 0
         while k < copy do
           out += in(i + k)
@@ -166,6 +191,10 @@ private[pdf] object RunLengthDecode {
       else
         val run = 257 - len
         if i >= in.length then return Attempt.failure(Err("RunLengthDecode: truncated run"))
+        if out.length.toLong + run.toLong > maxOutputBytes.toLong then
+          return Attempt.failure(
+            Err(FilterDecode.OutputLimitExceeded("RunLengthDecode", maxOutputBytes.bytes, out.length.toLong + run).getMessage)
+          )
         val b = in(i)
         i += 1
         var k = 0
@@ -177,11 +206,15 @@ private[pdf] object RunLengthDecode {
 }
 
 private[pdf] object LzwDecode {
-  def apply(stream: BitVector, parms: Prim): Attempt[BitVector] = {
+  def apply(
+    stream: BitVector,
+    parms: Prim,
+    maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
+  ): Attempt[BitVector] = {
     val earlyChange =
       Prim.Dict.number("EarlyChange")(parms).toOption.map(_.toInt).getOrElse(1) != 0
     try
-      val raw = decodeLzw(stream.toByteArray, earlyChange)
+      val raw = decodeLzw(stream.toByteArray, earlyChange, maxOutputBytes)
       // Predictor via FlateDecode's DecodeParms wrapper
       FlateDecode.handleParams(BitVector(raw), Prim.dict("DecodeParms" -> parms))
     catch {
@@ -189,7 +222,7 @@ private[pdf] object LzwDecode {
     }
   }
 
-  private def decodeLzw(input: Array[Byte], earlyChange: Boolean): Array[Byte] = {
+  private def decodeLzw(input: Array[Byte], earlyChange: Boolean, maxOutputBytes: ByteLimit): Array[Byte] = {
     val out      = new scala.collection.mutable.ArrayBuffer[Byte](input.length * 2)
     val table    = Array.ofDim[Array[Byte]](4096)
     var nextCode = 258
@@ -239,6 +272,12 @@ private[pdf] object LzwDecode {
             p :+ p(0)
           else
             throw new IllegalArgumentException(s"bad LZW code $code")
+        if out.length.toLong + entry.length.toLong > maxOutputBytes.toLong then
+          throw FilterDecode.OutputLimitExceeded(
+            "LZWDecode",
+            maxOutputBytes.bytes,
+            out.length.toLong + entry.length.toLong
+          )
         out ++= entry
         if prev != null && nextCode < 4096 then
           table(nextCode) = prev.nn :+ entry(0)

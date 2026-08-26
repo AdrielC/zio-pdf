@@ -35,18 +35,9 @@ private[pdf] object AnalyzeData {
 }
 
 private[pdf] object AnalyzeContent {
-
-  object SupportedCodec {
-    def unapply(data: Prim.Dict): Option[Image.Codec] = data("Filter") match {
-      case Some(Prim.Name("DCTDecode"))      => Some(Image.Codec.Jpg)
-      case Some(Prim.Name("CCITTFaxDecode")) => Some(Image.Codec.Ccitt)
-      case _                                  => None
-    }
-  }
-
   def apply(stream: Uncompressed): Prim => Attempt[Element.ContentKind] = {
-    case Prim.subtype("Image", data @ SupportedCodec(codec)) =>
-      Attempt.successful(Element.ContentKind.Image(Image(data, stream, codec)))
+    case Prim.subtype("Image", data) =>
+      Attempt.successful(Element.ContentKind.Image(Image(data, stream, Image.Codec.fromData(data))))
     case Prim.tpe("EmbeddedFile", data) =>
       Attempt.successful(Element.ContentKind.EmbeddedFileStream(data))
     case _ =>

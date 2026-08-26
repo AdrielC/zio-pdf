@@ -47,8 +47,20 @@ object Tiff {
   def fromData(params: Tiff)(data: ByteVector): ByteVector =
     header(params, data.size) ++ data
 
-  def image(params: Tiff)(data: ByteVector): Task[BufferedImage] =
-    ZIO.attempt(ImageIO.read(new ByteArrayInputStream(fromData(params)(data).toArray)))
+  final case class MaterializationLimitExceeded(maxBytes: ByteLimit, observedBytes: Long)
+      extends RuntimeException(
+        s"TIFF wrapper is $observedBytes bytes, above the configured ${maxBytes.bytes}-byte materialization limit"
+      )
+
+  def image(params: Tiff)(
+    data: ByteVector,
+    maxBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
+  ): Task[BufferedImage] =
+    ZIO.attempt {
+      val observed = Math.addExact(headerSize.toLong, data.size)
+      if observed > maxBytes.toLong then throw MaterializationLimitExceeded(maxBytes, observed)
+      ImageIO.read(new ByteArrayInputStream(fromData(params)(data).toArray))
+    }
 
   /** Strip the fixed-size baseline TIFF header produced by [[header]], leaving CCITT payload bits. */
   def raw(data: BitVector): BitVector =

@@ -35,10 +35,8 @@ import zio.blocks.typeid.TypeId
  * `Deriver[Codec]` over the structural patterns from zio-blocks-schema.
  *
  * Coverage:
- *   - Primitive: every numeric primitive, plus `String` (utf8_32),
- *     `Boolean`, `Byte`, `Short`, `Char`, `Unit`. Everything else
- *     falls through to a clear failure (so the call site sees what
- *     is missing rather than getting a silently broken codec).
+ *   - Primitive: all ZIO Blocks primitive types, including the Java time,
+ *     currency, UUID, `BigInt`, and `BigDecimal` families.
  *   - Record: encode each field in declaration order; decode each
  *     field, accumulate into registers, then run the constructor.
  *   - Variant: write a `uint8` discriminator tag, then the matching
@@ -46,9 +44,9 @@ import zio.blocks.typeid.TypeId
  *   - Wrapper: encode by `unwrap`, decode by `wrap`.
  *   - Sequence: `listOfN(int32, elementCodec)`.
  *   - Map: length-prefixed list of `(K, V)` pairs.
- *   - Dynamic: recursive wire format for [[DynamicValue]] (tagged tree
+ *   - Dynamic: recursive wire format for `DynamicValue` (tagged tree
  *     aligned with [[zio.blocks.schema.DynamicValueType]] indices, with
- *     [[PrimitiveValue.typeIndex]] as the inner primitive discriminator).
+ *     `PrimitiveValue.typeIndex` as the inner primitive discriminator).
  */
 object ScodecDeriver extends Deriver[Codec] {
 
@@ -386,8 +384,45 @@ object ScodecDeriver extends Deriver[Codec] {
       case _: PrimitiveType.Double  => double.asInstanceOf[Codec[A]]
       case _: PrimitiveType.Char    => uint16.xmap[Char](_.toChar, _.toInt).asInstanceOf[Codec[A]]
       case _: PrimitiveType.String  => utf8_32.asInstanceOf[Codec[A]]
-      case other                    =>
-        unimplemented[A](s"primitive ${other.getClass.getSimpleName.stripSuffix("$")}")
+      case _: PrimitiveType.BigInt  =>
+        parsedStringCodec("BigInt")(BigInt.apply)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.BigDecimal =>
+        parsedStringCodec("BigDecimal")(BigDecimal.apply)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.DayOfWeek =>
+        parsedStringCodec("DayOfWeek")(DayOfWeek.valueOf)(_.name()).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.Duration =>
+        parsedStringCodec("Duration")(Duration.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.Instant =>
+        parsedStringCodec("Instant")(Instant.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.LocalDate =>
+        parsedStringCodec("LocalDate")(LocalDate.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.LocalDateTime =>
+        parsedStringCodec("LocalDateTime")(LocalDateTime.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.LocalTime =>
+        parsedStringCodec("LocalTime")(LocalTime.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.Month =>
+        parsedStringCodec("Month")(Month.valueOf)(_.name()).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.MonthDay =>
+        parsedStringCodec("MonthDay")(MonthDay.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.OffsetDateTime =>
+        parsedStringCodec("OffsetDateTime")(OffsetDateTime.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.OffsetTime =>
+        parsedStringCodec("OffsetTime")(OffsetTime.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.Period =>
+        parsedStringCodec("Period")(Period.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.Year =>
+        parsedStringCodec("Year")(Year.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.YearMonth =>
+        parsedStringCodec("YearMonth")(YearMonth.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.ZoneId =>
+        parsedStringCodec("ZoneId")(ZoneId.of)(_.getId).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.ZoneOffset =>
+        parsedStringCodec("ZoneOffset")(ZoneOffset.of)(_.getId).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.ZonedDateTime =>
+        parsedStringCodec("ZonedDateTime")(ZonedDateTime.parse)(_.toString).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.Currency =>
+        parsedStringCodec("Currency")(Currency.getInstance)(_.getCurrencyCode).asInstanceOf[Codec[A]]
+      case _: PrimitiveType.UUID => uuid.asInstanceOf[Codec[A]]
     }
   }
 
@@ -409,6 +444,8 @@ object ScodecDeriver extends Deriver[Codec] {
     val recordFields  = fields.asInstanceOf[IndexedSeq[Term[Binding, A, ?]]]
     val recordReflect = new Reflect.Record[Binding, A](recordFields, typeId, binding, doc, modifiers)
     val registerArr   = recordReflect.registers.toArray
+    // Deriver exposes a kind-indexed Binding; this branch's kind guarantees
+    // the concrete binding carrying record constructors and deconstructors.
     val recordBinding = binding.asInstanceOf[Binding.Record[A]]
 
     Lazy {
@@ -663,13 +700,11 @@ object ScodecDeriver extends Deriver[Codec] {
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[A],
     examples:     Seq[A]
-  )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[A]] = {
+  )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[A]] =
     val wrapperBinding = binding.asInstanceOf[Binding.Wrapper[A, B]]
     D.instance(wrapped.metadata).map { inner =>
       inner.xmap[A](b => wrapperBinding.wrap(b), a => wrapperBinding.unwrap(a))
     }
-  }
-
   // -------------------------------------------------------------------
   // Dynamic (Schema[DynamicValue] → recursive binary tree codec)
   // -------------------------------------------------------------------
@@ -687,11 +722,18 @@ object ScodecDeriver extends Deriver[Codec] {
   // helpers
   // -------------------------------------------------------------------
 
-  private def unimplemented[A](what: String): Codec[A] = new Codec[A] {
-    def sizeBound: SizeBound                   = SizeBound.unknown
-    def encode(a: A): Attempt[BitVector]       =
-      Attempt.failure(Err(s"ScodecDeriver: encoding not implemented for $what"))
-    def decode(b: BitVector): Attempt[DecodeResult[A]] =
-      Attempt.failure(Err(s"ScodecDeriver: decoding not implemented for $what"))
-  }
+  private def parsedStringCodec[A](label: String)(parse: String => A)(render: A => String): Codec[A] =
+    new Codec[A] {
+      def sizeBound: SizeBound = SizeBound.unknown
+
+      def encode(value: A): Attempt[BitVector] = utf8_32.encode(render(value))
+
+      def decode(bits: BitVector): Attempt[DecodeResult[A]] =
+        utf8_32.decode(bits).flatMap { case DecodeResult(value, remainder) =>
+          Try(parse(value)) match {
+            case Success(decoded) => Attempt.successful(DecodeResult(decoded, remainder))
+            case Failure(error)   => Attempt.failure(Err(s"ScodecDeriver: invalid $label (${error.getMessage})"))
+          }
+        }
+    }
 }

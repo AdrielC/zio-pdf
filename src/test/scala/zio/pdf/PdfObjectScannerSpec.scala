@@ -24,6 +24,18 @@ object PdfObjectScannerSpec extends ZIOSpecDefault {
     }
 
   def spec: Spec[Any, Any] = suite("PdfObjectScanner")(
+    test("raw dictionary fallback scans compact real object and xref streams under fragmentation") {
+      val full = java.nio.file.Files.readAllBytes(
+        java.nio.file.Path.of("src/test/resources/court-corpus/scotus-atlantic-richfield-slip-opinion.pdf")
+      )
+      val suffix = java.util.Arrays.copyOfRange(full, full.length - 948, full.length)
+      val result = scan(Chunk.fromIterator(Chunk.fromArray(suffix).grouped(257)))
+      assertTrue(
+        result.exists { case (cursor, boundaries) =>
+          boundaries.map(_.index.number) == Chunk(127L, 128L) && PdfObjectScanner.finish(cursor).isRight
+        }
+      )
+    },
     test("reports stable absolute boundaries across arbitrary input fragmentation") {
       val pdf = bytes(
         "%PDF-1.7\n" +
@@ -66,6 +78,15 @@ object PdfObjectScannerSpec extends ZIOSpecDefault {
       )
 
       assertTrue(result.left.exists(_.isInstanceOf[PdfObjectScanner.Error.CarryLimit]))
+    },
+    test("fails immediately with a typed error for an indirect stream length") {
+      val pdf = bytes("1 0 obj\n<</Length 2 0 R>>\nstream\nabc\nendstream\nendobj\n2 0 obj\n3\nendobj\n")
+
+      assertTrue(
+        scan(Chunk.single(pdf)).left.exists(
+          _ == PdfObjectScanner.Error.IndirectLength(Obj.Index(1L, 0), Prim.Ref(2L, 0))
+        )
+      )
     },
     test("enforces carry headroom even when the caller supplies one large chunk") {
       val unterminated = bytes("%PDF-1.7\n1 0 obj\n(" + ("a" * 4096))
@@ -111,6 +132,15 @@ object PdfObjectScannerSpec extends ZIOSpecDefault {
         !events.exists(_.isInstanceOf[StreamingDecoded.ContentObjBytes]),
         !events.contains(StreamingDecoded.ContentObjEnd)
       )
+    },
+    test("finish rejects a source that ends inside a declared payload") {
+      val incomplete = bytes("1 0 obj\n<</Length 8>>\nstream\nabc")
+      val result = for
+        (cursor, _) <- PdfObjectScanner.step(PdfObjectScanner.Config.default, PdfObjectScanner.initial, incomplete)
+        _           <- PdfObjectScanner.finish(cursor)
+      yield ()
+
+      assertTrue(result.left.exists(_.isInstanceOf[PdfObjectScanner.Error.UnexpectedEnd]))
     }
   )
 }

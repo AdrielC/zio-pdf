@@ -342,7 +342,7 @@ object Stepper {
         val arr =
           if b.length >= cfg.maxSize then b.take(cfg.maxSize).toArray
           else b.toArray
-        val cut   = zio.pdf.cdc.FastCdc.cutOffsetForScan(arr, cfg)
+        val cut   = zio.pdf.cdc.FastCdcSupport.cutOffset(arr, cfg)
         val chunk = b.take(cut)
         b = b.drop(cut)
         out += kyo.Chunk.from(chunk)

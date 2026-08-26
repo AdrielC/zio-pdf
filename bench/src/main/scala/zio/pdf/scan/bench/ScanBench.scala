@@ -1,5 +1,5 @@
 /*
- * JMH benchmarks for the Graviton Scan algebra.
+ * JMH benchmarks for the experimental scan algebra.
  *
  * Run from sbt:
  *
@@ -14,7 +14,7 @@
  *   1. `scodecBaseline`            -- `vector(uint8).decode(bits)`. The
  *                                     reference for "decode N bytes
  *                                     into something boxed".
- *   2. `scanFusedDirect`           -- `Scan.runDirect` over a 4-stage
+ *   2. `scanFusedDirect`           -- `scan.runSinglePass` over a 4-stage
  *                                     pure pipeline. Fusion collapses
  *                                     the pipeline to a single
  *                                     `Byte => Int`; the runner does
@@ -23,7 +23,7 @@
  *                                     spliced in, which blocks fusion.
  *                                     Measures the per-stage Stepper
  *                                     dispatch cost.
- *   4. `scanFusedKyo`              -- `Scan.runKyo` over the same fused
+ *   4. `scanFusedKyo`              -- `scan.runKyo` over the same fused
  *                                     pipeline. Adds Kyo's
  *                                     Poll/Emit/Abort plumbing on top
  *                                     of the fast path.
@@ -47,7 +47,7 @@ import _root_.scodec.codecs.{uint8, vector}
 import scala.compiletime.uninitialized
 
 import zio.pdf.scan.*
-import zio.scan.*
+import zio.pdf.bench.scan.*
 
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
@@ -63,6 +63,7 @@ class ScanBench {
   var n: Int = uninitialized
 
   private var bytes: Array[Byte]              = uninitialized
+  private var zioBytes: zio.Chunk[Byte]       = zio.Chunk.empty
   private var bits: BitVector                 = uninitialized
   private var bytesSeq: IndexedSeq[Byte]      = uninitialized
 
@@ -82,6 +83,7 @@ class ScanBench {
   @Setup(Level.Trial)
   def setup(): Unit = {
     bytes    = Array.tabulate[Byte](n)(i => (i & 0xff).toByte)
+    zioBytes = zio.Chunk.fromArray(bytes)
     bits     = BitVector.view(bytes)
     bytesSeq = scala.collection.immutable.ArraySeq.unsafeWrapArray(bytes)
   }
@@ -96,11 +98,11 @@ class ScanBench {
 
   @Benchmark
   def scanFusedDirect: Vector[Int] =
-    Scan.runDirect[Byte, Int, Any](fused, bytesSeq)._2
+    fused.runSinglePass(bytesSeq)._2
 
   @Benchmark
   def scanUnfusedDirect: Vector[Int] =
-    Scan.runDirect[Byte, Int, Any](unfused, bytesSeq)._2
+    unfused.runSinglePass(bytesSeq)._2
 
   /** Same workload as `scanFusedDirect`, but routed through the
     * register-based runner. Because `Fusion.tryFuse` succeeds on a
@@ -109,7 +111,7 @@ class ScanBench {
     * fused case. */
   @Benchmark
   def scanFusedReg: Vector[Int] =
-    Scan.runDirectReg[Byte, Int, Any](fused, bytesSeq)._2
+    fused.runRegistered(bytesSeq)._2
 
   /** Same workload as `scanUnfusedDirect`, but routed through the
     * register-based runner: state lives in a single `RegState`, each
@@ -118,7 +120,7 @@ class ScanBench {
     * This is the lane the register architecture is meant to win. */
   @Benchmark
   def scanUnfusedReg: Vector[Int] =
-    Scan.runDirectReg[Byte, Int, Any](unfused, bytesSeq)._2
+    unfused.runRegistered(bytesSeq)._2
 
   // -------------------------------------------------------------------
   // Schema-driven Fold: primitive accumulator (Long) without boxing.
@@ -140,13 +142,13 @@ class ScanBench {
 
   @Benchmark
   def scanLongFoldDirect: Long = {
-    val (sig, _) = Scan.runDirect[Byte, Long, Any](longFold, bytesSeq)
+    val (sig, _) = longFold.runSinglePass(bytesSeq)
     sig.leftoverSeq.headOption.getOrElse(0L)
   }
 
   @Benchmark
   def scanLongFoldReg: Long = {
-    val (sig, _) = Scan.runDirectReg[Byte, Long, Any](longFold, bytesSeq)
+    val (sig, _) = longFold.runRegistered(bytesSeq)
     sig.leftoverSeq.headOption.getOrElse(0L)
   }
 
@@ -164,7 +166,7 @@ class ScanBench {
   // exercises the Kyo lane on a smaller payload.
 
   // -------------------------------------------------------------------
-  // zio.scan: zio-blocks.chunk + inline fusion + blocks.pure log path
+  // Benchmark-local byte scans: zio-blocks chunk + inline fusion + pure log path
   // -------------------------------------------------------------------
 
   /** Compile-time fused loop — no [[BytePipeline]] wrapper on the hot path. */
@@ -175,6 +177,11 @@ class ScanBench {
   @Benchmark
   def inlineByteScanFused: zio.blocks.chunk.Chunk[Int] =
     InlineByteScan.map(_ + 1).map(_ ^ 0x55).map(_ - 1).pipeline.run(bytes)
+
+  /** ZIO Chunk's own specialised Byte -> Int map, used as a direct control. */
+  @Benchmark
+  def directZioChunkMap: zio.Chunk[Int] =
+    zioBytes.map(byte => ((byte & 0xff) + 1 ^ 0x55) - 1)
 
   @Benchmark
   def bytePipelineFused: zio.blocks.chunk.Chunk[Int] =

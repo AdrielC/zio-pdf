@@ -259,7 +259,8 @@ object Scan {
   // -------------------------------------------------------------------
   // Runners
   //
-  // `Scan.run` is the only entry point you should normally use. It:
+  // `FreeScan#run` is the normal entry point; `Scan.run` remains as the
+  // compatibility/static form. Both:
   //   1. Tries `Fusion.tryFuse` (fully-fused pure spines run as one
   //      function per input -- the fast lane).
   //   2. Otherwise routes through `RegInterp`, the register-allocated

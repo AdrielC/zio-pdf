@@ -5,7 +5,7 @@
 
 package zio.pdf
 
-import _root_.scodec.bits.{BitVector, ByteVector}
+import _root_.scodec.bits.BitVector
 import zio.test.*
 
 object PrimSpec extends ZIOSpecDefault {
@@ -34,6 +34,18 @@ object PrimSpec extends ZIOSpecDefault {
     test("Prim.Number integers and decimals round-trip") {
       val cases = List(Prim.Number(BigDecimal(0)), Prim.Number(BigDecimal(42)), Prim.Number(BigDecimal("-7.25")))
       assertTrue(cases.forall(n => Prim.Codec_Prim.decode(Prim.Codec_Prim.encode(n).require).require.value == n))
+    },
+
+    test("Prim.Number accepts PDF leading-decimal and signed literals") {
+      val cases = List(
+        ".7499817" -> BigDecimal("0.7499817"),
+        "-.5"      -> BigDecimal("-0.5"),
+        "+1.25"    -> BigDecimal("1.25"),
+        "1."       -> BigDecimal("1")
+      )
+      assertTrue(cases.forall { case (literal, expected) =>
+        Prim.Codec_Prim.decode(BitVector(literal.getBytes)).toOption.exists(_.value == Prim.Number(expected))
+      })
     },
 
     test("Prim.Name round-trips") {

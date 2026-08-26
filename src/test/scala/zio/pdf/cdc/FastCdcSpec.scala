@@ -161,7 +161,7 @@ object FastCdcSpec extends ZIOSpecDefault {
       }
     },
 
-    test("encoder can ingest a 10 MiB random stream into CDC chunks without OOM (memory-bounded, hits target avg)") {
+    test("one 10 MiB upstream chunk is processed through bounded CDC steps") {
       val size  = 10 * 1024 * 1024
       // Random bytes: representative of compressed/encrypted PDF
       // content streams. Cyclic deterministic data (i & 0xff) is a
@@ -171,7 +171,6 @@ object FastCdcSpec extends ZIOSpecDefault {
       for {
         stats <- ZStream
                    .fromChunk(Chunk.fromArray(bytes))
-                   .rechunk(64 * 1024)
                    .via(FastCdc.pipeline())
                    .runFold((0L, 0L)) { case ((n, total), c) =>
                      (n + 1L, total + c.size.toLong)

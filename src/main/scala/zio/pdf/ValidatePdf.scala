@@ -152,12 +152,13 @@ object ValidatePdf {
     validateContentStreams(byNumber, refs).zipParRight(validatePages(byNumber, pdf))
   }
 
-  def fromDecoded(decoded: ZStream[Any, Throwable, Decoded]): ZIO[Any, Throwable, Validation[PdfError, Unit]] =
-    AssemblePdf(decoded).map { v =>
-      v.mapError(e => PdfError.Assembly(e): PdfError).flatMap { case ValidatedPdf(pdf, errors) =>
-        errors.mapError(e => PdfError.Assembly(e): PdfError).zipParRight(apply(pdf))
-      }
+  private[pdf] def fromAssembly(assembled: Validation[AssemblyError, ValidatedPdf]): Validation[PdfError, Unit] =
+    assembled.mapError(e => PdfError.Assembly(e): PdfError).flatMap { case ValidatedPdf(pdf, errors) =>
+      errors.mapError(e => PdfError.Assembly(e): PdfError).zipParRight(apply(pdf))
     }
+
+  def fromDecoded[R](decoded: ZStream[R, Throwable, Decoded]): ZIO[R, Throwable, Validation[PdfError, Unit]] =
+    AssemblePdf(decoded).map(fromAssembly)
 
   /** Validate a collected decode result. */
   def fromChunk(decoded: Chunk[Decoded]): Validation[PdfError, Unit] =
@@ -199,24 +200,30 @@ object ComparePdfs {
         Validation.succeed(())
     }
 
-  def fromDecoded(
-    oldDecoded: ZStream[Any, Throwable, Decoded],
-    updatedDecoded: ZStream[Any, Throwable, Decoded]
-  ): ZIO[Any, Throwable, Validation[CompareError, Unit]] =
+  private[pdf] def fromAssemblies(
+    oldV: Validation[AssemblyError, ValidatedPdf],
+    newV: Validation[AssemblyError, ValidatedPdf]
+  ): Validation[CompareError, Unit] =
+    oldV.zipPar(newV).mapError(e => CompareError.Assembly(e): CompareError).flatMap {
+      case (ValidatedPdf(oldPdf, _), ValidatedPdf(newPdf, newErrors)) =>
+        val oldByNumber = ValidatePdf.objsByNumber(oldPdf)
+        val newByNumber = ValidatePdf.objsByNumber(newPdf)
+        val keys        = oldByNumber.keySet ++ newByNumber.keySet
+        val compared    = keys.toList.foldLeft[Validation[CompareError, Unit]](Validation.succeed(())) {
+          (acc, num) =>
+            acc.zipParRight(compareObjs(num, (oldByNumber.get(num), newByNumber.get(num))))
+        }
+        val newErrorsAsCompare = newErrors.mapError(e => CompareError.Assembly(e): CompareError)
+        val validated          = ValidatePdf(newPdf).mapError(e => CompareError.Validation(e): CompareError)
+        newErrorsAsCompare.zipParRight(validated).zipParRight(compared)
+    }
+
+  def fromDecoded[R](
+    oldDecoded: ZStream[R, Throwable, Decoded],
+    updatedDecoded: ZStream[R, Throwable, Decoded]
+  ): ZIO[R, Throwable, Validation[CompareError, Unit]] =
     AssemblePdf(oldDecoded).zipPar(AssemblePdf(updatedDecoded)).map { case (oldV, newV) =>
-      oldV.zipPar(newV).mapError(e => CompareError.Assembly(e): CompareError).flatMap {
-        case (ValidatedPdf(oldPdf, _), ValidatedPdf(newPdf, newErrors)) =>
-          val oldByNumber = ValidatePdf.objsByNumber(oldPdf)
-          val newByNumber = ValidatePdf.objsByNumber(newPdf)
-          val keys        = oldByNumber.keySet ++ newByNumber.keySet
-          val compared    = keys.toList.foldLeft[Validation[CompareError, Unit]](Validation.succeed(())) {
-            (acc, num) =>
-              acc.zipParRight(compareObjs(num, (oldByNumber.get(num), newByNumber.get(num))))
-          }
-          val newErrorsAsCompare = newErrors.mapError(e => CompareError.Assembly(e): CompareError)
-          val validated        = ValidatePdf(newPdf).mapError(e => CompareError.Validation(e): CompareError)
-          newErrorsAsCompare.zipParRight(validated).zipParRight(compared)
-      }
+      fromAssemblies(oldV, newV)
     }
 
   /** Compare two collected decode results. */

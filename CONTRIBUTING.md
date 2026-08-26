@@ -10,9 +10,14 @@ This GitHub repository is the public source and release project. Every change in
 4. Run:
 
    ```bash
-   sbt -batch test
+   npm ci
+   sbt -batch ";root/test;scanKyo/test;scalaJs/test;bench/test"
    sbt -batch examples/run
    sbt -batch "bench/Jmh/compile" "benchFs2/Jmh/compile"
+   npm --prefix examples-js/frontend ci
+   npm --prefix examples-js/frontend run build
+   bash scripts/audit-published-artifact.sh
+   bash scripts/verify-external-consumer.sh
    sbt -batch publishLocal
    ```
 

@@ -20,11 +20,35 @@
 package zio.pdf
 
 import _root_.scodec.bits.ByteVector
-import zio.{Cause, Chunk, NonEmptyChunk}
+import zio.{Cause, Chunk, NonEmptyChunk, Ref, ZIO}
 import zio.pdf.codec.Codecs
 import zio.stream.{ZChannel, ZPipeline}
 
 object WritePdf {
+
+  sealed abstract class Error(message: String) extends RuntimeException(message)
+
+  /** The caller-supplied length for a streaming object did not match its bytes. */
+  final case class StreamLengthMismatch(objectNumber: Long, declared: Long, actual: Long)
+      extends Error(
+        s"stream object $objectNumber declared /Length $declared but emitted $actual bytes"
+      )
+
+  final case class InvalidStreamLength(objectNumber: Long, declared: Long)
+      extends Error(s"stream object $objectNumber declared a negative /Length: $declared")
+
+  final case class StreamDictionaryRequired(objectNumber: Long)
+      extends Error(s"stream object $objectNumber requires a dictionary so /Length can be encoded")
+
+  final case class StreamLengthOverflow(objectNumber: Long, observed: Long, nextChunkBytes: Int)
+      extends Error(
+        s"stream object $objectNumber byte count overflowed Long after $observed bytes with a $nextChunkBytes-byte chunk"
+      )
+
+  final case class StreamHeaderEncodingFailed(objectNumber: Long, detail: String)
+      extends Error(s"encoding stream-object header $objectNumber failed: $detail")
+
+  private val OutputChunkBytes = 64 * 1024
 
   private final case class EncodeLog(entries: List[XrefObjMeta], trailer: Option[Trailer]) {
     def entry(newEntry: XrefObjMeta): EncodeLog = copy(entries = newEntry :: entries)
@@ -33,7 +57,7 @@ object WritePdf {
   private val emptyLog: EncodeLog = EncodeLog(Nil, None)
 
   /** Try to encode the version header. */
-  private def encodeVersion(part: Option[Part[Trailer]]): Either[String, (ByteVector, Option[Part[Trailer]])] =
+  private[pdf] def encodeVersion(part: Option[Part[Trailer]]): Either[String, (ByteVector, Option[Part[Trailer]])] =
     part match {
       case Some(Part.Version(version)) =>
         Codecs.encodeBytes(version)(using Version.codec) match {
@@ -49,25 +73,56 @@ object WritePdf {
 
   /** Encode the header of a streaming object: `<num> <gen> obj` +
     * dict (with `/Length` patched in) + `stream\n`. */
-  private def encodeStreamHeader(index: Obj.Index, data: Prim, length: Long): Either[String, ByteVector] = {
-    // Patch /Length into the dict.
-    val patched: Prim = data match {
-      case Prim.Dict(d) => Prim.Dict(d.updated("Length", Prim.Number(BigDecimal(length))))
-      case other        => other
-    }
-    val obj = Obj(index, patched)
-    // Encode <obj header> + <prim> by reusing IndirectObjCodec's preStream codec
-    // and then appending the literal `stream\n`.
-    Codecs.encodeBytes(obj)(using IndirectObj.preStream) match {
-      case _root_.scodec.Attempt.Successful(headerBytes) =>
-        Right(headerBytes ++ ByteVector("stream\n".getBytes))
-      case _root_.scodec.Attempt.Failure(c) =>
-        Left(s"encoding stream-object header ${index.number}: ${c.messageWithContext}")
-    }
-  }
+  private def encodeStreamHeader(index: Obj.Index, data: Prim, length: Long): Either[Error, ByteVector] =
+    if length < 0L then Left(InvalidStreamLength(index.number, length))
+    else
+      data match
+        case Prim.Dict(dictionary) =>
+          val obj = Obj(index, Prim.Dict(dictionary.updated("Length", Prim.Number(BigDecimal(length)))))
+          Codecs.encodeBytes(obj)(using IndirectObj.preStream) match
+            case _root_.scodec.Attempt.Successful(headerBytes) =>
+              Right(headerBytes ++ ByteVector("stream\n".getBytes))
+            case _root_.scodec.Attempt.Failure(c) =>
+              Left(StreamHeaderEncodingFailed(index.number, c.messageWithContext))
+        case _ => Left(StreamDictionaryRequired(index.number))
 
   private val streamTrailer: ByteVector =
     ByteVector("\nendstream\nendobj\n".getBytes)
+
+  /**
+   * Count at ZStream chunk granularity and fail before `endstream` is emitted
+   * when a caller supplied an incorrect `/Length`. The payload remains fully
+   * streaming: the counter is one Long and no content chunk is retained.
+   */
+  private def checkedPayload(
+    index: Obj.Index,
+    declaredLength: Long,
+    payload: zio.stream.ZStream[Any, Throwable, Byte]
+  ): zio.stream.ZStream[Any, Throwable, Byte] =
+    zio.stream.ZStream.unwrap {
+      Ref.make(0L).map { emitted =>
+        val forward = payload
+          .rechunk(OutputChunkBytes)
+          .chunks
+          .mapZIO { chunk =>
+            emitted.get.flatMap { actual =>
+              val chunkBytes = chunk.size
+              if actual > Long.MaxValue - chunkBytes.toLong then
+                ZIO.fail(StreamLengthOverflow(index.number, actual, chunkBytes))
+              else
+                val next = actual + chunkBytes.toLong
+                if next > declaredLength then ZIO.fail(StreamLengthMismatch(index.number, declaredLength, next))
+                else emitted.set(next).as(chunk)
+            }
+          }
+          .flattenChunks
+        val verify = emitted.get.flatMap { actual =>
+          if actual == declaredLength then ZIO.unit
+          else ZIO.fail(StreamLengthMismatch(index.number, declaredLength, actual))
+        }
+        forward ++ zio.stream.ZStream.fromZIO(verify).drain
+      }
+    }
 
   /** Encode a non-streaming Part.Obj. */
   private def encodeObj(state: EncodeLog, obj: IndirectObj): Either[String, (ByteVector, EncodeLog)] =
@@ -84,7 +139,8 @@ object WritePdf {
   )(log: EncodeLog): ZChannel[Any, Any, Any, Any, Throwable, Chunk[ByteVector], Unit] =
     log match {
       case EncodeLog(h :: t, Some(trailer)) =>
-        val entries = NonEmptyChunk(h, t.reverse*)
+        val physicalOrder = (h :: t).reverse
+        val entries       = NonEmptyChunk(physicalOrder.head, physicalOrder.tail*)
         Codecs.encodeBytes(GenerateXref(entries, trailer, initialOffset))(using summon[_root_.scodec.Codec[Xref]]) match {
           case _root_.scodec.Attempt.Successful(bytes) => ZChannel.write(Chunk.single(bytes))
           case _root_.scodec.Attempt.Failure(c) =>
@@ -118,8 +174,8 @@ object WritePdf {
 
       case Part.StreamObj(index, data, length, payload) =>
         encodeStreamHeader(index, data, length) match {
-          case Left(msg) =>
-            ZChannel.fail(new RuntimeException(msg))
+          case Left(error) =>
+            ZChannel.fail(error)
           case Right(header) =>
             // The header + the streamed payload + the trailer all go
             // into the byte count for this object's xref entry.
@@ -132,7 +188,7 @@ object WritePdf {
             // lives at a time.
             val forward
                 : ZChannel[Any, Any, Any, Any, Throwable, Chunk[ByteVector], Any] =
-              payload.channel.mapOut(c => Chunk.single(ByteVector.view(c.toArray)))
+              checkedPayload(index, length, payload).channel.mapOut(c => Chunk.single(ByteVector.view(c.toArray)))
             ZChannel.write(Chunk.single(header)) *>
               forward.unit *>
               ZChannel.write(Chunk.single(streamTrailer)) *>
@@ -153,61 +209,67 @@ object WritePdf {
   val parts: ZPipeline[Any, Throwable, Part[Trailer], ByteVector] =
     ZPipeline.fromChannel(streamingEncode)
 
+  /**
+   * Encode a part stream that has already emitted its version header.
+   *
+   * `initialPending` lets a caller which had to inspect a prefix (notably the
+   * linearized writer) continue with the exact remainder of the same upstream
+   * chunk. `terminalTrailer` wins over any earlier metadata when the stream
+   * ends, which is how a linearized tail writes its final trailer.
+   */
+  private[pdf] def tailEncoder(
+    initialOffset: Long,
+    initialPending: Chunk[Part[Trailer]] = Chunk.empty,
+    terminalTrailer: Option[Trailer] = None
+  ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {
+
+    def processChunk(
+      st: EncodeLog,
+      pending: Chunk[Part[Trailer]]
+    ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {
+      def goOne(
+        state: EncodeLog,
+        index: Int
+      ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
+        if index >= pending.size then readMore(state)
+        else emitPart(state, pending(index)).flatMap(next => goOne(next, index + 1))
+      goOne(st, 0)
+    }
+
+    def readMore(
+      st: EncodeLog
+    ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
+      ZChannel.readWithCause[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit](
+        (chunk: Chunk[Part[Trailer]]) => processChunk(st, chunk),
+        (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
+        (_: Any) => finishLog(initialOffset)(terminalTrailer.fold(st)(trailer => st.copy(trailer = Some(trailer))))
+      )
+
+    processChunk(emptyLog, initialPending)
+  }
+
   private def streamingEncode
       : ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {
-
-    val failNoEntries
-        : ZChannel[Any, Throwable, Any, Any, Throwable, Chunk[ByteVector], Unit] =
-      ZChannel.fail(new RuntimeException("no xref entries in parts stream"))
 
     def initial: ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
       ZChannel.readWithCause[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit](
         (chunk: Chunk[Part[Trailer]]) =>
-          if (chunk.isEmpty) initial
+          if chunk.isEmpty then initial
           else {
-            val first = chunk.head
-            encodeVersion(Some(first)) match {
-              case Right((vbytes, leftover)) =>
-                val tail = leftover.fold[Chunk[Part[Trailer]]](chunk.drop(1))(p => p +: chunk.drop(1))
-                ZChannel.write(Chunk.single(vbytes)) *> processChunk(emptyLog, tail, vbytes.size.toLong)
-              case Left(msg) =>
-                ZChannel.fail(new RuntimeException(msg))
+            encodeVersion(Some(chunk.head)) match {
+              case Right((bytes, leftover)) =>
+                val tail = leftover.fold[Chunk[Part[Trailer]]](chunk.drop(1))(part => part +: chunk.drop(1))
+                ZChannel.write(Chunk.single(bytes)) *> tailEncoder(bytes.size.toLong, tail)
+              case Left(message) => ZChannel.fail(new RuntimeException(message))
             }
           },
         (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
         (_: Any) =>
           encodeVersion(None) match {
-            case Right((vbytes, _)) =>
-              ZChannel.write(Chunk.single(vbytes)) *> failNoEntries
-            case Left(msg) => ZChannel.fail(new RuntimeException(msg))
+            case Right((bytes, _)) =>
+              ZChannel.write(Chunk.single(bytes)) *> tailEncoder(bytes.size.toLong)
+            case Left(message) => ZChannel.fail(new RuntimeException(message))
           }
-      )
-
-    def processChunk(
-      st: EncodeLog,
-      pending: Chunk[Part[Trailer]],
-      initialOffset: Long
-    ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {
-      // Process Parts one at a time so Part.StreamObj can interleave
-      // its own writes between the header and the trailer.
-      def goOne(
-        s: EncodeLog,
-        idx: Int
-      ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
-        if (idx >= pending.size) readMore(s, initialOffset)
-        else
-          emitPart(s, pending(idx)).flatMap(next => goOne(next, idx + 1))
-      goOne(st, 0)
-    }
-
-    def readMore(
-      st: EncodeLog,
-      initialOffset: Long
-    ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
-      ZChannel.readWithCause[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit](
-        (chunk: Chunk[Part[Trailer]]) => processChunk(st, chunk, initialOffset),
-        (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
-        (_: Any)                  => finishLog(initialOffset)(st)
       )
 
     initial

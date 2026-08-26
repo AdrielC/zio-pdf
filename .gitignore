@@ -32,6 +32,13 @@ project/.sbtboot/
 .cache-main
 .cache-tests
 
+# Scala.js external runtime dependencies
+node_modules/
+examples-js/frontend/src/generated/*.js
+examples-js/frontend/src/generated/*.map
+examples-js/frontend/dist/
+examples-js/frontend/tsconfig.tsbuildinfo
+
 # Local tooling / bench output (never commit)
 .cursor/
 bench/jmh-result.csv

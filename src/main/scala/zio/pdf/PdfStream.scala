@@ -8,7 +8,8 @@ package zio.pdf
 
 import _root_.scodec.Attempt
 import _root_.scodec.bits.BitVector
-import zio.{Chunk, ZIO}
+import scala.util.control.NonFatal
+import zio.Chunk
 import zio.scodec.stream.ChunkBytes
 import zio.stream.{ZPipeline, ZStream}
 
@@ -39,15 +40,16 @@ object PdfStream {
    * [[StreamingDecoded.ContentObjStart]].inlinePayload; larger
    * streams use chunked bytes on the wire before expansion.
    *
-   * When the PDF is a file path, prefer [[PdfEngine.decode]] — fused mmap
-   * path, no `ZChannel` per chunk. This pipeline remains for true
-   * `ZStream[Byte]` sources.
+   * [[FusedDecoder]] rechunks then carries parser and expansion state
+   * across bounded byte windows. `Path` and caller-owned `ZStream[Byte]`
+   * sources therefore have identical incremental decode semantics.
    */
   def decode(
     enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    chunkSize: Int = FusedDecoder.DefaultChunkSize
   ): ZPipeline[Any, Throwable, Byte, Decoded] =
-    StreamingDecode.pipeline(enableDiagnostics, config) >>> DecodedFromStreaming.pipeline
+    FusedDecoder.decodePipeline(enableDiagnostics, config, chunkSize)
 
   /**
    * Raw streaming events only (no ObjStm / XRef expansion). Prefer
@@ -62,16 +64,23 @@ object PdfStream {
    */
   def streamingDecode(
     enableDiagnostics: Boolean = false,
-    config: StreamingDecode.Config = StreamingDecode.Config.default
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    chunkSize: Int = FusedDecoder.DefaultChunkSize
   ): ZPipeline[Any, Throwable, Byte, StreamingDecoded] =
-    StreamingDecode.pipeline(enableDiagnostics, config)
+    ZPipeline
+      .rechunk[Byte](FusedDecoder.normalizedChunkSize(chunkSize))
+      .andThen(StreamingDecode.pipeline(enableDiagnostics, config))
 
   /**
    * Decode the high-level Element layer: Page / Pages / Image /
    * FontResource / Info / etc.
    */
-  def elements(enableDiagnostics: Boolean = false): ZPipeline[Any, Throwable, Byte, Element] =
-    decode(enableDiagnostics) >>> Elements.pipe
+  def elements(
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    chunkSize: Int = FusedDecoder.DefaultChunkSize
+  ): ZPipeline[Any, Throwable, Byte, Element] =
+    FusedDecoder.elementsPipeline(enableDiagnostics, config, chunkSize)
 
   /**
    * Process decoded PDF attachment payloads (and any other stream objects) in a
@@ -94,11 +103,11 @@ object PdfStream {
   def mapContentElements[R](
     f: Element.Content => ZStream[R, Throwable, Element]
   ): ZPipeline[R, Throwable, Element, Element] =
-    ZPipeline.mapChunksZIO { chunk =>
-      ZIO.foreach(chunk) {
-        case c: Element.Content => f(c).runCollect
-        case e                    => ZIO.succeed(Chunk.single(e))
-      }.map(_.flatten)
+    ZPipeline.fromFunction[R, Throwable, Element, Element] { elements =>
+      elements.flatMap {
+        case c: Element.Content => f(c)
+        case e                  => ZStream.succeed(e)
+      }
     }
 
   /**
@@ -114,6 +123,18 @@ object PdfStream {
     elements(enableDiagnostics) >>> Rewrite.simpleParts(initial)(collect)(update) >>> WritePdf.parts
 
   /**
+   * Full streaming rewrite with multi-part collection and finalization. This
+   * is the general form behind [[transformElements]]; use it when an update
+   * needs to add or replace more than one PDF object.
+   */
+  def rewriteElements[S](enableDiagnostics: Boolean = false)(initial: S)(
+    collect: Rewrite.Collect[S, Element]
+  )(
+    update: Rewrite.Update[S]
+  ): ZPipeline[Any, Throwable, Byte, _root_.scodec.bits.ByteVector] =
+    elements(enableDiagnostics) >>> Rewrite(initial)(collect)(update)
+
+  /**
    * Decompress each rewritable content stream, apply `f` to the
    * uncompressed bytes, recompress with Flate, and re-encode the PDF.
    * Streams whose `/Filter` chain includes image/Crypt filters are
@@ -122,32 +143,40 @@ object PdfStream {
   def mapUncompressedContent(
     enableDiagnostics: Boolean = false
   )(f: BitVector => BitVector): ZPipeline[Any, Throwable, Byte, _root_.scodec.bits.ByteVector] =
-    transformElements(enableDiagnostics)(())(mapUncompressedCollect(f))(Rewrite.noUpdate)
+    elements(enableDiagnostics) >>>
+      Rewrite(())(mapUncompressedCollect(f))(_ => Right(Chunk.empty))
 
   private def mapUncompressedCollect(
     f: BitVector => BitVector
-  ): RewriteState[Unit] => Element => (List[Part[Trailer]], RewriteState[Unit]) =
+  ): Rewrite.Collect[Unit, Element] =
     state => {
       case Element.Meta(trailer, _) =>
-        (Nil, state.copy(trailer = trailer.orElse(state.trailer)))
+        Right(Rewrite.Emission(Chunk.empty, state.copy(trailer = trailer.orElse(state.trailer))))
       case Element.Data(obj, _) =>
-        (List(Part.Obj(IndirectObj(obj, None))), state)
+        Right(Rewrite.Emission(Chunk.single(Part.Obj(IndirectObj(obj, None))), state))
       case Element.Content(obj, rawStream, stream, _) =>
         if !Content.mayRewriteFilters(obj.data) then
-          (List(Part.Obj(IndirectObj(obj, Some(rawStream)))), state)
+          Right(Rewrite.Emission(Chunk.single(Part.Obj(IndirectObj(obj, Some(rawStream)))), state))
         else
           stream.exec match {
             case Attempt.Failure(err) =>
-              throw new RuntimeException(s"uncompress obj ${obj.index.number}: ${err.messageWithContext}")
+              Left(new RuntimeException(s"uncompress obj ${obj.index.number}: ${err.messageWithContext}"))
             case Attempt.Successful(bits) =>
-              Content.compressFlate(obj.data, f(bits)) match {
-                case Attempt.Failure(err) =>
-                  throw new RuntimeException(s"FlateEncode obj ${obj.index.number}: ${err.messageWithContext}")
-                case Attempt.Successful((dict, compressed)) =>
-                  (
-                    List(Part.Obj(IndirectObj(Obj(obj.index, dict), Some(compressed)))),
-                    state
-                  )
+              val transformed =
+                try Right(f(bits))
+                catch case NonFatal(error) => Left(error)
+              transformed.flatMap { rewritten =>
+                Content.compressFlate(obj.data, rewritten) match {
+                  case Attempt.Failure(err) =>
+                    Left(new RuntimeException(s"FlateEncode obj ${obj.index.number}: ${err.messageWithContext}"))
+                  case Attempt.Successful((dict, compressed)) =>
+                    Right(
+                      Rewrite.Emission(
+                        Chunk.single(Part.Obj(IndirectObj(Obj(obj.index, dict), Some(compressed)))),
+                        state
+                      )
+                    )
+                }
               }
           }
     }
@@ -171,11 +200,15 @@ object PdfStream {
    * `Chunk[Element]` (callers that need the timeline should `runCollect`
    * on [[elements]] themselves).
    */
-  def extractText(enableDiagnostics: Boolean = false): ZPipeline[Any, Throwable, Byte, PageText] =
+  def extractText(
+    enableDiagnostics: Boolean = false,
+    config: StreamingDecode.Config = StreamingDecode.Config.default,
+    chunkSize: Int = FusedDecoder.DefaultChunkSize
+  ): ZPipeline[Any, Throwable, Byte, PageText] =
     ZPipeline.fromFunction[Any, Throwable, Byte, PageText] { bytes =>
       ZStream.unwrap {
         bytes
-          .via(elements(enableDiagnostics))
+          .via(elements(enableDiagnostics, config, chunkSize))
           .runFold(TextExtract.Acc())(TextExtract.fold)
           .map(acc => ZStream.fromChunk(TextExtract.finish(acc)))
       }
@@ -187,4 +220,17 @@ object PdfStream {
     updated: zio.stream.ZStream[Any, Throwable, Byte]
   ): zio.ZIO[Any, Throwable, zio.prelude.Validation[CompareError, Unit]] =
     ComparePdfs.fromBytes(enableDiagnostics)(old, updated)
+
+  /**
+   * Compare two PDFs as schema-backed semantic components in bounded LCS
+   * windows. Unlike [[compare]], this never assembles the two documents.
+   */
+  def diff(
+    config: PdfDiff.Config = PdfDiff.Config.default,
+    enableDiagnostics: Boolean = false
+  )(
+    old: zio.stream.ZStream[Any, Throwable, Byte],
+    updated: zio.stream.ZStream[Any, Throwable, Byte]
+  ): zio.stream.ZStream[Any, Throwable, PdfDiff.Window] =
+    PdfDiff.fromDecoded(old.via(decode(enableDiagnostics)), updated.via(decode(enableDiagnostics)), config)
 }

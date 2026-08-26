@@ -38,7 +38,7 @@ class RealPdfBench {
     bytes = is.readAllBytes()
     is.close()
     pdfPath = Files.createTempFile("real-pdf-bench-", ".pdf")
-    Files.write(pdfPath, bytes)
+    Files.write(pdfPath, bytes): Unit
   }
 
   @TearDown(Level.Trial)

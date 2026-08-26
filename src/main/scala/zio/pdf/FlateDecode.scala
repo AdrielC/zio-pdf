@@ -9,10 +9,10 @@
 package zio.pdf
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
+import java.util.zip.InflaterInputStream
 
-import _root_.scodec.{Attempt, DecodeResult, Err}
+import _root_.scodec.{Attempt, Err}
 import _root_.scodec.bits.BitVector
-import _root_.scodec.codecs.{bits, zlib}
 
 private[pdf] object PredictorTransform {
 
@@ -55,8 +55,30 @@ private[pdf] object FlateDecode {
       .flatten
       .getOrElse(Attempt.successful(stream))
 
-  def apply(stream: BitVector, data: Prim): Attempt[BitVector] =
-    zlib(bits).decode(stream).flatMap { case DecodeResult(inflated, _) =>
-      handleParams(inflated, data)
-    }
+  def apply(
+    stream: BitVector,
+    data: Prim,
+    maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization
+  ): Attempt[BitVector] =
+    val input  = new InflaterInputStream(new ByteArrayInputStream(stream.toByteArray))
+    val output = new ByteArrayOutputStream(math.min(stream.bytes.size.toInt.max(32), maxOutputBytes.bytes))
+    val buffer = new Array[Byte](8192)
+    var total  = 0L
+    try
+      var read = input.read(buffer)
+      while read >= 0 do
+        if read > 0 then
+          total += read.toLong
+          if total > maxOutputBytes.toLong then
+            return Attempt.failure(
+              Err(
+                FilterDecode.OutputLimitExceeded("FlateDecode", maxOutputBytes.bytes, total).getMessage
+              )
+            )
+          output.write(buffer, 0, read)
+        read = input.read(buffer)
+      handleParams(BitVector(output.toByteArray), data)
+    catch
+      case error: Throwable => Attempt.failure(Err(s"FlateDecode: ${error.getMessage}"))
+    finally input.close()
 }

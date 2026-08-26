@@ -1,6 +1,9 @@
 # Continuous integration on GitHub Actions.
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -12,6 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  JAVA_OPTS: ""
   SBT_OPTS: -Dsbt.supershell=false
 
 jobs:
@@ -20,16 +24,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "21"
 
-      - name: Coursier cache
-        uses: coursier/cache-action@v6
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install independent PDF validators
+        run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils
 
       - name: Install sbt
         run: |
@@ -40,11 +49,30 @@ jobs:
           fi
           echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
 
-      - name: Run tests
-        run: sbt -batch test
+      - name: Run verified test suites
+        run: |
+          npm ci
+          sbt -batch ';root/test;scanKyo/test;scalaJs/test;bench/test'
+
+      - name: Package API and documentation
+        run: sbt -batch ';root/package;root/packageDoc;scalaJs/package'
+
+      - name: Build Scala.js browser demo
+        run: |
+          npm --prefix examples-js/frontend ci
+          npm --prefix examples-js/frontend run build
 
       - name: Smoke examples
         run: sbt -batch examples/run
 
+      - name: Validate generated PDF independently
+        run: bash scripts/verify-generated-pdf.sh
+
       - name: Compile bench subprojects
-        run: sbt -batch "bench/Jmh/compile" "benchFs2/Jmh/compile"
+        run: sbt -batch "bench/Jmh/compile;benchFs2/Jmh/compile"
+
+      - name: Audit release artifact
+        run: bash scripts/audit-published-artifact.sh
+
+      - name: Prove external consumption
+        run: bash scripts/verify-external-consumer.sh

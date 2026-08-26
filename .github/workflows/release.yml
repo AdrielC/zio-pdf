@@ -20,7 +20,13 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: sbt
-      - uses: coursier/cache-action@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install independent PDF validators
+        run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils
+      - uses: coursier/cache-action@95e5b1029b6b86e7bac033ee44a0697d8a527d2d # v8.1.1
       - name: Install sbt
         run: |
           if ! command -v sbt >/dev/null 2>&1; then
@@ -30,11 +36,17 @@ jobs:
           fi
           echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
       - name: Test the complete build
-        run: sbt -batch clean test examples/run
+        run: |
+          npm ci
+          sbt -batch ';clean;root/test;scanKyo/test;scalaJs/test;bench/test;examples/run'
+          npm --prefix examples-js/frontend ci
+          npm --prefix examples-js/frontend run build
       - name: Audit the public package
         run: bash scripts/audit-published-artifact.sh
       - name: Prove external consumption
         run: bash scripts/verify-external-consumer.sh
+      - name: Validate generated PDF independently
+        run: bash scripts/verify-generated-pdf.sh
 
   maven-central:
     needs: validate
@@ -53,7 +65,7 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: sbt
-      - uses: coursier/cache-action@v6
+      - uses: coursier/cache-action@95e5b1029b6b86e7bac033ee44a0697d8a527d2d # v8.1.1
       - name: Install sbt
         run: |
           if ! command -v sbt >/dev/null 2>&1; then
@@ -71,6 +83,22 @@ jobs:
             exit 1
           fi
           sbt -batch ci-release
+      - name: Verify both artifacts from Maven Central
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in $(seq 1 30); do
+            jvm="https://repo.maven.apache.org/maven2/io/github/adrielc/zio-pdf_3/${version}/zio-pdf_3-${version}.pom"
+            js="https://repo.maven.apache.org/maven2/io/github/adrielc/zio-pdf_sjs1_3/${version}/zio-pdf_sjs1_3-${version}.pom"
+            if curl -fsS --retry 2 "${jvm}" >/dev/null && curl -fsS --retry 2 "${js}" >/dev/null; then
+              echo "Verified zio-pdf ${version} JVM and Scala.js artifacts on Maven Central."
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Maven Central did not expose both zio-pdf ${version} artifacts within 10 minutes." >&2
+          exit 1
 
   github-release:
     needs: maven-central

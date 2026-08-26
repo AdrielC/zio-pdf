@@ -5,6 +5,8 @@
 
 package zio.pdf
 
+import java.nio.file.Files
+
 import _root_.scodec.bits.{BitVector, ByteVector}
 import zio.*
 import zio.stream.*
@@ -57,6 +59,40 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
   }
 
   def spec: Spec[Any, Throwable] = suite("streamingDecode (memory-bounded)")(
+
+    test("waits for a split CRLF after a stream keyword before accepting its payload") {
+      val beforeLf = ByteVector.view("10 0 obj\r\n<</Length 1>>stream\r".getBytes)
+      val complete = beforeLf ++ ByteVector.view("\nx\r\nendstream\r\nendobj\r\n".getBytes)
+
+      val header = PdfByteLexer.next(complete)
+      assertTrue(
+        PdfByteLexer.next(beforeLf) == PdfByteLexer.LexResult.NeedMore,
+        header match
+          case PdfByteLexer.LexResult.Ok(
+                PdfByteLexer.HeaderEvent.H(IndirectObj.IndirectObjHeader(_, Some(1L))),
+                rest
+              ) => rest.take(1) == ByteVector('x'.toByte)
+          case _ => false
+      )
+    },
+
+    test("recognises only PDF's LF or CRLF stream delimiters across byte boundaries") {
+      val lf   = ByteVector.view("10 0 obj\n<</Length 1>>stream\nx\nendstream\nendobj\n".getBytes)
+      val crlf = ByteVector.view("10 0 obj\r\n<</Length 1>>stream\r\nx\r\nendstream\r\nendobj\r\n".getBytes)
+      val bareCr = ByteVector.view("10 0 obj\r\n<</Length 1>>stream\r".getBytes)
+
+      def payloadStart(bytes: ByteVector): Option[Byte] =
+        PdfByteLexer.next(bytes) match
+          case PdfByteLexer.LexResult.Ok(PdfByteLexer.HeaderEvent.H(IndirectObj.IndirectObjHeader(_, Some(1L))), rest) =>
+            rest.headOption
+          case _ => None
+
+      assertTrue(
+        payloadStart(lf).contains('x'.toByte),
+        payloadStart(crlf).contains('x'.toByte),
+        PdfByteLexer.next(bareCr) == PdfByteLexer.LexResult.NeedMore
+      )
+    },
 
     test("emits ContentObjStart (inline for small payload) and a final Meta") {
       for {
@@ -125,6 +161,36 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
       )
     },
 
+    test("high-level expansion fails before allocating beyond the configured stream bound") {
+      val payloadSize = 512 * 1024
+      val config = StreamingDecode.Config(
+        inlineMaxBytes = 0L,
+        maxMaterializedStreamBytes = ByteLimit.fromBytes(256L * 1024L).toOption.get
+      )
+      for {
+        bytes <- buildPdf(payloadSize)
+        rawCount <- ZStream
+                      .fromChunk(Chunk.fromArray(bytes.toArray))
+                      .via(PdfStream.streamingDecode(config = config))
+                      .runFold(0L) {
+                        case (count, StreamingDecoded.ContentObjBytes(chunk)) => count + chunk.size.toLong
+                        case (count, _)                                       => count
+                      }
+        expanded <- ZStream
+                      .fromChunk(Chunk.fromArray(bytes.toArray))
+                      .via(PdfStream.decode(config = config))
+                      .runDrain
+                      .exit
+      } yield assertTrue(
+        rawCount == payloadSize.toLong,
+        expanded.causeOption.exists(
+          _.failureOption.contains(
+            DecodedFromStreaming.MaterializedStreamLimitExceeded(4L, payloadSize.toLong, 256L * 1024L)
+          )
+        )
+      )
+    },
+
     test("decodes a 1 MiB streaming payload without materialising it (memory-bounded)") {
       val size = 1024 * 1024
       for {
@@ -166,6 +232,48 @@ object StreamingDecodeSpec extends ZIOSpecDefault {
                      }
                    }
       } yield assertTrue(stats == size.toLong)
+    } @@ TestAspect.timeout(60.seconds),
+
+    test("fused decode accepts a fragmented 10 MiB source through bounded windows") {
+      val size = 10 * 1024 * 1024
+      for {
+        bytes <- buildPdf(size)
+        stats <- ZStream
+                   .fromChunk(Chunk.fromArray(bytes.toArray))
+                   .rechunk(64 * 1024)
+                   .via(PdfStream.decode())
+                   .runFold((0L, 0L)) { case ((objects, payloadBytes), decoded) =>
+                     decoded match {
+                       case Decoded.ContentObj(_, raw, _) => (objects + 1L, payloadBytes + raw.bytes.size.toLong)
+                       case _                              => (objects + 1L, payloadBytes)
+                     }
+                   }
+      } yield assertTrue(stats._1 >= 1L, stats._2 == size.toLong)
+    } @@ TestAspect.timeout(60.seconds),
+
+    test("path stream preserves a 10 MiB raw payload across buffer reuse") {
+      val size = 10 * 1024 * 1024
+      ZIO.acquireReleaseWith(
+        buildPdf(size).flatMap { bytes =>
+          ZIO.attemptBlocking {
+            val path = Files.createTempFile("zio-pdf-large-stream-", ".pdf")
+            Files.write(path, bytes.toArray)
+            path
+          }
+        }
+      )(path => ZIO.attemptBlocking(Files.deleteIfExists(path)).ignore) { path =>
+        PdfEngine.stream(path).runCollect.provide(PdfEngine.live)
+      }.map { decoded =>
+        val content = decoded.collectFirst { case Decoded.ContentObj(_, raw, _) => raw }
+        val preservesSamples = content.exists { raw =>
+          val bytes = raw.bytes
+          bytes.size == size.toLong &&
+          bytes(0L) == 0.toByte &&
+          bytes((size / 2).toLong) == ((size / 2) & 0xff).toByte &&
+          bytes((size - 1).toLong) == ((size - 1) & 0xff).toByte
+        }
+        assertTrue(preservesSamples)
+      }
     } @@ TestAspect.timeout(60.seconds),
 
     test("the streamingDecode pipeline can be hashed straight to a digest (no buffering)") {

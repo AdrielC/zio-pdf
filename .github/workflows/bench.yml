@@ -1,12 +1,12 @@
 # Nightly JMH benchmark run on GitHub Actions.
 #
-# Produces a bench-results artifact with raw JMH text output for each
-# suite.  The run is triggered nightly (02:00 UTC) and can also be
-# kicked off manually via workflow_dispatch.
+# Prints raw JMH text output for each suite into the Actions log. The run is
+# triggered nightly (02:00 UTC) and can also be kicked off manually via
+# workflow_dispatch.
 #
 # Results intentionally do NOT fail the build on regression — JMH
-# numbers on shared CI runners are noisy.  Use the artifact to spot
-# trends over time; pin thresholds once you have a stable baseline.
+# numbers on shared CI runners are noisy. Use the job log to spot trends
+# over time; pin thresholds once you have a stable baseline.
 name: Benchmarks
 
 on:
@@ -15,6 +15,7 @@ on:
   workflow_dispatch:
 
 env:
+  JAVA_OPTS: ""
   SBT_OPTS: -Dsbt.supershell=false
 
 jobs:
@@ -25,22 +26,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "21"
 
-      - name: Coursier cache
-        uses: coursier/cache-action@v6
-
       - name: Install sbt
         run: |
-          if [[ "${{ github.server_url }}" != "https://github.com" ]]; then
-            export HOME=/root
-          fi
           if ! command -v sbt >/dev/null 2>&1; then
             curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
             chmod +x /usr/local/bin/cs
@@ -51,13 +46,13 @@ jobs:
       - name: ScanBench
         run: >
           sbt -batch
-          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*ScanBench.*"
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms ^zio\.pdf\.scan\.bench\.ScanBench\..*$"
           2>&1 | tee bench-scan.txt
 
       - name: ComplexScanBench
         run: >
           sbt -batch
-          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms .*ComplexScanBench.*"
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms ^zio\.pdf\.scan\.bench\.ComplexScanBench\..*$"
           2>&1 | tee bench-scan-complex.txt
 
       - name: StreamDecoderBench
@@ -90,6 +85,12 @@ jobs:
           "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*PdfHyperdriveBench.*"
           2>&1 | tee bench-hyperdrive.txt
 
+      - name: PdfEvidenceBench
+        run: >
+          sbt -batch
+          "bench/Jmh/run -prof gc -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*(PublicPdfCorpusBench|EvidenceBench).*"
+          2>&1 | tee bench-evidence.txt
+
       - name: HeadToHeadBench (ZIO vs fs2 streaming)
         run: >
           sbt -batch
@@ -104,8 +105,10 @@ jobs:
 
       - name: Upload bench results
         if: always()
-        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-results-${{ github.run_id }}
           path: bench-*.txt
           retention-days: 90
+          if-no-files-found: warn

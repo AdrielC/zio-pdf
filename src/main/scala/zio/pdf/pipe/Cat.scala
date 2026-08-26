@@ -1,9 +1,6 @@
 package zio.pdf.pipe
 
 import zio.pdf.pipe.Cat.IsoImpl
-import zio.pdf.pipe.tags.*
-
-import zio.pdf.pipe.tags.{One, Scala, Plus, Obj, Dual, Zero, Closure, Tensor}
 transparent trait HomAliases[H[_, _]]:
     infix type -->[A, B] = H[A, B]
     infix type <--[A, B] = H[B, A]

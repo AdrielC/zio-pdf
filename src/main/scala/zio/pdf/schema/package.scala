@@ -45,6 +45,10 @@ import zio.blocks.typeid.TypeId
 
 package object schema {
 
+  /**
+   * Preserve PDF dictionary insertion order while exposing the standard map
+   * shape expected by the current ZIO Blocks Schema release.
+   */
   inline given chunkMapSchema[K, V](using key: Schema[K], value: Schema[V]): Schema[ChunkMap[K, V]] = {
     given TypeId[ChunkMap[K, V]] = TypeId.of[ChunkMap[K, V]]
     Schema.map(using key, value).transform(

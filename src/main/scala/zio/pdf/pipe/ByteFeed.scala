@@ -87,7 +87,7 @@ private[pdf] object ByteFeed {
    * continues. Fuse/sink path — does not retain the full log.
    *
    * `consume` is `inline` so call-site lambdas (count / classify / digest)
-   * beta-reduce into this loop — same idea as [[zio.scan.InlineByteScan]].
+   * beta-reduce into this loop as one monomorphic traversal.
    */
   inline def runWindows[S, E](
     slice: Slice,

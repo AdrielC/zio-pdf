@@ -12,7 +12,6 @@
 
 package zio.scodec.stream
 
-import _root_.scodec.bits.*
 import _root_.scodec.codecs.uint8
 import zio.*
 import zio.blocks.ringbuffer.SpscRingBuffer

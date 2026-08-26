@@ -64,7 +64,7 @@ import kyo.{Record, ~}
   * the inputs, produces a `Record[name ~ V]` fragment with the
   * correct internal key shape; `run` accumulates those fragments via
   * `Record#&`. */
-final class ScanFlow[-I, +Out] @scala.annotation.publicInBinary private[scan] (
+final class ScanFlow[-I, Out] @scala.annotation.publicInBinary private[scan] (
     private[scan] val stages: Vector[Iterable[Any] => Record[Any]]
 ) {
 
@@ -86,10 +86,7 @@ final class ScanFlow[-I, +Out] @scala.annotation.publicInBinary private[scan] (
       inline scan: FreeScan[I1, V]
   ): ScanFlow[I1, Out & (N ~ Vector[V])] = {
     val stage: Iterable[Any] => Record[Any] = { (inputs: Iterable[Any]) =>
-      val (sig, _) = Scan.run[I1, V, Any](
-        scan,
-        inputs.asInstanceOf[Iterable[I1]]
-      )
+      val (sig, _) = scan.run(inputs.asInstanceOf[Iterable[I1]])
       val leftover: Vector[V] = sig.leftoverSeq.toVector
       // `name ~ leftover` runs at this call site with `name: N` and
       // `leftover: Vector[V]`, so the resulting Record fragment is

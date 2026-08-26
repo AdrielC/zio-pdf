@@ -24,6 +24,7 @@
 package zio.pdf.scan
 
 import StepOut.StepOut
+import kyo.*
 
 sealed trait FreeScan[-I, +O] extends Product with Serializable
 
@@ -60,6 +61,44 @@ object FreeScan {
   def id[A]: FreeScan[A, A] = Arr(a => a)
 
   extension [I, O](self: FreeScan[I, O]) {
+
+    // ===================================================================
+    // Execution
+    // ===================================================================
+
+    /** Run this scan over `inputs`.
+      *
+      * This is the normal execution surface. It selects the fused or
+      * register-backed implementation as appropriate, so callers do not
+      * need to name an interpreter or manufacture an error type merely to
+      * execute a pure scan.
+      */
+    def run(inputs: Iterable[I]): (ScanDone[O, Any], Vector[O]) =
+      Scan.run[I, O, Any](self, inputs)
+
+    /** Run this scan through the single-pass stepper implementation.
+      *
+      * Kept for interpreter-equivalence tests and benchmarks. Application
+      * code should use [[run]].
+      */
+    def runSinglePass(inputs: Iterable[I]): (ScanDone[O, Any], Vector[O]) =
+      SinglePassInterp.runDirect[I, O, Any](self, inputs)
+
+    /** Run this scan through the register-backed implementation.
+      *
+      * Kept for interpreter-equivalence tests and benchmarks. Application
+      * code should use [[run]].
+      */
+    def runRegistered(inputs: Iterable[I]): (ScanDone[O, Any], Vector[O]) =
+      RegInterp.runDirect[I, O, Any](self, inputs)
+
+    /** Run this scan in the Kyo `Poll` / `Emit` / `Abort` environment. */
+    def runKyo(inputs: Seq[I])(using
+        pollTag: Tag[Poll[I]],
+        emitTag: Tag[Emit[O]],
+        frame: Frame
+    ): (ScanDone[O, Any], Chunk[O]) < Any =
+      Scan.runKyo[I, O, Any](self, inputs)
 
     // ===================================================================
     // Category: identity, sequential composition
@@ -257,4 +296,3 @@ object FreeScan {
   def snd[A, B]: FreeScan[(A, B), B] =
     Arr((p: (A, B)) => p._2)
 }
-

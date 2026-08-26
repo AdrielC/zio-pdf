@@ -6,21 +6,21 @@
  *
  *   1. `scodec.codecs.vector(uint8).decode`     -- the strict, no-streaming
  *                                                  baseline.
- *   2. `Scan.runDirect (fused, 4 maps)`         -- a 4-stage pipeline of
- *                                                  pure maps. Fusion collapses
- *                                                  the spine to a single
- *                                                  `Byte => Int`; the runner
- *                                                  is `it.foreach(builder +=
- *                                                  f(_))`.
- *   3. `Scan.runDirect (unfused, 4 maps + filt)` -- the same maps with a
- *                                                   Filter spliced in. The
- *                                                   filter blocks fusion so
- *                                                   the driver routes through
- *                                                   the per-stage Stepper
- *                                                   path -- the conservative
- *                                                   cost when fusion is not
- *                                                   possible.
- *   4. `Scan.runKyo (fused, 4 maps)`             -- the same fused pipeline
+ *   2. `scan.runSinglePass (fused, 4 maps)`      -- a 4-stage pipeline of
+ *                                                   pure maps. Fusion collapses
+ *                                                   the spine to a single
+ *                                                   `Byte => Int`; the runner
+ *                                                   is `it.foreach(builder +=
+ *                                                   f(_))`.
+ *   3. `scan.runSinglePass (unfused, 4 maps + filt)` -- the same maps with a
+ *                                                    Filter spliced in. The
+ *                                                    filter blocks fusion so
+ *                                                    the driver routes through
+ *                                                    the per-stage Stepper
+ *                                                    path -- the conservative
+ *                                                    cost when fusion is not
+ *                                                    possible.
+ *   4. `scan.runKyo (fused, 4 maps)`              -- the same fused pipeline
  *                                                   driven through Kyo's
  *                                                   Poll/Emit/Abort row.
  *                                                   Pays a fixed per-element
@@ -110,13 +110,13 @@ object ScanPerfBench extends ZIOSpecDefault {
         require(r.value.size == N)
       }
 
-      val fusedMs = timeMillis("Scan.runDirect (fused, 4 maps)           ", 5) {
-        val (_, out) = Scan.runDirect[Byte, Int, Any](fusedPipeline, payloadSeq)
+      val fusedMs = timeMillis("single-pass runner (fused, 4 maps)      ", 5) {
+        val (_, out) = fusedPipeline.runSinglePass(payloadSeq)
         require(out.size == N)
       }
 
-      val unfusedMs = timeMillis("Scan.runDirect (unfused, 4 maps + filter)", 5) {
-        val (_, out) = Scan.runDirect[Byte, Int, Any](unfusedPipeline, payloadSeq)
+      val unfusedMs = timeMillis("single-pass runner (unfused, 4 maps + filter)", 5) {
+        val (_, out) = unfusedPipeline.runSinglePass(payloadSeq)
         require(out.size == N)
       }
 
@@ -127,7 +127,7 @@ object ScanPerfBench extends ZIOSpecDefault {
       val kyoN: Int = 1024
       val kyoSeq    = payloadSeq.take(kyoN)
       val kyoMs = timeMillis(s"Scan.runKyo  (fused, 4 maps, N=$kyoN)     ", 5) {
-        val (_, out) = Scan.runKyo[Byte, Int, Any](fusedPipeline, kyoSeq).eval
+        val (_, out) = fusedPipeline.runKyo(kyoSeq).eval
         require(out.size == kyoN)
       }
 
@@ -173,7 +173,7 @@ object ScanPerfBench extends ZIOSpecDefault {
         require(r.value.size == N)
       }
       val fusedMs = go { () =>
-        val (_, out) = Scan.runDirect[Byte, Int, Any](fusedPipeline, payloadSeq)
+        val (_, out) = fusedPipeline.runSinglePass(payloadSeq)
         require(out.size == N)
       }
       println(f"  ratio fused/scodec = ${fusedMs.toDouble / math.max(1L, baselineMs).toDouble}%.2fx")

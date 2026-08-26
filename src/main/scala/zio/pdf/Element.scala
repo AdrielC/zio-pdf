@@ -63,18 +63,42 @@ final case class FontResource(index: Obj.Index, data: Prim.Dict)
 /** Indirect object whose data is a sole array. */
 final case class IndirectArray(index: Obj.Index, data: Prim.Array)
 
-/** Image with codec discriminator + uncompressed payload. */
+/** Image with source-filter discriminator + uncompressed payload. */
 final case class Image(data: Prim.Dict, stream: Uncompressed, codec: Image.Codec)
 
 object Image {
   sealed trait Codec
   object Codec {
-    case object Jpg   extends Codec
-    case object Ccitt extends Codec
+    case object Jpg     extends Codec
+    case object Ccitt   extends Codec
+    case object Flate   extends Codec
+    case object Jpx     extends Codec
+    case object Jbig2   extends Codec
+    case object Unknown extends Codec
+
+    /**
+     * An XObject's `/Subtype /Image` establishes that it is an image;
+     * `/Filter` only determines how its pixel data is represented. Keeping
+     * that distinction prevents a valid Flate/JPX/JBIG2 image from being
+     * silently classified as general content.
+     */
+    def fromData(data: Prim.Dict): Codec =
+      FilterDecode.filterNames(data).lastOption match {
+        case Some("DCTDecode")      => Jpg
+        case Some("CCITTFaxDecode") => Ccitt
+        case Some("FlateDecode")    => Flate
+        case Some("JPXDecode")      => Jpx
+        case Some("JBIG2Decode")    => Jbig2
+        case _                       => Unknown
+      }
 
     def extension: Codec => String = {
-      case Jpg   => "jpg"
-      case Ccitt => "tiff"
+      case Jpg     => "jpg"
+      case Ccitt   => "tiff"
+      case Flate   => "raw"
+      case Jpx     => "jp2"
+      case Jbig2   => "jb2"
+      case Unknown => "bin"
     }
   }
 }

@@ -28,7 +28,7 @@ import zio.stream.*
  * Streaming binary decoder backed by a `ZChannel`.
  *
  * The main reason to reach for [[StreamDecoder]] over a plain
- * [[Decoder]] is that decoded values are emitted as soon as they are
+ * `Decoder` is that decoded values are emitted as soon as they are
  * available, instead of being buffered until the underlying
  * bit-stream completes. This makes it usable for incremental decoding
  * of large (or unbounded) inputs.
@@ -54,7 +54,7 @@ final class StreamDecoder[+A] private (private[stream] val step: StreamDecoder.S
   /**
    * Compile this decoder into a `ZChannel`. The channel reads
    * `Chunk[BitVector]` from upstream, writes `Chunk[A]` downstream,
-   * and completes with the leftover [[BitVector]] (bits that were
+   * and completes with the leftover `BitVector` (bits that were
    * pulled from upstream but not consumed by this decoder).
    */
   def toChannel: BitChannel[A] = runStep(step, BitVector.empty)
@@ -191,7 +191,9 @@ object StreamDecoder {
 
   /** Pipeline that converts `Byte` chunks into `BitVector` chunks. */
   private val bytesToBits: ZPipeline[Any, Nothing, Byte, BitVector] =
-    ZPipeline.mapChunks[Byte, BitVector](ChunkBytes.toBitVectorChunk)
+    ZPipeline
+      .rechunk[Byte](64 * 1024)
+      .andThen(ZPipeline.mapChunks[Byte, BitVector](ChunkBytes.toBitVectorChunk))
 
   // -------------------------------------------------------------------
   // Constructors
@@ -261,7 +263,7 @@ object StreamDecoder {
   /** A decoder that fails immediately with the given exception. */
   def raiseError(cause: Throwable): StreamDecoder[Nothing] = new StreamDecoder(Failed(cause))
 
-  /** A decoder that fails immediately with the given scodec [[Err]]. */
+  /** A decoder that fails immediately with the given scodec `Err`. */
   def raiseError(err: Err): StreamDecoder[Nothing] = raiseError(CodecError(err))
 
   /**

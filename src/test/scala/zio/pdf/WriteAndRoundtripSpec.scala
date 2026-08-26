@@ -95,6 +95,20 @@ object WriteAndRoundtripSpec extends ZIOSpecDefault {
         text.contains("trailer\n"),
         text.contains("startxref\n")
       )
+    },
+
+    test("xref offsets point at every object in physical order") {
+      for {
+        bytes <- ZStream(catalog, pages, page, content)
+                   .via(WritePdf.objects(trailer))
+                   .runFold(ByteVector.empty)(_ ++ _)
+        text = new String(bytes.toArray, java.nio.charset.StandardCharsets.ISO_8859_1)
+        xrefStart = text.indexOf("xref\n")
+        xrefEnd = text.indexOf("trailer\n", xrefStart)
+        rows = text.substring(xrefStart, xrefEnd).linesIterator.filter(_.endsWith(" n ")).toVector
+        offsets = rows.map(_.takeWhile(_.isDigit).toLong)
+        actual = (1L to 4L).map(number => text.indexOf(s"$number 0 obj").toLong)
+      } yield assertTrue(offsets == actual)
     }
   )
 }

@@ -4,7 +4,7 @@
  *
  * Sink spines take `inline` emit/consume lambdas so classify / count /
  * digest beta-reduce into the window loop (same pattern as
- * [[zio.scan.InlineByteScan]]).
+ * an inline monomorphic scan loop).
  *
  * Digest shares the same windows by putting [[MessageDigest]] in ZPure state
  * beside the decode machine ([[Digested]]).
@@ -80,7 +80,7 @@ private[pdf] object HyperFuse {
   inline def fuseDecodedBuild(slice: Slice, cfg: Cfg, inline emit: Decoded => Unit): Unit = {
     var bridge = DecodedFromStreaming.accInitial
     runStreaming(slice, cfg, streamingStep(cfg)) { log =>
-      bridge = DecodedFromStreaming.foldEventsAcc(bridge, log, emit)
+      bridge = DecodedFromStreaming.foldEventsAcc(bridge, log, cfg.config.maxMaterializedStreamBytes, emit)
     }
     val tail = DecodedFromStreaming.finalizeSync(bridge)
     if !tail.isEmpty then
@@ -96,7 +96,7 @@ private[pdf] object HyperFuse {
   ): MessageDigest = {
     var bridge = DecodedFromStreaming.accInitial
     val endMd = runStreamingDigested(slice, cfg, md) { log =>
-      bridge = DecodedFromStreaming.foldEventsAcc(bridge, log, emit)
+      bridge = DecodedFromStreaming.foldEventsAcc(bridge, log, cfg.config.maxMaterializedStreamBytes, emit)
     }
     val tail = DecodedFromStreaming.finalizeSync(bridge)
     if !tail.isEmpty then
@@ -109,7 +109,8 @@ private[pdf] object HyperFuse {
   inline def fuseDecoded(slice: Slice, cfg: Cfg)(inline sink: Chunk[Decoded] => Unit): Unit = {
     var bridge = DecodedFromStreaming.accInitial
     runStreaming(slice, cfg, streamingStep(cfg)) { log =>
-      val (decoded, next) = DecodedFromStreaming.foldSync(bridge, log)
+      val (decoded, next) =
+        DecodedFromStreaming.foldSync(bridge, log, cfg.config.maxMaterializedStreamBytes)
       if !decoded.isEmpty then sink(decoded)
       bridge = next
     }

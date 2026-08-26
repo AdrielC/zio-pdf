@@ -326,7 +326,7 @@ private[scan] object RegSteppers {
     ): Unit = {
       val raw    = buf.toByteArray()
       val window = if raw.length >= cfg.maxSize then raw.take(cfg.maxSize) else raw
-      val cut    = zio.pdf.cdc.FastCdc.cutOffsetForScan(window, cfg)
+      val cut    = zio.pdf.cdc.FastCdcSupport.cutOffset(window, cfg)
       val chunk  = java.util.Arrays.copyOfRange(raw, 0, cut)
       val rest   = java.util.Arrays.copyOfRange(raw, cut, raw.length)
       buf.reset()
