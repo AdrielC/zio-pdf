@@ -7,7 +7,8 @@
     "link:dev": "cd ../.. && sbt -batch \"scalaJsFrontend/fastLinkJS\"",
     "link:prod": "cd ../.. && sbt -batch \"scalaJsFrontend/fullLinkJS\"",
     "dev": "npm run link:dev && vite",
-    "build": "npm run link:prod && tsc -b && vite build",
+    "build": "npm run link:prod && tsc -b && vite build && npm run check:preview-compat",
+    "check:preview-compat": "node scripts/check-preview-compat.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

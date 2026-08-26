@@ -219,7 +219,7 @@ npm --prefix examples-js/frontend run build
 npm --prefix examples-js/frontend run dev
 ```
 
-The preview reads bounded ranges from the browser `Blob` and renders one page at a time. The evidence scan remains the arbitrary-size streaming path. Browser transforms retain a decoded document graph and therefore enforce explicit 64 MiB input and output bounds before producing a downloadable PDF. Font remapping runs the same encoding, widths, CID-metric, and `ToUnicode` checks as the library API and rejects incompatible replacements without rendering partial output.
+The preview reads bounded ranges from the browser `Blob` and renders one page at a time. It bundles PDF.js's translated and polyfilled legacy display layer and worker so supported mobile Safari releases do not depend on the modern bundle's newest JavaScript APIs. The evidence scan remains the arbitrary-size streaming path. Browser transforms retain a decoded document graph and therefore enforce explicit 64 MiB input and output bounds before producing a downloadable PDF. Font remapping runs the same encoding, widths, CID-metric, and `ToUnicode` checks as the library API and rejects incompatible replacements without rendering partial output.
 
 OCR is an explicit browser-only recovery step. Neither preview nor OCR is presented as work performed by the core parser.
 
