@@ -10,7 +10,6 @@ import {
   CircleAlert,
   FileSearch,
   FileUp,
-  Gauge,
   Minus,
   PanelTopOpen,
   Plus,
@@ -22,7 +21,6 @@ import {
   ShieldCheck,
   TextSearch,
   TriangleAlert,
-  Waves,
   X,
   createIcons
 } from "lucide";
@@ -42,6 +40,7 @@ const sourceStatus = document.querySelector<HTMLElement>("#source-status")!;
 const dropTitle = document.querySelector<HTMLElement>("#drop-title")!;
 const dropCopy = document.querySelector<HTMLElement>("#drop-copy")!;
 const emptyState = document.querySelector<HTMLElement>("#empty-state")!;
+const emptyStateCopy = document.querySelector<HTMLElement>("#empty-state-copy")!;
 const report = document.querySelector<HTMLElement>("#report")!;
 const reportTitle = document.querySelector<HTMLElement>("#report-title")!;
 const reportState = document.querySelector<HTMLElement>("#report-state")!;
@@ -113,6 +112,8 @@ const scanProgressWrap = document.querySelector<HTMLElement>("#scan-progress-wra
 const scanProgress = document.querySelector<HTMLProgressElement>("#scan-progress")!;
 const scanProgressLabel = document.querySelector<HTMLElement>("#scan-progress-label")!;
 const scanProgressDetail = document.querySelector<HTMLElement>("#scan-progress-detail")!;
+const scanFlow = document.querySelector<HTMLElement>("#scan-flow")!;
+const scanCommand = document.querySelector<HTMLElement>("#scan-command")!;
 
 let selectedFile: File | undefined;
 let previewGeneration = 0;
@@ -142,12 +143,12 @@ type RunPhase = "idle" | "ready" | "bridge" | "evidence" | "complete" | "error";
 type ObservationState = "positive" | "neutral" | "review";
 
 const runMessages: Record<RunPhase, string> = {
-  idle: "Choose a PDF to start a local preview.",
-  ready: "First-page preview is independent. Run the evidence scan when you are ready.",
-  bridge: "Starting the Scala.js evidence worker…",
-  evidence: "Streaming one fused pass through decode, inspection, text, policy, and SHA-256.",
-  complete: "Evidence scan complete.",
-  error: "Scan stopped. Review the error and try another PDF."
+  idle: "Select a PDF to preview.",
+  ready: "Ready to inspect.",
+  bridge: "Starting inspection…",
+  evidence: "Inspecting document…",
+  complete: "Inspection complete.",
+  error: "Inspection failed."
 };
 
 const stageOrder = ["source", "decode", "evidence", "report"] as const;
@@ -159,7 +160,6 @@ const iconSet = {
   CircleAlert,
   FileSearch,
   FileUp,
-  Gauge,
   Minus,
   PanelTopOpen,
   Plus,
@@ -171,7 +171,6 @@ const iconSet = {
   ShieldCheck,
   TextSearch,
   TriangleAlert,
-  Waves,
   X
 };
 
@@ -393,11 +392,11 @@ async function openPreview(file: File): Promise<void> {
   previewZoom = 1;
   setPreviewZoomLabel();
   previewEmpty.hidden = false;
-  previewEmpty.querySelector("strong")!.textContent = "Requesting the first page…";
-  previewEmpty.querySelector("span")!.textContent = `Reading at most ${formatBytes(MAX_PREVIEW_RANGE_BYTES)} at a time instead of collecting the full file.`;
+  previewEmpty.querySelector("strong")!.textContent = "Loading preview…";
+  previewEmpty.querySelector("span")!.textContent = `Reads are capped at ${formatBytes(MAX_PREVIEW_RANGE_BYTES)}.`;
   previewError.hidden = true;
   previewHost.hidden = true;
-  setPreviewState("loading", "Opening bounded ranges…");
+  setPreviewState("loading", "Opening PDF…");
 
   try {
     const pdfjs = await import("pdfjs-dist");
@@ -571,7 +570,10 @@ function resetReport(): void {
   citationLayer.hidden = true;
   reportState.textContent = "idle";
   reportState.dataset.state = "idle";
+  emptyStateCopy.textContent = "No inspection results.";
+  transformPlan.hidden = true;
   resetScanUi();
+  scanFlow.hidden = true;
   setRunPhase("idle");
 }
 
@@ -583,14 +585,15 @@ function resetWorkspace(): void {
   resetButton.disabled = true;
   delete dropZone.dataset.selected;
   dropTitle.textContent = "Choose a PDF";
-  dropCopy.textContent = "or drop one here";
+  dropCopy.textContent = "or drop a file";
   sourceStatus.textContent = "Blob stream";
   fileFacts.hidden = true;
+  scanCommand.hidden = true;
   inputStatus.textContent = runMessages.idle;
   destroyPreview();
   previewEmpty.hidden = false;
-  previewEmpty.querySelector("strong")!.textContent = "Your first page appears here";
-  previewEmpty.querySelector("span")!.textContent = "Previewing does not wait for the full evidence scan.";
+  previewEmpty.querySelector("strong")!.textContent = "No PDF selected";
+  previewEmpty.querySelector("span")!.textContent = "Choose a PDF above.";
   setPreviewState("idle", "Waiting for a PDF");
   resetReport();
 }
@@ -606,13 +609,16 @@ function selectFile(file: File | undefined): void {
   resetReport();
   analyzeButton.disabled = false;
   resetButton.disabled = false;
+  emptyStateCopy.textContent = "Run Evidence Scan.";
+  transformPlan.hidden = false;
   dropZone.dataset.selected = "true";
   dropTitle.textContent = "Replace PDF";
-  dropCopy.textContent = "preview opens in this tab";
+  dropCopy.textContent = "choose another file";
   setText("#file-name", file.name);
   setText("#file-size", formatBytes(file.size));
   sourceStatus.textContent = "Blob stream · not started";
   fileFacts.hidden = false;
+  scanCommand.hidden = false;
   inputStatus.textContent = runMessages.ready;
   setRunPhase("ready");
   void openPreview(file);
@@ -1080,6 +1086,7 @@ async function analyze(): Promise<void> {
   emptyState.hidden = true;
   errorState.hidden = true;
   report.hidden = true;
+  scanFlow.hidden = false;
   scanProgressWrap.hidden = false;
   scanProgress.value = 0;
   scanProgress.textContent = "0%";
