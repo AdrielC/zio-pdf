@@ -105,7 +105,9 @@ final class ScanFlow[-I, +Out] @scala.annotation.publicInBinary private[scan] (
   /** Run every labeled stage against `inputs` and assemble the
     * resulting fields into a `Record[Out]`. Each stage traverses the
     * input independently; v1 will fuse via `Fanout`. */
-  def run(inputs: Iterable[I @scala.annotation.unchecked.uncheckedVariance]): Record[Out] = {
+  def run(
+      inputs: Iterable[I @scala.annotation.unchecked.uncheckedVariance]
+  ): Record[Out @scala.annotation.unchecked.uncheckedVariance] = {
     var rec: Record[Any] = Record.empty
     var i = 0
     val seq = inputs.asInstanceOf[Iterable[Any]]
