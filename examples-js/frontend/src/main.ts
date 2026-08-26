@@ -1,12 +1,19 @@
-import type { Template } from "@pdfme/common";
-import type { Form } from "@pdfme/ui";
+import "@fontsource-variable/jetbrains-mono";
+import "@fontsource-variable/manrope";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   ArrowRightLeft,
   Braces,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   FileSearch,
   FileUp,
+  Gauge,
+  Minus,
   PanelTopOpen,
+  Plus,
   Quote,
   RotateCcw,
   ScanLine,
@@ -15,16 +22,19 @@ import {
   ShieldCheck,
   TextSearch,
   TriangleAlert,
+  Waves,
   X,
   createIcons
 } from "lucide";
 import type { Analysis, Citation, FontResource, TextRecoveryRequest, TransformPlan } from "zio-pdf-demo";
+import type { ScanWorkerMessage } from "./scan-protocol";
 import "./styles.css";
 
 const fileInput = document.querySelector<HTMLInputElement>("#file-input")!;
 const dropZone = document.querySelector<HTMLLabelElement>("#drop-zone")!;
 const workbench = document.querySelector<HTMLElement>("#workbench")!;
 const analyzeButton = document.querySelector<HTMLButtonElement>("#analyze-button")!;
+const analyzeButtonLabel = document.querySelector<HTMLElement>("#analyze-button-label")!;
 const resetButton = document.querySelector<HTMLButtonElement>("#reset-button")!;
 const fileFacts = document.querySelector<HTMLElement>("#file-facts")!;
 const inputStatus = document.querySelector<HTMLElement>("#input-status")!;
@@ -54,6 +64,14 @@ const previewErrorMessage = document.querySelector<HTMLElement>("#preview-error-
 const previewState = document.querySelector<HTMLElement>("#preview-state")!;
 const previewPage = document.querySelector<HTMLElement>("#preview-page")!;
 const previewEngine = document.querySelector<HTMLElement>("#preview-engine")!;
+const previewCanvas = document.querySelector<HTMLCanvasElement>("#preview-canvas")!;
+const previewScroll = document.querySelector<HTMLElement>("#preview-scroll")!;
+const previewPrevious = document.querySelector<HTMLButtonElement>("#preview-previous")!;
+const previewNext = document.querySelector<HTMLButtonElement>("#preview-next")!;
+const previewPageControl = document.querySelector<HTMLElement>("#preview-page-control")!;
+const previewZoomOut = document.querySelector<HTMLButtonElement>("#preview-zoom-out")!;
+const previewZoomIn = document.querySelector<HTMLButtonElement>("#preview-zoom-in")!;
+const previewZoomLabel = document.querySelector<HTMLElement>("#preview-zoom-label")!;
 const citationLayer = document.querySelector<HTMLElement>("#citation-layer")!;
 const citationPin = document.querySelector<HTMLButtonElement>("#citation-pin")!;
 const citationPinLabel = document.querySelector<HTMLElement>("#citation-pin-label")!;
@@ -91,12 +109,24 @@ const fontInventory = document.querySelector<HTMLElement>("#font-inventory")!;
 const fontInventorySummary = document.querySelector<HTMLElement>("#font-inventory-summary")!;
 const fontInventoryList = document.querySelector<HTMLUListElement>("#font-inventory-list")!;
 const fontFilter = document.querySelector<HTMLInputElement>("#font-filter")!;
+const scanProgressWrap = document.querySelector<HTMLElement>("#scan-progress-wrap")!;
+const scanProgress = document.querySelector<HTMLProgressElement>("#scan-progress")!;
+const scanProgressLabel = document.querySelector<HTMLElement>("#scan-progress-label")!;
+const scanProgressDetail = document.querySelector<HTMLElement>("#scan-progress-detail")!;
 
 let selectedFile: File | undefined;
-let preview: Form | undefined;
 let previewGeneration = 0;
 let currentPreviewPage = 1;
 let previewTotalPages = 0;
+let previewLoadingTask: PDFDocumentLoadingTask | undefined;
+let previewDocument: PDFDocumentProxy | undefined;
+let previewPageProxy: PDFPageProxy | undefined;
+let previewRenderTask: RenderTask | undefined;
+let previewZoom = 1;
+let previewRanges: Array<readonly [number, number]> = [];
+let activeScanWorker: Worker | undefined;
+let activeScanCancel: (() => void) | undefined;
+let scanGeneration = 0;
 let ocrGeneration = 0;
 let planGeneration = 0;
 let discoveredFonts: FontResource[] = [];
@@ -105,28 +135,34 @@ let citations: Citation[] = [];
 let textRecoveryRequests: TextRecoveryRequest[] = [];
 let citationOpen = false;
 
-const MAX_PREVIEW_BYTES = 64 * 1024 * 1024;
+const PREVIEW_RANGE_BYTES = 256 * 1024;
+const MAX_PREVIEW_RANGE_BYTES = 1024 * 1024;
 
 type RunPhase = "idle" | "ready" | "bridge" | "evidence" | "complete" | "error";
 type ObservationState = "positive" | "neutral" | "review";
 
 const runMessages: Record<RunPhase, string> = {
-  idle: "Choose a PDF to open its preview.",
-  ready: "PDFMe is rendering a local preview. Analysis will read the Blob once.",
-  bridge: "Loading the Scala.js scan bridge.",
-  evidence: "One fused pass: decode, inspection, font inventory, text, validation, policy, and digest.",
-  complete: "One fused scan complete.",
-  error: "Scan stopped before a report was produced."
+  idle: "Choose a PDF to start a local preview.",
+  ready: "First-page preview is independent. Run the evidence scan when you are ready.",
+  bridge: "Starting the Scala.js evidence worker…",
+  evidence: "Streaming one fused pass through decode, inspection, text, policy, and SHA-256.",
+  complete: "Evidence scan complete.",
+  error: "Scan stopped. Review the error and try another PDF."
 };
 
 const stageOrder = ["source", "decode", "evidence", "report"] as const;
 const iconSet = {
   ArrowRightLeft,
   Braces,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   FileSearch,
   FileUp,
+  Gauge,
+  Minus,
   PanelTopOpen,
+  Plus,
   Quote,
   RotateCcw,
   ScanLine,
@@ -135,6 +171,7 @@ const iconSet = {
   ShieldCheck,
   TextSearch,
   TriangleAlert,
+  Waves,
   X
 };
 
@@ -180,7 +217,11 @@ function setPreviewState(state: "idle" | "loading" | "ready" | "error", message:
 
 function setPreviewPage(page: number): void {
   currentPreviewPage = page;
-  previewPage.textContent = previewTotalPages > 0 ? `Page ${page} / ${previewTotalPages}` : `Page ${page}`;
+  const label = previewTotalPages > 0 ? `Page ${page} / ${previewTotalPages}` : `Page ${page}`;
+  previewPage.textContent = label;
+  previewPageControl.textContent = label;
+  previewPrevious.disabled = page <= 1;
+  previewNext.disabled = previewTotalPages === 0 || page >= previewTotalPages;
 }
 
 function citationForPage(page: number): Citation | undefined {
@@ -199,20 +240,11 @@ function renderTextRecoveryAction(): void {
 }
 
 function previewScrollContainer(): HTMLElement | undefined {
-  return Array.from(previewHost.querySelectorAll<HTMLElement>("div")).find((element) => {
-    const style = window.getComputedStyle(element);
-    return (
-      (style.overflowY === "auto" || style.overflowY === "scroll") &&
-      element.scrollHeight > element.clientHeight &&
-      (element.firstElementChild?.children.length ?? 0) > 0
-    );
-  });
+  return previewScroll;
 }
 
-function previewPageElement(page: number): HTMLElement | undefined {
-  const pages = previewScrollContainer()?.firstElementChild?.children;
-  const element = pages?.item(page - 1);
-  return element === null || element === undefined ? undefined : (element as HTMLElement);
+function previewPageElement(_page: number): HTMLElement | undefined {
+  return previewStage.dataset.state === "ready" ? previewCanvas : undefined;
 }
 
 function positionCitationOverlay(): void {
@@ -257,59 +289,262 @@ function destroyPreview(): void {
   ocrGeneration += 1;
   currentPreviewPage = 1;
   previewTotalPages = 0;
-  preview?.destroy();
-  preview = undefined;
-  previewHost.replaceChildren();
+  previewRenderTask?.cancel();
+  previewRenderTask = undefined;
+  previewPageProxy?.cleanup();
+  previewPageProxy = undefined;
+  if (previewLoadingTask) void previewLoadingTask.destroy().catch(() => undefined);
+  previewLoadingTask = undefined;
+  previewDocument = undefined;
+  previewRanges = [];
+  previewZoom = 1;
+  delete previewStage.dataset.firstPageMs;
+  previewCanvas.width = 0;
+  previewCanvas.height = 0;
+  previewCanvas.removeAttribute("style");
+  previewZoomLabel.textContent = "Fit";
+  previewPrevious.disabled = true;
+  previewNext.disabled = true;
+  previewZoomOut.disabled = true;
+  previewZoomIn.disabled = true;
   previewHost.hidden = true;
   previewError.hidden = true;
   citationLayer.hidden = true;
   citationOpen = false;
 }
 
-async function openPreview(file: File): Promise<void> {
-  const generation = ++previewGeneration;
-  preview?.destroy();
-  preview = undefined;
-  previewHost.replaceChildren();
-  previewEmpty.hidden = true;
-  previewError.hidden = true;
-  previewHost.hidden = false;
-  setPreviewState("loading", "Rendering locally");
+function previewBytesRead(): number {
+  const ranges = [...previewRanges].sort((left, right) => left[0] - right[0]);
+  let total = 0;
+  let cursor = -1;
+  for (const [begin, end] of ranges) {
+    const start = Math.max(begin, cursor);
+    if (end > start) total += end - start;
+    cursor = Math.max(cursor, end);
+  }
+  return total;
+}
+
+function recordPreviewRange(begin: number, end: number, total: number): void {
+  previewRanges.push([begin, end]);
+  const read = Math.min(total, previewBytesRead());
+  previewEngine.textContent = `${formatBytes(read)} of ${formatBytes(total)} read`;
+}
+
+function setPreviewZoomLabel(): void {
+  previewZoomLabel.textContent = previewZoom === 1 ? "Fit" : `${Math.round(previewZoom * 100)}%`;
+}
+
+async function renderPreviewPage(pageNumber: number, generation = previewGeneration): Promise<void> {
+  if (!previewDocument || generation !== previewGeneration) return;
+
+  const nextPage = Math.max(1, Math.min(pageNumber, previewDocument.numPages));
+  previewRenderTask?.cancel();
+  previewPageProxy?.cleanup();
+  previewPageProxy = undefined;
+  setPreviewPage(nextPage);
+  setPreviewState("loading", `Rendering page ${nextPage}…`);
 
   try {
-    if (file.size > MAX_PREVIEW_BYTES) {
-      throw new Error(
-        `Local page preview is limited to ${formatBytes(MAX_PREVIEW_BYTES)}. ` +
-          "The streaming Scala.js scan remains available for this file."
-      );
-    }
-    const [{ Form }] = await Promise.all([import("@pdfme/ui")]);
-    const basePdf = new Uint8Array(await file.arrayBuffer());
+    const page = await previewDocument.getPage(nextPage);
+    if (generation !== previewGeneration) return;
+    previewPageProxy = page;
+    const natural = page.getViewport({ scale: 1 });
+    const availableWidth = Math.max(240, previewScroll.clientWidth - 48);
+    const fitScale = Math.max(0.25, Math.min(2.5, availableWidth / natural.width));
+    const viewport = page.getViewport({ scale: fitScale * previewZoom });
+    const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+    const context = previewCanvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("This browser could not create the PDF canvas.");
+
+    previewCanvas.width = Math.floor(viewport.width * outputScale);
+    previewCanvas.height = Math.floor(viewport.height * outputScale);
+    previewCanvas.style.width = `${Math.floor(viewport.width)}px`;
+    previewCanvas.style.height = `${Math.floor(viewport.height)}px`;
+    previewCanvas.setAttribute("aria-label", `Rendered PDF page ${nextPage} of ${previewDocument.numPages}`);
+    const transform = outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0];
+    previewRenderTask = page.render({ canvas: null, canvasContext: context, viewport, transform });
+    await previewRenderTask.promise;
     if (generation !== previewGeneration) return;
 
-    const template: Template = { basePdf, schemas: [] };
-    preview = new Form({
-      domContainer: previewHost,
-      template,
-      inputs: [{}],
-      options: { zoomLevel: 0.82, sidebarOpen: false }
+    previewRenderTask = undefined;
+    previewEmpty.hidden = true;
+    previewHost.hidden = false;
+    previewZoomOut.disabled = false;
+    previewZoomIn.disabled = false;
+    setPreviewState("ready", `${formatBytes(previewBytesRead())} of ${formatBytes(selectedFile?.size ?? 0)} read`);
+    setPreviewPage(nextPage);
+    renderCitationOverlay();
+  } catch (error) {
+    if (generation !== previewGeneration || (error instanceof Error && error.name === "RenderingCancelledException")) return;
+    throw error;
+  }
+}
+
+async function openPreview(file: File): Promise<void> {
+  const startedAt = performance.now();
+  const generation = ++previewGeneration;
+  previewRenderTask?.cancel();
+  if (previewLoadingTask) void previewLoadingTask.destroy().catch(() => undefined);
+  previewLoadingTask = undefined;
+  previewDocument = undefined;
+  previewPageProxy = undefined;
+  previewRanges = [];
+  previewZoom = 1;
+  setPreviewZoomLabel();
+  previewEmpty.hidden = false;
+  previewEmpty.querySelector("strong")!.textContent = "Requesting the first page…";
+  previewEmpty.querySelector("span")!.textContent = `Reading at most ${formatBytes(MAX_PREVIEW_RANGE_BYTES)} at a time instead of collecting the full file.`;
+  previewError.hidden = true;
+  previewHost.hidden = true;
+  setPreviewState("loading", "Opening bounded ranges…");
+
+  try {
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+    class BlobRangeTransport extends pdfjs.PDFDataRangeTransport {
+      private stopped = false;
+
+      constructor() {
+        super(file.size, null, false, file.name);
+      }
+
+      requestDataRange(begin: number, end: number): void {
+        const length = end - begin;
+        if (length <= 0 || length > MAX_PREVIEW_RANGE_BYTES) {
+          this.onDataRange(begin, null);
+          return;
+        }
+        void file.slice(begin, end).arrayBuffer().then(
+          (buffer) => {
+            if (this.stopped || generation !== previewGeneration) return;
+            recordPreviewRange(begin, end, file.size);
+            this.onDataRange(begin, new Uint8Array(buffer));
+          },
+          () => this.onDataRange(begin, null)
+        );
+      }
+
+      abort(): void {
+        this.stopped = true;
+      }
+    }
+
+    const range = new BlobRangeTransport();
+    previewLoadingTask = pdfjs.getDocument({
+      range,
+      rangeChunkSize: PREVIEW_RANGE_BYTES,
+      disableStream: true,
+      disableAutoFetch: true,
+      stopAtErrors: false,
+      isOffscreenCanvasSupported: true
     });
-    setPreviewPage(preview.getPageCursor() + 1);
-    preview.onPageChange(({ currentPage, totalPages }) => {
-      previewTotalPages = totalPages;
-      setPreviewPage(currentPage + 1);
-      renderCitationOverlay();
-    });
-    setPreviewState("ready", "Rendered locally");
+    const document = await previewLoadingTask.promise;
+    if (generation !== previewGeneration) return;
+    previewDocument = document;
+    previewTotalPages = document.numPages;
+    await renderPreviewPage(1, generation);
+    if (generation === previewGeneration && previewStage.dataset.state === "ready") {
+      const elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
+      previewStage.dataset.firstPageMs = String(elapsedMs);
+      previewEngine.textContent = `${previewEngine.textContent} · ${elapsedMs.toLocaleString()} ms`;
+    }
   } catch (error) {
     if (generation !== previewGeneration) return;
     const message = error instanceof Error ? error.message : "The local previewer could not render this PDF.";
     previewHost.hidden = true;
+    previewEmpty.hidden = true;
     previewError.hidden = false;
     previewErrorMessage.textContent = message;
-    inputStatus.textContent = `${message} Streaming scan is ready.`;
+    inputStatus.textContent = `${message} The worker-based evidence scan is still available.`;
     setPreviewState("error", "Preview failed");
   }
+}
+
+function resetScanUi(): void {
+  delete analyzeButton.dataset.running;
+  analyzeButtonLabel.textContent = "Run Evidence Scan";
+  scanProgressWrap.hidden = true;
+  scanProgress.value = 0;
+  scanProgress.textContent = "0%";
+  scanProgressLabel.textContent = "Streaming bytes";
+  scanProgressDetail.textContent = "0%";
+}
+
+function stopActiveScan(): boolean {
+  const wasRunning = activeScanWorker !== undefined;
+  scanGeneration += 1;
+  if (activeScanCancel) activeScanCancel();
+  else activeScanWorker?.terminate();
+  activeScanCancel = undefined;
+  activeScanWorker = undefined;
+  resetScanUi();
+  return wasRunning;
+}
+
+function updateScanProgress(loadedBytes: number, totalBytes: number): void {
+  const safeTotal = Math.max(0, totalBytes);
+  const safeLoaded = Math.max(0, Math.min(loadedBytes, safeTotal));
+  const percent = safeTotal === 0 ? 0 : Math.min(100, Math.round((safeLoaded / safeTotal) * 100));
+  scanProgressWrap.hidden = false;
+  scanProgress.value = percent;
+  scanProgress.textContent = `${percent}%`;
+  scanProgressLabel.textContent = safeLoaded >= safeTotal && safeTotal > 0 ? "Building report" : "Streaming bytes";
+  scanProgressDetail.textContent = `${formatBytes(safeLoaded)} / ${formatBytes(safeTotal)} · ${percent}%`;
+  sourceStatus.textContent = safeLoaded >= safeTotal && safeTotal > 0 ? "Blob consumed once" : `${percent}% streamed`;
+  inputStatus.textContent = safeLoaded >= safeTotal && safeTotal > 0
+    ? "All bytes consumed. Finalizing typed evidence in the worker…"
+    : `Streaming ${formatBytes(safeLoaded)} of ${formatBytes(safeTotal)} through Scala.js…`;
+}
+
+function scanInWorker(file: File, id: number): Promise<Analysis> {
+  const worker = new Worker(new URL("./scan.worker.ts", import.meta.url), {
+    type: "module",
+    name: "zio-pdf-evidence"
+  });
+  activeScanWorker = worker;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (): void => {
+      if (activeScanWorker === worker) activeScanWorker = undefined;
+      if (activeScanCancel === cancel) activeScanCancel = undefined;
+      worker.terminate();
+    };
+    const cancel = (): void => {
+      if (settled) return;
+      settled = true;
+      finish();
+      reject(new DOMException("Evidence scan cancelled", "AbortError"));
+    };
+    activeScanCancel = cancel;
+
+    worker.onmessage = (event: MessageEvent<ScanWorkerMessage>) => {
+      const message = event.data;
+      if (message.id !== id || id !== scanGeneration) return;
+      if (message.kind === "progress") {
+        const runPhase = message.phase as RunPhase;
+        setRunPhase(runPhase);
+        updateScanProgress(message.loadedBytes, message.totalBytes);
+      } else if (message.kind === "complete") {
+        settled = true;
+        finish();
+        resolve(message.analysis);
+      } else {
+        settled = true;
+        finish();
+        reject(new Error(message.message));
+      }
+    };
+
+    worker.onerror = (event) => {
+      settled = true;
+      finish();
+      reject(new Error(event.message || "The PDF evidence worker could not start."));
+    };
+
+    worker.postMessage({ kind: "analyze", id, file });
+  });
 }
 
 function resetReport(): void {
@@ -336,10 +571,12 @@ function resetReport(): void {
   citationLayer.hidden = true;
   reportState.textContent = "idle";
   reportState.dataset.state = "idle";
+  resetScanUi();
   setRunPhase("idle");
 }
 
 function resetWorkspace(): void {
+  stopActiveScan();
   selectedFile = undefined;
   fileInput.value = "";
   analyzeButton.disabled = true;
@@ -352,7 +589,9 @@ function resetWorkspace(): void {
   inputStatus.textContent = runMessages.idle;
   destroyPreview();
   previewEmpty.hidden = false;
-  setPreviewState("idle", "No file");
+  previewEmpty.querySelector("strong")!.textContent = "Your first page appears here";
+  previewEmpty.querySelector("span")!.textContent = "Previewing does not wait for the full evidence scan.";
+  setPreviewState("idle", "Waiting for a PDF");
   resetReport();
 }
 
@@ -362,16 +601,17 @@ function selectFile(file: File | undefined): void {
     return;
   }
 
+  stopActiveScan();
   selectedFile = file;
   resetReport();
   analyzeButton.disabled = false;
   resetButton.disabled = false;
   dropZone.dataset.selected = "true";
   dropTitle.textContent = "Replace PDF";
-  dropCopy.textContent = "preview opens in this browser";
+  dropCopy.textContent = "preview opens in this tab";
   setText("#file-name", file.name);
   setText("#file-size", formatBytes(file.size));
-  sourceStatus.textContent = "Blob stream";
+  sourceStatus.textContent = "Blob stream · not started";
   fileFacts.hidden = false;
   inputStatus.textContent = runMessages.ready;
   setRunPhase("ready");
@@ -671,7 +911,7 @@ function renderAnalysis(analysis: Analysis): void {
   emptyState.hidden = true;
   errorState.hidden = true;
   report.hidden = false;
-  reportTitle.textContent = inspection.status === "accepted" ? "Inspection complete" : "Inspection rejected";
+  reportTitle.textContent = inspection.status === "accepted" ? "Inspection Complete" : "Inspection Rejected";
   reportState.textContent = inspection.status;
   reportState.dataset.state = inspection.status;
 
@@ -680,7 +920,7 @@ function renderAnalysis(analysis: Analysis): void {
   setText("#policy-result", analysis.strictPolicyPassed ? "passed" : "blocked");
   setText("#objects-result", String(inspection.elementsRead));
   setText("#elapsed-result", `${Math.max(0, Math.round(analysis.elapsedMs)).toLocaleString()} ms`);
-  setText("#digest-result", `SHA-256 ${analysis.sha256.slice(0, 12)}...`);
+  setText("#digest-result", `SHA-256 ${analysis.sha256.slice(0, 12)}…`);
 
   renderFontInventory(inspection.fonts);
   citations = content.citations.filter((citation) => citation.excerpt.length > 0);
@@ -789,7 +1029,7 @@ async function recognizeCurrentPage(): Promise<void> {
 
   const generation = ++ocrGeneration;
   ocrButton.disabled = true;
-  ocrStatus.textContent = `Preparing page ${currentPreviewPage} for local OCR...`;
+  ocrStatus.textContent = `Preparing page ${currentPreviewPage} for local OCR…`;
   ocrValue.textContent = "";
 
   try {
@@ -822,34 +1062,58 @@ async function recognizeCurrentPage(): Promise<void> {
 
 async function analyze(): Promise<void> {
   if (!selectedFile) return;
+  if (activeScanWorker) {
+    stopActiveScan();
+    emptyState.hidden = false;
+    inputStatus.textContent = "Evidence scan cancelled. The preview remains available.";
+    sourceStatus.textContent = "Blob stream · cancelled";
+    setRunPhase("ready");
+    return;
+  }
 
-  analyzeButton.disabled = true;
-  resetButton.disabled = true;
+  const file = selectedFile;
+  const generation = ++scanGeneration;
+  analyzeButton.dataset.running = "true";
+  analyzeButtonLabel.textContent = "Stop Scan";
+  analyzeButton.disabled = false;
+  resetButton.disabled = false;
   emptyState.hidden = true;
   errorState.hidden = true;
   report.hidden = true;
+  scanProgressWrap.hidden = false;
+  scanProgress.value = 0;
+  scanProgress.textContent = "0%";
+  scanProgressDetail.textContent = `0 B / ${formatBytes(file.size)} · 0%`;
+  sourceStatus.textContent = "Starting worker";
   setRunPhase("bridge");
   inputStatus.textContent = runMessages.bridge;
 
   try {
-    const { ZioPdfDemo } = await import("zio-pdf-demo");
-    if (transformPlan.dataset.state !== "ready") await compileTransformPlan();
-    renderAnalysis(await ZioPdfDemo.analyzeBlobWithProgress(selectedFile, (phase) => {
-      const runPhase = phase as RunPhase;
-      setRunPhase(runPhase);
-      inputStatus.textContent = runMessages[runPhase] ?? "Streaming the document through Scala.js.";
-    }));
+    const analysis = await scanInWorker(file, generation);
+    if (generation !== scanGeneration) return;
+    renderAnalysis(analysis);
+    updateScanProgress(file.size, file.size);
+    scanProgressLabel.textContent = "Evidence ready";
     inputStatus.textContent = runMessages.complete;
+    sourceStatus.textContent = "Blob consumed once";
+    setRunPhase("complete");
   } catch (error) {
+    if (generation !== scanGeneration) return;
     errorState.hidden = false;
     reportState.textContent = "error";
     reportState.dataset.state = "error";
-    errorMessage.textContent = error instanceof Error ? error.message : "The PDF could not be analyzed.";
+    errorMessage.textContent = error instanceof Error
+      ? `${error.message} Choose another PDF or retry the scan.`
+      : "The PDF could not be analyzed. Choose another PDF or retry the scan.";
     inputStatus.textContent = runMessages.error;
     setRunPhase("error");
   } finally {
-    analyzeButton.disabled = !selectedFile;
-    resetButton.disabled = !selectedFile;
+    if (generation === scanGeneration) {
+      delete analyzeButton.dataset.running;
+      analyzeButtonLabel.textContent = "Run Evidence Scan";
+      analyzeButton.disabled = !selectedFile;
+      resetButton.disabled = !selectedFile;
+    }
   }
 }
 
@@ -866,6 +1130,18 @@ dropZone.addEventListener("drop", (event) => {
 });
 analyzeButton.addEventListener("click", () => void analyze());
 resetButton.addEventListener("click", resetWorkspace);
+previewPrevious.addEventListener("click", () => void renderPreviewPage(currentPreviewPage - 1));
+previewNext.addEventListener("click", () => void renderPreviewPage(currentPreviewPage + 1));
+previewZoomOut.addEventListener("click", () => {
+  previewZoom = Math.max(0.5, Number((previewZoom - 0.25).toFixed(2)));
+  setPreviewZoomLabel();
+  void renderPreviewPage(currentPreviewPage);
+});
+previewZoomIn.addEventListener("click", () => {
+  previewZoom = Math.min(2, Number((previewZoom + 0.25).toFixed(2)));
+  setPreviewZoomLabel();
+  void renderPreviewPage(currentPreviewPage);
+});
 ocrButton.addEventListener("click", () => void recognizeCurrentPage());
 citationPin.addEventListener("click", () => {
   citationOpen = true;
@@ -876,7 +1152,14 @@ citationClose.addEventListener("click", () => {
   citationOpen = false;
   renderCitationOverlay();
 });
-window.addEventListener("resize", renderCitationOverlay);
+let resizeFrame = 0;
+window.addEventListener("resize", () => {
+  window.cancelAnimationFrame(resizeFrame);
+  resizeFrame = window.requestAnimationFrame(() => {
+    if (previewDocument) void renderPreviewPage(currentPreviewPage);
+    else renderCitationOverlay();
+  });
+});
 compilePlanButton.addEventListener("click", () => void compileTransformPlan());
 [planRemap, planTokenize].forEach((control) => control.addEventListener("change", () => {
   renderMappingRoute();

@@ -64,7 +64,7 @@ object ZioPdfDemo:
 
   @JSExport
   def analyze(input: Uint8Array): js.Promise[js.Dictionary[js.Any]] =
-    analyzeSource(PdfSource.fromUint8Array(input), _ => ())
+    analyzeSource(PdfSource.fromUint8Array(input), input.length.toLong, (_, _, _) => ())
 
   /**
    * Streams a browser `File` / `Blob` through `PdfSource` without an
@@ -72,27 +72,40 @@ object ZioPdfDemo:
    */
   @JSExport
   def analyzeBlob(input: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
-    analyzeSource(PdfSource.fromBlob(input), _ => ())
+    analyzeSource(PdfSource.fromBlob(input), input.size.toLong, (_, _, _) => ())
 
-  /** Emit actual phase boundaries while a browser source is being consumed. */
+  /** Emit actual phase and byte boundaries while a browser source is consumed. */
   @JSExport
   def analyzeBlobWithProgress(
     input: dom.Blob,
-    progress: js.Function1[String, Unit]
+    progress: js.Function3[String, Double, Double, Unit]
   ): js.Promise[js.Dictionary[js.Any]] =
-    analyzeSource(PdfSource.fromBlob(input), phase => progress(phase))
+    analyzeSource(
+      PdfSource.fromBlob(input),
+      input.size.toLong,
+      (phase, loaded, total) => progress(phase, loaded.toDouble, total.toDouble)
+    )
 
   private def analyzeSource(
     source: PdfSource,
-    progress: String => Unit
+    totalBytes: Long,
+    progress: (String, Long, Long) => Unit
   ): js.Promise[js.Dictionary[js.Any]] =
-    def phase(name: String): UIO[Unit] = ZIO.succeed(progress(name))
+    var loadedBytes = 0L
+    val observedSource = new PdfSource:
+      def bytes =
+        source.bytes.mapChunksZIO { chunk =>
+          loadedBytes += chunk.length.toLong
+          ZIO.succeed(progress("evidence", loadedBytes, totalBytes)).as(chunk)
+        }
+
+    def phase(name: String): UIO[Unit] = ZIO.succeed(progress(name, loadedBytes, totalBytes))
 
     val startedAt = js.Date.now()
     val effect =
       for
         _      <- phase("evidence")
-        bundle <- PdfEngine.evidence(source, browserPlan)
+        bundle <- PdfEngine.evidence(observedSource, browserPlan)
         _      <- phase("complete")
       yield js.Dictionary(
         "inspection" -> inspectionJson(bundle.inspection).asInstanceOf[js.Any],
