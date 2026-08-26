@@ -210,7 +210,7 @@ The build uses the current Maven Central releases of:
 
 ## Scala.js playground
 
-The browser application performs parsing, hashing, evidence extraction, and plan inspection locally through the Scala.js artifact. A selected file is consumed through `Blob.stream()` rather than `arrayBuffer()`.
+The browser application performs parsing, hashing, evidence extraction, and document transforms locally through the Scala.js artifact. A selected file is consumed through `Blob.stream()` rather than `arrayBuffer()` for the evidence scan. The resulting font inventory exposes the PDF's actual resource names, object numbers, subtypes, and unambiguous replacement candidates.
 
 ```bash
 npm ci
@@ -219,7 +219,9 @@ npm --prefix examples-js/frontend run build
 npm --prefix examples-js/frontend run dev
 ```
 
-The optional random-access page preview has a 64 MiB admission bound before it calls the renderer. Files above that limit can still use the streaming Scala.js scan. OCR is an explicit browser-only recovery step. Neither preview nor OCR is presented as work performed by the core parser.
+The preview reads bounded ranges from the browser `Blob` and renders one page at a time. The evidence scan remains the arbitrary-size streaming path. Browser transforms retain a decoded document graph and therefore enforce explicit 64 MiB input and output bounds before producing a downloadable PDF. Font remapping runs the same encoding, widths, CID-metric, and `ToUnicode` checks as the library API and rejects incompatible replacements without rendering partial output.
+
+OCR is an explicit browser-only recovery step. Neither preview nor OCR is presented as work performed by the core parser.
 
 ## Real corpus and operational proof
 

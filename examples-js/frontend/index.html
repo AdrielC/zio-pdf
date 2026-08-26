@@ -193,24 +193,47 @@
           <details class="transform-plan" id="transform-plan" data-state="waiting" hidden>
             <summary>
               <span>
-                <strong id="transform-plan-title">Typed Transform Plan</strong>
-                <small>Configure font remapping and text tokenization.</small>
+                <strong id="transform-plan-title">Transform PDF</strong>
+                <small>Choose fonts in this PDF and run.</small>
               </span>
-              <span class="plan-badge" id="plan-badge">pending</span>
+              <span class="plan-badge" id="plan-badge">Run inspection</span>
             </summary>
             <div class="transform-plan-body">
+              <section class="font-inventory" id="font-inventory" aria-labelledby="font-inventory-title" hidden>
+                <div class="section-heading">
+                  <div>
+                    <h3 id="font-inventory-title">Fonts in This PDF</h3>
+                    <p class="font-inventory-copy">BaseFont · object · subtype</p>
+                  </div>
+                  <span id="font-inventory-summary"></span>
+                </div>
+                <label class="font-filter">Filter fonts
+                  <span><i data-lucide="search" aria-hidden="true"></i><input id="font-filter" name="font-filter" type="search" placeholder="Font, subtype, or object…" autocomplete="off" /></span>
+                </label>
+                <ul class="font-inventory-list" id="font-inventory-list"></ul>
+                <p class="font-inventory-note">Ambiguous names are excluded. Incompatible encodings or metrics are rejected.</p>
+              </section>
+
               <fieldset class="plan-controls" id="plan-controls">
-                <legend>Program leaves</legend>
+                <legend>Pipeline</legend>
                 <label class="toggle-control">
                   <input id="plan-remap" type="checkbox" checked />
-                  <span>Remap existing fonts</span>
+                  <span>Replace a font resource</span>
                 </label>
                 <div class="font-bindings" id="font-bindings">
-                  <label>From<input id="plan-source-font" name="source-font" value="SourceFace" autocomplete="off" spellcheck="false" /></label>
+                  <label>Source
+                    <select id="plan-source-font" name="source-font" disabled>
+                      <option value="">Run inspection first</option>
+                    </select>
+                  </label>
                   <button class="swap-fonts" id="swap-fonts" type="button" title="Swap selected mapping" aria-label="Swap selected mapping">
                     <i data-lucide="arrow-right-left" aria-hidden="true"></i>
                   </button>
-                  <label>To<input id="plan-target-font" name="target-font" value="TargetFace" autocomplete="off" spellcheck="false" /></label>
+                  <label>Replacement
+                    <select id="plan-target-font" name="target-font" disabled>
+                      <option value="">Run inspection first</option>
+                    </select>
+                  </label>
                 </div>
                 <label class="toggle-control">
                   <input id="plan-tokenize" type="checkbox" checked />
@@ -222,12 +245,12 @@
                     <option value="words">Words</option>
                   </select>
                 </label>
-                <button class="compile-plan" id="compile-plan" type="button">Compile Plan</button>
               </fieldset>
+
               <section class="mapping-route" id="mapping-route" aria-labelledby="mapping-route-title" hidden>
                 <div class="section-heading">
                   <div>
-                    <h3 id="mapping-route-title">Selected Mapping</h3>
+                    <h3 id="mapping-route-title">Replacement</h3>
                     <p class="mapping-route-copy" id="mapping-route-copy"></p>
                   </div>
                   <span class="mapping-route-state" id="mapping-route-state"></span>
@@ -240,7 +263,7 @@
                   </div>
                   <div class="mapping-gate">
                     <i data-lucide="shield-check" aria-hidden="true"></i>
-                    <span>execution gate</span>
+                    <span>checked at run</span>
                     <small>encoding · CID metrics · ToUnicode</small>
                   </div>
                   <div class="mapping-endpoint" data-role="target">
@@ -250,22 +273,9 @@
                   </div>
                 </div>
               </section>
-              <section class="font-inventory" id="font-inventory" aria-labelledby="font-inventory-title" hidden>
-                <div class="section-heading">
-                  <div>
-                    <h3 id="font-inventory-title">Document Font Resources</h3>
-                    <p class="font-inventory-copy">Choose a real resource for either side of the remap.</p>
-                  </div>
-                  <span id="font-inventory-summary"></span>
-                </div>
-                <label class="font-filter">Find resource
-                  <span><i data-lucide="search" aria-hidden="true"></i><input id="font-filter" name="font-filter" type="search" placeholder="Font, subtype, or object…" autocomplete="off" /></span>
-                </label>
-                <ul class="font-inventory-list" id="font-inventory-list"></ul>
-                <p class="font-inventory-note">Rebindable candidates still require glyph-code, metrics, and ToUnicode compatibility when the transform runs.</p>
-              </section>
+
               <ol class="plan-nodes" id="plan-nodes">
-                <li><span>01</span><strong>Compile the Scala.js bridge to inspect this plan.</strong></li>
+                <li><span>01</span><strong>Run inspection to discover document fonts.</strong></li>
               </ol>
               <dl class="plan-profile" id="plan-profile" hidden>
                 <div><dt>Scope</dt><dd id="plan-scope"></dd></div>
@@ -273,6 +283,11 @@
               </dl>
               <pre class="plan-source"><code id="plan-source">PdfTransform.fonts.replaceExisting("SourceFace", "TargetFace")
   &gt;&gt;&gt; PdfTransform.text.tokenize(Tokenizer.characters)</code></pre>
+              <div class="transform-actions">
+                <button class="run-transform" id="run-transform" type="button" disabled>Run Pipeline</button>
+                <a class="transform-download" id="transform-download" href="#" download hidden>Download Transformed PDF</a>
+                <p id="transform-status" role="status" aria-live="polite">Run inspection to configure the pipeline.</p>
+              </div>
             </div>
           </details>
 

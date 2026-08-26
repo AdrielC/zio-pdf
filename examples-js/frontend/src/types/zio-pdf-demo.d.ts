@@ -72,6 +72,19 @@ declare module "zio-pdf-demo" {
     code: string;
   }
 
+  export interface TransformExecution {
+    sourceFont?: string;
+    targetFont?: string;
+    sourceObjectNumbers: number[];
+    targetObjectNumber?: number;
+    resourceBindingsRewritten: number;
+    tokenPages: number;
+    tokenCount: number;
+    chunks: Uint8Array[];
+    outputBytes: number;
+    maxMaterializedBytes: number;
+  }
+
 export const ZioPdfDemo: {
   analyze(input: Uint8Array): Promise<Analysis>;
   analyzeBlob(input: Blob): Promise<Analysis>;
@@ -86,5 +99,13 @@ export const ZioPdfDemo: {
     tokenize: boolean,
     tokenizer: "characters" | "words"
   ): TransformPlan;
+  executeTransformBlob(
+    input: Blob,
+    remapExistingFonts: boolean,
+    sourceFont: string,
+    targetFont: string,
+    tokenize: boolean,
+    tokenizer: "characters" | "words"
+  ): Promise<TransformExecution>;
 };
 }
