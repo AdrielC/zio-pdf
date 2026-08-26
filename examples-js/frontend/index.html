@@ -21,35 +21,19 @@
         <nav class="project-nav" aria-label="Project links">
           <a href="https://github.com/AdrielC/zio-pdf" target="_blank" rel="noreferrer">Source</a>
           <a href="https://javadoc.io/doc/io.github.adrielc/zio-pdf_3/latest/index.html" target="_blank" rel="noreferrer">API</a>
-          <span class="runtime-status"><span class="runtime-dot" aria-hidden="true"></span>Scala.js ready</span>
         </nav>
       </header>
 
-      <section class="intro" aria-labelledby="workspace-title">
-        <div>
-          <h1 id="workspace-title">See the page. Stream the evidence.</h1>
-          <p>
-            Preview one page at a time, then run a single-pass structural scan without sending the document to a server.
-          </p>
-        </div>
-        <ul class="runtime-facts" aria-label="Runtime properties">
-          <li><i data-lucide="shield-check" aria-hidden="true"></i>File stays in this tab</li>
-          <li><i data-lucide="gauge" aria-hidden="true"></i>Bounded preview reads</li>
-          <li><i data-lucide="waves" aria-hidden="true"></i>Worker-based streaming scan</li>
-        </ul>
-      </section>
-
       <section class="intake-panel" aria-labelledby="intake-title">
         <div class="intake-heading">
-          <h2 id="intake-title">Open a PDF</h2>
-          <p>Choose a local file. The first page and the evidence scan run independently.</p>
+          <h1 id="intake-title">Open a PDF</h1>
         </div>
 
         <label class="drop-zone" id="drop-zone" for="file-input">
           <i data-lucide="file-up" aria-hidden="true"></i>
           <span>
             <strong id="drop-title">Choose a PDF</strong>
-            <small id="drop-copy">or drop one here</small>
+            <small id="drop-copy">or drop a file</small>
           </span>
           <input id="file-input" name="pdf" type="file" accept="application/pdf,.pdf" autocomplete="off" />
         </label>
@@ -60,13 +44,13 @@
           <div><dt>Source</dt><dd id="source-status">Blob stream</dd></div>
         </dl>
 
-        <div class="scan-command">
+        <div class="scan-command" id="scan-command" hidden>
           <button class="analyze-button" id="analyze-button" type="button" disabled>
             <i data-lucide="scan-search" aria-hidden="true"></i>
             <span id="analyze-button-label">Run Evidence Scan</span>
           </button>
           <p class="input-status" id="input-status" role="status" aria-live="polite">
-            Choose a PDF to start a local preview.
+            Select a PDF to preview.
           </p>
           <div class="scan-progress" id="scan-progress-wrap" hidden>
             <div>
@@ -77,7 +61,7 @@
           </div>
         </div>
 
-        <section class="scan-flow" aria-label="Evidence scan stages" id="scan-flow">
+        <section class="scan-flow" aria-label="Evidence scan stages" id="scan-flow" hidden>
           <span data-stage="source">Blob stream</span>
           <span data-stage="decode">fused decode</span>
           <span data-stage="evidence">merged evidence</span>
@@ -89,8 +73,7 @@
         <section class="preview-pane" aria-labelledby="preview-title">
           <header class="preview-toolbar">
             <div>
-              <h2 id="preview-title">Document Preview</h2>
-              <p>PDF.js requests bounded ranges and renders only the page you are viewing.</p>
+              <h2 id="preview-title">Preview</h2>
             </div>
             <div class="preview-state" id="preview-state" data-state="idle" aria-live="polite">
               <span id="preview-page">No file</span>
@@ -101,8 +84,8 @@
           <div class="preview-stage" id="preview-stage" data-state="empty">
             <div class="preview-empty" id="preview-empty">
               <i data-lucide="panel-top-open" aria-hidden="true"></i>
-              <strong>Your first page appears here</strong>
-              <span>Previewing does not wait for the full evidence scan.</span>
+              <strong>No PDF selected</strong>
+              <span>Choose a PDF above.</span>
             </div>
             <div class="preview-host" id="preview-host" hidden aria-label="PDF page preview">
               <div class="preview-controls" aria-label="Page preview controls">
@@ -145,8 +128,7 @@
         <aside class="review-rail" aria-labelledby="review-title">
           <header class="rail-heading">
             <div>
-              <h2 id="review-title">Evidence & Transforms</h2>
-              <p>Review the scan first, then inspect a typed transform plan.</p>
+              <h2 id="review-title">Inspection</h2>
             </div>
             <button class="icon-button" id="reset-button" type="button" title="Clear selected file" aria-label="Clear selected file" disabled>
               <i data-lucide="rotate-ccw" aria-hidden="true"></i>
@@ -155,14 +137,13 @@
 
           <div class="empty-result" id="empty-state">
             <i data-lucide="scan-line" aria-hidden="true"></i>
-            <p>Run the evidence scan to inspect structure, policy, native text, fonts, and a streaming SHA-256 digest.</p>
+            <p id="empty-state-copy">No inspection results.</p>
           </div>
 
           <section class="report" id="report" hidden aria-live="polite">
             <header class="result-heading">
               <div>
                 <h3 id="report-title">Inspection Complete</h3>
-                <p>One fused traversal, summarized below.</p>
               </div>
               <span class="report-state" id="report-state">idle</span>
             </header>
@@ -209,11 +190,11 @@
             <p id="error-message"></p>
           </div>
 
-          <details class="transform-plan" id="transform-plan" data-state="waiting">
+          <details class="transform-plan" id="transform-plan" data-state="waiting" hidden>
             <summary>
               <span>
                 <strong id="transform-plan-title">Typed Transform Plan</strong>
-                <small>Compose named operations and inspect the compiled Scala.js plan.</small>
+                <small>Configure font remapping and text tokenization.</small>
               </span>
               <span class="plan-badge" id="plan-badge">pending</span>
             </summary>
@@ -318,11 +299,6 @@
         </aside>
       </section>
 
-      <footer class="page-footer">
-        <span><i data-lucide="shield-check" aria-hidden="true"></i>Document bytes stay local</span>
-        <span><i data-lucide="waves" aria-hidden="true"></i>Evidence streams through ZIO PDF</span>
-        <span><i data-lucide="gauge" aria-hidden="true"></i>Preview slices capped at 1 MiB</span>
-      </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
