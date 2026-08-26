@@ -1,7 +1,7 @@
 import "@fontsource-variable/jetbrains-mono";
 import "@fontsource-variable/manrope";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import PdfPreviewWorker from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker";
 import {
   ArrowRightLeft,
   Braces,
@@ -125,6 +125,7 @@ let previewLoadingTask: PDFDocumentLoadingTask | undefined;
 let previewDocument: PDFDocumentProxy | undefined;
 let previewPageProxy: PDFPageProxy | undefined;
 let previewRenderTask: RenderTask | undefined;
+let previewWorker: Worker | undefined;
 let previewZoom = 1;
 let previewRanges: Array<readonly [number, number]> = [];
 let activeScanWorker: Worker | undefined;
@@ -405,8 +406,9 @@ async function openPreview(file: File): Promise<void> {
   setPreviewState("loading", "Opening PDF…");
 
   try {
-    const pdfjs = await import("pdfjs-dist");
-    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    previewWorker ??= new PdfPreviewWorker();
+    pdfjs.GlobalWorkerOptions.workerPort = previewWorker;
     class BlobRangeTransport extends pdfjs.PDFDataRangeTransport {
       private stopped = false;
 
@@ -1352,6 +1354,7 @@ window.addEventListener("resize", () => {
   });
 });
 window.addEventListener("beforeunload", clearTransformDownload);
+window.addEventListener("beforeunload", () => previewWorker?.terminate());
 runTransformButton.addEventListener("click", () => void executeTransform());
 [planRemap, planTokenize].forEach((control) => control.addEventListener("change", () => {
   clearTransformDownload();

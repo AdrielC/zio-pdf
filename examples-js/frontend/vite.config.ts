@@ -12,6 +12,10 @@ export default defineConfig({
   // development and consumer embeds remain rooted at /.
   base: normalizeBase(process.env.DOCS_BASE),
   build: {
+    // Keep the application and the bundled PDF.js worker within the syntax
+    // understood by supported mobile Safari releases. PDF.js's legacy build
+    // provides the corresponding runtime polyfills.
+    target: "es2020",
     // The lazy Scala.js runtime is intentionally its own 1.5 MB optimized chunk.
     chunkSizeWarningLimit: 1600,
   },
