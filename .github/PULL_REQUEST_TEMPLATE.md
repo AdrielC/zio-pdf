@@ -1,6 +1,6 @@
 ## Summary
 
-<!-- What changed and why? Link internal issue if applicable. -->
+<!-- What changed and why? Link the GitHub issue if applicable. -->
 
 ## Test plan
 

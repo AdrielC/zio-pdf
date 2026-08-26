@@ -1,4 +1,4 @@
-# Nightly JMH benchmark run (internal Gitea Actions + GitHub).
+# Nightly JMH benchmark run on GitHub Actions.
 #
 # Produces a bench-results artifact with raw JMH text output for each
 # suite.  The run is triggered nightly (02:00 UTC) and can also be

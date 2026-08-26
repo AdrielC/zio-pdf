@@ -49,6 +49,14 @@ object StreamingDecoded {
   /** End of the current content stream (only after `ContentObjStart` with no inline). */
   case object ContentObjEnd extends StreamingDecoded
 
+  /** A fully consumed indirect-object boundary, emitted only when enabled in
+    * [[StreamingDecode.Config]]. `nextByteOffset` is the first source byte
+    * after the complete object trailer and consumed trailing whitespace.
+    */
+  final case class ObjectEnd(index: Obj.Index, nextByteOffset: Long) extends StreamingDecoded {
+    require(nextByteOffset >= 0L, "nextByteOffset must be non-negative")
+  }
+
   /** Final aggregate of accumulated metadata. Always the last event. */
   final case class Meta(
     xrefs: List[Xref],

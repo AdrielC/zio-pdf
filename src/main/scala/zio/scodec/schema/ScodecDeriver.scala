@@ -26,9 +26,8 @@ import java.util.Currency
 import scala.util.{Failure, Success, Try}
 
 import zio.blocks.chunk.ChunkBuilder
-import zio.blocks.docs.Doc
-import zio.blocks.schema.{DynamicValue, Lazy, Modifier, PrimitiveType, PrimitiveValue, Reflect, Term}
-import zio.blocks.schema.binding.{Binding, HasBinding, RegisterOffset, Registers}
+import zio.blocks.schema.{Doc, DynamicValue, Lazy, Modifier, PrimitiveType, PrimitiveValue, Reflect, Term}
+import zio.blocks.schema.binding.{Binding, BindingType, HasBinding, RegisterOffset, Registers}
 import zio.blocks.schema.derive.{Deriver, HasInstance as SchemaHasInstance}
 import zio.blocks.typeid.TypeId
 
@@ -370,7 +369,7 @@ object ScodecDeriver extends Deriver[Codec] {
   override def derivePrimitive[A](
     primitiveType: PrimitiveType[A],
     typeId:        TypeId[A],
-    binding:       Binding.Primitive[A],
+    binding:       Binding[BindingType.Primitive, A],
     doc:           Doc,
     modifiers:     Seq[Modifier.Reflect],
     defaultValue:  Option[A],
@@ -399,7 +398,7 @@ object ScodecDeriver extends Deriver[Codec] {
   override def deriveRecord[F[_, _], A](
     fields:        IndexedSeq[Term[F, A, ?]],
     typeId:        TypeId[A],
-    binding:       Binding.Record[A],
+    binding:       Binding[BindingType.Record, A],
     doc:           Doc,
     modifiers:     Seq[Modifier.Reflect],
     defaultValue:  Option[A],
@@ -410,6 +409,7 @@ object ScodecDeriver extends Deriver[Codec] {
     val recordFields  = fields.asInstanceOf[IndexedSeq[Term[Binding, A, ?]]]
     val recordReflect = new Reflect.Record[Binding, A](recordFields, typeId, binding, doc, modifiers)
     val registerArr   = recordReflect.registers.toArray
+    val recordBinding = binding.asInstanceOf[Binding.Record[A]]
 
     Lazy {
       // Defer child-instance resolution to first use - same recursive
@@ -424,7 +424,7 @@ object ScodecDeriver extends Deriver[Codec] {
 
         def encode(value: A): Attempt[BitVector] = {
           val regs = Registers(recordReflect.usedRegisters)
-          binding.deconstructor.deconstruct(regs, RegisterOffset.Zero, value)
+          recordBinding.deconstructor.deconstruct(regs, RegisterOffset.Zero, value)
           var i   = 0
           var acc = BitVector.empty
           val n   = resolvedCodecs.length
@@ -453,7 +453,7 @@ object ScodecDeriver extends Deriver[Codec] {
             }
             i += 1
           }
-          Attempt.successful(DecodeResult(binding.constructor.construct(regs, RegisterOffset.Zero), rem))
+          Attempt.successful(DecodeResult(recordBinding.constructor.construct(regs, RegisterOffset.Zero), rem))
         }
       }
     }
@@ -466,7 +466,7 @@ object ScodecDeriver extends Deriver[Codec] {
   override def deriveVariant[F[_, _], A](
     cases:        IndexedSeq[Term[F, A, ?]],
     typeId:       TypeId[A],
-    binding:      Binding.Variant[A],
+    binding:      Binding[BindingType.Variant, A],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[A],
@@ -474,6 +474,7 @@ object ScodecDeriver extends Deriver[Codec] {
   )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[A]] = {
     val caseLazies: IndexedSeq[Lazy[Codec[A]]] =
       cases.map(c => D.instance(c.value.metadata).asInstanceOf[Lazy[Codec[A]]])
+    val variantBinding = binding.asInstanceOf[Binding.Variant[A]]
 
     Lazy {
       lazy val resolved: Array[Codec[A]] = caseLazies.iterator.map(_.force).toArray
@@ -484,11 +485,11 @@ object ScodecDeriver extends Deriver[Codec] {
         def sizeBound: SizeBound = SizeBound.unknown
 
         def encode(value: A): Attempt[BitVector] = {
-          val idx = binding.discriminator.discriminate(value)
-          val downcast = binding.matchers(idx).downcastOrNull(value).asInstanceOf[AnyRef]
+          val idx = variantBinding.discriminator.discriminate(value)
+          val downcast = variantBinding.matchers(idx).downcastOrNull(value).asInstanceOf[AnyRef]
           // `downcastOrNull` returns null when the discriminator is
           // wrong; comparing as AnyRef avoids the value-class trap.
-          if (downcast eq null)
+          if downcast.eq(null) then
             Attempt.failure(Err(s"variant ${typeId.name}: failed to downcast case $idx"))
           else
             uint8.encode(idx).flatMap(tag =>
@@ -516,14 +517,15 @@ object ScodecDeriver extends Deriver[Codec] {
   override def deriveSequence[F[_, _], C[_], A](
     element:      Reflect[F, A],
     typeId:       TypeId[C[A]],
-    binding:      Binding.Seq[C, A],
+    binding:      Binding[BindingType.Seq[C], C[A]],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[C[A]],
     examples:     Seq[C[A]]
   )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[C[A]]] = {
-    val constructor = binding.constructor
-    val deconstructor = binding.deconstructor
+    val sequenceBinding = binding.asInstanceOf[Binding.Seq[C, A]]
+    val constructor = sequenceBinding.constructor
+    val deconstructor = sequenceBinding.deconstructor
     val elemClassTag  = element.typeId.classTag.asInstanceOf[scala.reflect.ClassTag[A]]
 
     D.instance(element.metadata).map { elementCodec =>
@@ -539,7 +541,7 @@ object ScodecDeriver extends Deriver[Codec] {
           val buf = new java.util.ArrayList[BitVector]()
           while (items.hasNext) {
             elementCodec.encode(items.next()) match {
-              case Attempt.Successful(bits) => buf.add(bits); count += 1
+              case Attempt.Successful(outputBits) => buf.add(outputBits); count += 1
               case f @ Attempt.Failure(_)   => return f
             }
           }
@@ -583,14 +585,15 @@ object ScodecDeriver extends Deriver[Codec] {
     key:          Reflect[F, K],
     value:        Reflect[F, V],
     typeId:       TypeId[M[K, V]],
-    binding:      Binding.Map[M, K, V],
+    binding:      Binding[BindingType.Map[M], M[K, V]],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[M[K, V]],
     examples:     Seq[M[K, V]]
   )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[M[K, V]]] = {
-    val constructor   = binding.constructor
-    val deconstructor = binding.deconstructor
+    val mapBinding    = binding.asInstanceOf[Binding.Map[M, K, V]]
+    val constructor   = mapBinding.constructor
+    val deconstructor = mapBinding.deconstructor
 
     D.instance(key.metadata).zip(D.instance(value.metadata)).map { case (kCodec, vCodec) =>
       new Codec[M[K, V]] {
@@ -655,22 +658,24 @@ object ScodecDeriver extends Deriver[Codec] {
   override def deriveWrapper[F[_, _], A, B](
     wrapped:      Reflect[F, B],
     typeId:       TypeId[A],
-    binding:      Binding.Wrapper[A, B],
+    binding:      Binding[BindingType.Wrapper[A, B], A],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[A],
     examples:     Seq[A]
-  )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[A]] =
+  )(using F: HasBinding[F], D: SchemaHasInstance[F, Codec]): Lazy[Codec[A]] = {
+    val wrapperBinding = binding.asInstanceOf[Binding.Wrapper[A, B]]
     D.instance(wrapped.metadata).map { inner =>
-      inner.xmap[A](b => binding.wrap(b), a => binding.unwrap(a))
+      inner.xmap[A](b => wrapperBinding.wrap(b), a => wrapperBinding.unwrap(a))
     }
+  }
 
   // -------------------------------------------------------------------
   // Dynamic (Schema[DynamicValue] → recursive binary tree codec)
   // -------------------------------------------------------------------
 
   override def deriveDynamic[F[_, _]](
-    binding:      Binding.Dynamic,
+    binding:      Binding[BindingType.Dynamic, DynamicValue],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[DynamicValue],

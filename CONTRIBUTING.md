@@ -1,80 +1,38 @@
 # Contributing to zio-pdf
 
-**internal repository** — canonical forge [git.internal.net/internal/zio-pdf](https://git.internal.net/internal/zio-pdf).  
-Until the forge is healthy, open PRs on [github.com/AdrielC/zio-pdf](https://github.com/AdrielC/zio-pdf) and push to internal when it is back.  
-No public mirror long-term; artifacts publish only to internal Gitea Packages (`com.internal`).
-
-## Clone (SSH)
-
-Add to `~/.ssh/config`:
-
-```
-Host git.internal.net
-  HostName git.internal.net
-  User git
-  IdentityFile ~/.ssh/id_ed25519_internal
-  IdentitiesOnly yes
-```
-
-Then:
-
-```bash
-git clone git@git.internal.net:internal/zio-pdf.git
-cd zio-pdf
-```
-
-HTTPS also works: `git clone https://git.internal.net/internal/zio-pdf.git`
+This GitHub repository is the public source and release project. Every change intended for Maven Central must build without private resolvers, private artifacts, or credentials.
 
 ## Workflow
 
-1. Branch from `main`: `git checkout -b feat/my-change`
-2. Make changes; keep public API on **`PdfEngine`** / **`PdfStream`** / **`PdfIO`**.
-3. Run locally:
+1. Clone `https://github.com/AdrielC/zio-pdf.git` and branch from `main`.
+2. Keep byte streams incremental. Any collecting helper must state and enforce its bound or return a type whose full materialization is the method's explicit contract.
+3. Keep public decode APIs on `PdfEngine`, `PdfStream`, and `PdfIO`. Use `PdfObjectScanner` for bounded structural observation.
+4. Run:
+
    ```bash
-   sbt test
-   sbt examples/run
-   sbt "bench/Jmh/compile" "benchFs2/Jmh/compile"
+   sbt -batch test
+   sbt -batch examples/run
+   sbt -batch "bench/Jmh/compile" "benchFs2/Jmh/compile"
+   sbt -batch publishLocal
    ```
-4. Open a pull request on internal → squash merge into `main`.
-5. `main` is protected: **CI must pass** and **one approval** is required (no self-merge).
+
+5. Open a GitHub pull request. CI must pass before merge.
 
 ## Code conventions
 
-- Scala 3, ZIO 2 — prefer `import zio.*` star imports in `zio.pdf` code.
-- Avoid `throw` in library code; use `ZIO` / `Validation` / `Attempt`.
-- Public byte surface: **`Chunk[Byte]`**, not `Array[Byte]`.
-- Fused mmap paths stay behind **`PdfEngine`**; do not expose `PdfHyperdrive` publicly.
-- Match existing naming: `decoded()` pipeline vs `decode(path)` fused collect.
+- Use Scala 3 and ZIO 2 idioms.
+- Prefer typed errors and explicit error translation at transport boundaries.
+- Do not use `runCollect`, `toArray`, or full-payload buffers on an arbitrary-size streaming path.
+- Bounded parser carry and content-stream payload handling are separate concerns. Document both.
+- Avoid `throw` in operational library paths. Constructors may reject impossible static configuration, but data failures belong in typed error channels.
+- Keep fused mmap internals behind `PdfEngine`.
 
-## Commit messages
+## Releases and Maven Central
 
-Short imperative subject, optional body explaining *why*:
-
-```
-feat: add PdfEngine.elementsSink for constant-memory classify
-fix: digestSink Chunk typing on ZIO 2.1.25
-docs: update pipeline-first README examples
-```
-
-## Releases & Maven (internal)
-
-Coordinates: **`com.internal` %% `zio-pdf`**.
-
-Publish locally (requires Gitea token in env):
-
-```bash
-export GIT_USER=acasellas
-export GIT_TOKEN=<gitea-token>
-sbt publish
-```
-
-Consume from another internal project:
+Public coordinates are:
 
 ```scala
-resolvers += "internal Gitea Maven" at "https://git.internal.net/api/packages/internal/maven"
-libraryDependencies += "com.internal" %% "zio-pdf" % "0.2.0-RC1"
+libraryDependencies += "io.github.adrielc" %% "zio-pdf" % version
 ```
 
-CI publishes automatically on `v*` tags. Add repo secret **`GIT_TOKEN`** (Gitea Actions → Secrets) with a token for `git.runner` or your user.
-
-Tag on `main` and create a Gitea release from `CHANGELOG.md`.
+Tags matching `v*` run the full tests, examples, package audit, external-consumer proof, and signed Maven Central publication before GitHub creates a release. Publication requires repository secrets named `PGP_SECRET`, `PGP_PASSPHRASE`, `SONATYPE_USERNAME`, and `SONATYPE_PASSWORD`. The workflow fails if any are missing.

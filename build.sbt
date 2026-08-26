@@ -1,31 +1,42 @@
-val zioVersion                 = "2.1.25"
+val zioVersion                 = "2.1.26"
 val zioPreludeVersion          = "1.0.0-RC47"
-val zioBlocksSchemaVersion     = "0.0.33"
-val zioBlocksMediaTypeVersion  = "0.0.33"
-val zioBlocksRingbufferVersion = "0.0.32"
-val zioBlocksStreamsVersion    = "0.0.20"
-val zioBlocksChunkVersion      = "0.0.33"
+val zioBlocksSchemaVersion     = "0.017"
+val zioBlocksMediaTypeVersion  = "0.0.51"
+val zioBlocksRingbufferVersion = "0.0.51"
+val zioBlocksStreamsVersion    = "0.017"
+val zioBlocksChunkVersion      = "0.017"
 val scodecCoreVersion          = "2.3.3"
-val scodecBitsVersion          = "1.2.4"
-val kyoVersion                 = "1.0-RC1"
+val scodecBitsVersion          = "1.2.5"
+val kyoVersion                 = "1.0.0-RC4"
 
-ThisBuild / organization      := "com.internal"
-ThisBuild / scalaVersion      := "3.8.3"
-ThisBuild / version           := "0.2.0-RC1"
+ThisBuild / organization      := "io.github.adrielc"
+ThisBuild / scalaVersion      := "3.8.4"
+ThisBuild / description       := "Streaming PDF parsing and structural boundary scanning for ZIO and Scala 3"
 ThisBuild / versionScheme     := Some("early-semver")
 ThisBuild / fork              := true
+ThisBuild / publishMavenStyle := true
+ThisBuild / pomIncludeRepository := { _ => false }
+ThisBuild / Test / publishArtifact := false
 ThisBuild / licenses          := List(
   "Apache-2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0.txt")
 )
-ThisBuild / homepage          := Some(url("https://git.internal.net/internal/zio-pdf"))
+ThisBuild / homepage          := Some(url("https://github.com/AdrielC/zio-pdf"))
 ThisBuild / scmInfo           := Some(
   ScmInfo(
-    url("https://git.internal.net/internal/zio-pdf"),
-    "scm:git:git@git.internal.net:internal/zio-pdf.git",
-    Some("scm:git:git@git.internal.net:internal/zio-pdf.git")
+    url("https://github.com/AdrielC/zio-pdf"),
+    "scm:git:https://github.com/AdrielC/zio-pdf.git",
+    Some("scm:git:git@github.com:AdrielC/zio-pdf.git")
   )
 )
 ThisBuild / autoAPIMappings   := true
+ThisBuild / developers        := List(
+  Developer(
+    "AdrielC",
+    "Adriel Casellas",
+    "adrielcasellas@gmail.com",
+    url("https://github.com/AdrielC")
+  )
+)
 
 ThisBuild / scalacOptions ++= List(
   "-deprecation",
@@ -42,7 +53,6 @@ ThisBuild / scalacOptions ++= List(
 lazy val root = (project in file("."))
   .settings(
     name := "zio-pdf",
-    resolvers += PublishSettings.internalResolver,
     libraryDependencies ++= List(
       "dev.zio"   %% "zio"               % zioVersion,
       "dev.zio"   %% "zio-streams"       % zioVersion,
@@ -59,7 +69,6 @@ lazy val root = (project in file("."))
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
-  .settings(PublishSettings.settings)
 
 /**
  * JMH benchmark subproject for the ZIO-based codec stack. Run with:
@@ -99,7 +108,7 @@ lazy val bench = (project in file("bench"))
     Jmh / version     := "1.37",
     // Inline expansion of `zio.pdf.pipe` in forked JMH runs can fail class loading; keep fuse in PdfHyperdrive.
     Jmh / fork        := false,
-    // Scala 3.8.3 JVM optimizer — scoped to sources + our packages (not JDK/deps).
+    // Scala 3.8.4 JVM optimizer, scoped to sources and project packages.
     scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused")) ++ List(
       "-opt",
       "-opt-inline:<sources>,zio.pdf.**,zio.scan.**,zio.scodec.**,zio.blocks.**",

@@ -74,7 +74,8 @@ object DecodedFromStreaming {
         Right((Chunk.single(Decoded.DataObj(obj)), s))
 
       case StreamingDecoded.VersionT(_) | _: StreamingDecoded.CommentT |
-          _: StreamingDecoded.StartXrefT | _: StreamingDecoded.XrefT =>
+          _: StreamingDecoded.StartXrefT | _: StreamingDecoded.XrefT |
+          _: StreamingDecoded.ObjectEnd =>
         Right((Chunk.empty, s))
 
       case StreamingDecoded.ContentObjStart(obj, _, Some(bits)) =>

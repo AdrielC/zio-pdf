@@ -39,11 +39,19 @@
 package zio.pdf
 
 import _root_.scodec.bits.{BitVector, ByteVector}
-import zio.blocks.chunk.Chunk as BlocksChunk
+import zio.blocks.chunk.{Chunk as BlocksChunk, ChunkMap}
 import zio.blocks.schema.Schema
 import zio.blocks.typeid.TypeId
 
 package object schema {
+
+  inline given chunkMapSchema[K, V](using key: Schema[K], value: Schema[V]): Schema[ChunkMap[K, V]] = {
+    given TypeId[ChunkMap[K, V]] = TypeId.of[ChunkMap[K, V]]
+    Schema.map(using key, value).transform(
+      to   = entries => if entries == null then ChunkMap.empty else ChunkMap.from(entries),
+      from = _.toMap
+    )
+  }
 
   /** `Schema[scodec.bits.ByteVector]` via `zio.blocks.chunk.Chunk[Byte]`.
     *
@@ -53,7 +61,7 @@ package object schema {
   given byteVectorSchema: Schema[ByteVector] = {
     given TypeId[ByteVector] = TypeId.of[ByteVector]
     summon[Schema[BlocksChunk[Byte]]].transform[ByteVector](
-      to   = (c: BlocksChunk[Byte]) => ByteVector.view(c.toArray),
+      to   = (c: BlocksChunk[Byte]) => if c == null then ByteVector.empty else ByteVector.view(c.toArray),
       from = (b: ByteVector)        => BlocksChunk.fromArray(b.toArray)
     )
   }
