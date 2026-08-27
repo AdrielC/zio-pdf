@@ -4,8 +4,11 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## [0.2.0-RC7] — 2026-08-26
+
 ### Changed
 
+- ZIO Blocks schema and chunk now use `0.0.51`; `ScodecDeriver` follows the current documentation and binding APIs on both the JVM and Scala.js.
 - The PDF preview now bundles PDF.js's translated and polyfilled legacy display layer and worker for mobile Safari compatibility.
 - The Scala.js workbench renders the first page from bounded PDF.js range requests while the ZIO PDF evidence scan runs independently in a cancellable worker.
 - Browser scan progress now reports actual bytes consumed instead of phase-only activity.

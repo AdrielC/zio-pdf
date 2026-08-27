@@ -3,10 +3,10 @@ import org.scalajs.sbtplugin.ScalaJSPlugin
 
 val zioVersion                 = "2.1.26"
 val zioPreludeVersion          = "1.0.0-RC47"
-val zioBlocksSchemaVersion     = "0.017"
+val zioBlocksSchemaVersion     = "0.0.51"
 val zioBlocksMediaTypeVersion  = "0.0.51"
 val zioBlocksRingbufferVersion = "0.0.51"
-val zioBlocksChunkVersion      = "0.017"
+val zioBlocksChunkVersion      = "0.0.51"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.5"
 val kyoVersion                 = "1.0.0-RC4"

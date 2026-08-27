@@ -14,11 +14,11 @@ That distinction makes the raw path suitable for very large uploads while keepin
 
 ## Project status
 
-Release `0.2.0-RC6` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
+Release `0.2.0-RC7` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
 
 ```scala
-libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.0-RC6" // JVM
-libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.0-RC6" // Scala.js
+libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.0-RC7" // JVM
+libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.0-RC7" // Scala.js
 ```
 
 Only the JVM and Scala.js `zio-pdf` artifacts are publishable. Examples, benchmarks, the browser application, and the Kyo comparison module are build-only projects.
@@ -201,8 +201,8 @@ Each emitted window is an exact edit script for that window. The library does no
 
 The build uses the current Maven Central releases of:
 
-- `zio-blocks-schema` 0.017 for structural schemas and derivation;
-- `zio-blocks-chunk` 0.017 for allocation-conscious chunk operations;
+- `zio-blocks-schema` 0.0.51 for structural schemas and derivation;
+- `zio-blocks-chunk` 0.0.51 for allocation-conscious chunk operations;
 - `zio-blocks-mediatype` 0.0.51 for media-type boundaries;
 - `zio-blocks-ringbuffer` 0.0.51 only in tests and benchmarks.
 

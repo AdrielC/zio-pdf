@@ -26,8 +26,9 @@ import java.util.Currency
 import scala.util.{Failure, Success, Try}
 
 import zio.blocks.chunk.ChunkBuilder
-import zio.blocks.schema.{Doc, DynamicValue, Lazy, Modifier, PrimitiveType, PrimitiveValue, Reflect, Term}
-import zio.blocks.schema.binding.{Binding, BindingType, HasBinding, RegisterOffset, Registers}
+import zio.blocks.docs.Doc
+import zio.blocks.schema.{DynamicValue, Lazy, Modifier, PrimitiveType, PrimitiveValue, Reflect, Term}
+import zio.blocks.schema.binding.{Binding, HasBinding, RegisterOffset, Registers}
 import zio.blocks.schema.derive.{Deriver, HasInstance as SchemaHasInstance}
 import zio.blocks.typeid.TypeId
 
@@ -367,7 +368,7 @@ object ScodecDeriver extends Deriver[Codec] {
   override def derivePrimitive[A](
     primitiveType: PrimitiveType[A],
     typeId:        TypeId[A],
-    binding:       Binding[BindingType.Primitive, A],
+    binding:       Binding.Primitive[A],
     doc:           Doc,
     modifiers:     Seq[Modifier.Reflect],
     defaultValue:  Option[A],
@@ -433,7 +434,7 @@ object ScodecDeriver extends Deriver[Codec] {
   override def deriveRecord[F[_, _], A](
     fields:        IndexedSeq[Term[F, A, ?]],
     typeId:        TypeId[A],
-    binding:       Binding[BindingType.Record, A],
+    binding:       Binding.Record[A],
     doc:           Doc,
     modifiers:     Seq[Modifier.Reflect],
     defaultValue:  Option[A],
@@ -503,7 +504,7 @@ object ScodecDeriver extends Deriver[Codec] {
   override def deriveVariant[F[_, _], A](
     cases:        IndexedSeq[Term[F, A, ?]],
     typeId:       TypeId[A],
-    binding:      Binding[BindingType.Variant, A],
+    binding:      Binding.Variant[A],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[A],
@@ -554,7 +555,7 @@ object ScodecDeriver extends Deriver[Codec] {
   override def deriveSequence[F[_, _], C[_], A](
     element:      Reflect[F, A],
     typeId:       TypeId[C[A]],
-    binding:      Binding[BindingType.Seq[C], C[A]],
+    binding:      Binding.Seq[C, A],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[C[A]],
@@ -622,7 +623,7 @@ object ScodecDeriver extends Deriver[Codec] {
     key:          Reflect[F, K],
     value:        Reflect[F, V],
     typeId:       TypeId[M[K, V]],
-    binding:      Binding[BindingType.Map[M], M[K, V]],
+    binding:      Binding.Map[M, K, V],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[M[K, V]],
@@ -695,7 +696,7 @@ object ScodecDeriver extends Deriver[Codec] {
   override def deriveWrapper[F[_, _], A, B](
     wrapped:      Reflect[F, B],
     typeId:       TypeId[A],
-    binding:      Binding[BindingType.Wrapper[A, B], A],
+    binding:      Binding.Wrapper[A, B],
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[A],
@@ -710,7 +711,7 @@ object ScodecDeriver extends Deriver[Codec] {
   // -------------------------------------------------------------------
 
   override def deriveDynamic[F[_, _]](
-    binding:      Binding[BindingType.Dynamic, DynamicValue],
+    binding:      Binding.Dynamic,
     doc:          Doc,
     modifiers:    Seq[Modifier.Reflect],
     defaultValue: Option[DynamicValue],
