@@ -17,7 +17,7 @@ package zio.pdf
 import _root_.scodec.bits.ByteVector
 import zio.blocks.chunk.{Chunk as BlocksChunk, ChunkMap}
 import zio.blocks.schema.Schema
-import zio.blocks.schema.json.{JsonBinaryCodec, JsonFormat}
+import zio.blocks.schema.json.{JsonCodec, JsonFormat}
 import zio.test.*
 
 object PrimSchemaSpec extends ZIOSpecDefault {
@@ -45,7 +45,7 @@ object PrimSchemaSpec extends ZIOSpecDefault {
       )))
     )))
 
-  private val primCodec: JsonBinaryCodec[Prim] =
+  private val primCodec: JsonCodec[Prim] =
     summon[Schema[Prim]].derive(JsonFormat.deriver)
 
   private def roundTrip(value: Prim): Either[String, Prim] =

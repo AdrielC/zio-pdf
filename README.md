@@ -201,8 +201,8 @@ Each emitted window is an exact edit script for that window. The library does no
 
 The build uses the current Maven Central releases of:
 
-- `zio-blocks-schema` 0.017 for structural schemas and derivation;
-- `zio-blocks-chunk` 0.017 for allocation-conscious chunk operations;
+- `zio-blocks-schema` 0.0.51 for structural schemas and derivation;
+- `zio-blocks-chunk` 0.0.51 for allocation-conscious chunk operations;
 - `zio-blocks-mediatype` 0.0.51 for media-type boundaries;
 - `zio-blocks-ringbuffer` 0.0.51 only in tests and benchmarks.
 
