@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## [0.2.0-RC7] — 2026-08-26
+
 ### Changed
 
 - ZIO Blocks schema and chunk now use `0.0.51`; `ScodecDeriver` follows the current documentation and binding APIs on both the JVM and Scala.js.
