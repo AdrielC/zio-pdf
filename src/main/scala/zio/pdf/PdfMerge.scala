@@ -31,20 +31,6 @@ object PdfMerge {
         .runFold(Chunk.empty[Byte])((acc, chunk) => acc ++ Chunk.fromArray(chunk.toArray))
     }
 
-  /** Decode paths and merge in order. */
-  def fromPaths[R](
-    paths: NonEmptyChunk[java.nio.file.Path],
-    opts: PdfEngine.Options = PdfEngine.Options.default
-  ): ZIO[R & PdfEngine, Throwable, Chunk[Byte]] =
-    paths.toList match {
-      case head :: tail =>
-        ZIO
-          .foreach(head :: tail)(path => PdfEngine.decode(path, opts))
-          .flatMap(chunks => bytes(NonEmptyChunk(chunks.head, chunks.tail*)))
-      case Nil =>
-        ZIO.fail(new IllegalArgumentException("merge requires at least one path"))
-    }
-
   private final case class MergeState(
     nextNumber: Long,
     mergedObjects: List[IndirectObj],

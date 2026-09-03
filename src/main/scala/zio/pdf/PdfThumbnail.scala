@@ -50,7 +50,10 @@ object PdfThumbnail {
                           options.copy(scope = Scope.AllPages, largeDocPageThreshold = Int.MaxValue)
                         ).left.map(new RuntimeException(_))
                       )
-          rewritten <- PdfEngine.writeBytes(enriched)
+          rewritten <- ZStream
+                         .fromChunk(enriched)
+                         .via(WritePdf.parts)
+                         .runFold(Chunk.empty[Byte])((acc, chunk) => acc ++ Chunk.fromArray(chunk.toArray))
         } yield rewritten
     }
 
