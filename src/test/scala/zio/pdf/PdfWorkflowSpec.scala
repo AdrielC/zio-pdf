@@ -84,13 +84,21 @@ object PdfWorkflowSpec extends ZIOSpecDefault {
         text.contains("/L")
       )
     },
-    test("linearize fromBytes stays near source size for preencoded top-level objects") {
+    test("linearize fromBytes on court corpus stays near source size with /Linearized") {
+      val path = java.nio.file.Path.of("src/test/resources/court-corpus/cafc-janich-v-collins.pdf")
       for {
-        source <- singlePagePdf("preserve")
+        source     <- zio.pdf.io.PdfIO.readAll(path)
         linearized <- PdfLinearize.fromBytes(source)
+        endOffset  <- ZIO.fromEither(PdfLinearize.firstPageByteLength(linearized).left.map(new RuntimeException(_)))
+        text        = new String(linearized.toArray.take(4096), StandardCharsets.ISO_8859_1)
+        validation <- PdfEngine.validate(ZStream.fromChunk(linearized)).provide(PdfEngine.live)
       } yield assertTrue(
-        linearized.size <= source.size * 2,
-        linearized.size >= source.size
+        linearized.size <= source.size * 11L / 10L,
+        linearized.size >= source.size,
+        endOffset > 0L,
+        endOffset < linearized.size,
+        text.contains("/Linearized"),
+        validation.isSuccess
       )
     },
     test("withThumbnails adds inspectable /Thumb references") {

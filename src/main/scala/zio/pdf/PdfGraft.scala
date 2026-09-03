@@ -22,12 +22,11 @@ object PdfGraft {
    * expanding object streams or re-encoding payloads.
    */
   def rawObjectParts(bytes: Array[Byte]): Either[String, RawParts] = {
-    var rest       = BitVector.view(bytes)
-    var version    = Option.empty[Version]
-    val objects    = Chunk.newBuilder[Part.Preencoded]
-    var stop       = false
+    var rest    = BitVector.view(bytes)
+    var version = Option.empty[Version]
+    val byNumber = scala.collection.mutable.LinkedHashMap.empty[Long, Part.Preencoded]
 
-    while rest.nonEmpty && !stop do
+    while rest.nonEmpty do
       TopLevel.streamDecoder.decode(rest) match {
         case Attempt.Successful(result) =>
           val consumed = rest.size - result.remainder.size
@@ -36,18 +35,16 @@ object PdfGraft {
             case TopLevel.VersionT(v) =>
               version = Some(v)
             case TopLevel.IndirectObjT(obj) if !isLinearizedDict(obj) =>
-              objects += Part.Preencoded(obj.obj.index, raw)
-            case TopLevel.XrefT(_) | TopLevel.StartXrefT(_) =>
-              stop = true
+              byNumber(obj.obj.index.number) = Part.Preencoded(obj.obj.index, raw)
             case _ =>
               ()
           }
-          if !stop then rest = result.remainder
-        case Attempt.Failure(cause) =>
-          stop = true
+          rest = result.remainder
+        case Attempt.Failure(_) =>
+          rest = BitVector.empty
       }
 
-    Right(RawParts(version, objects.result()))
+    Right(RawParts(version, Chunk.fromIterable(byNumber.values)))
   }
 
   /** Build a [[Part]] stream that preserves donor bytes for every top-level object. */

@@ -150,15 +150,15 @@ object WritePdf {
   /** Emit the final xref + trailer + startxref. */
   private[pdf] def finishLog(
     initialOffset: Long,
-    append: Option[AppendContext] = None
+    append: Option[AppendContext] = None,
+    absolutePrefix: List[(Long, Long, Long)] = Nil
   )(log: EncodeLog): ZChannel[Any, Any, Any, Any, Throwable, Chunk[ByteVector], Unit] =
     log match {
       case EncodeLog(h :: t, Some(revisionTrailer)) =>
         val physicalOrder = (h :: t).reverse
-        val entries       = NonEmptyChunk(physicalOrder.head, physicalOrder.tail*)
         val trailer       = append match {
           case Some(AppendContext(prev, base)) =>
-            val maxNum  = entries.map(_.index.number).max
+            val maxNum  = physicalOrder.map(_.index.number).max
             val newSize = BigDecimal(math.max(base.size.toLong, maxNum + 1L))
             val merged  = base.data.data ++ revisionTrailer.data.data
             Trailer(
@@ -169,7 +169,28 @@ object WritePdf {
           case None =>
             revisionTrailer
         }
-        Codecs.encodeBytes(GenerateXref(entries, trailer, initialOffset))(using summon[_root_.scodec.Codec[Xref]]) match {
+        val xrefBytes =
+          if absolutePrefix.isEmpty then
+            val entries = NonEmptyChunk(physicalOrder.head, physicalOrder.tail*)
+            Codecs.encodeBytes(GenerateXref(entries, trailer, initialOffset))(using summon[_root_.scodec.Codec[Xref]])
+          else
+            var offset   = initialOffset
+            val tailObjs = physicalOrder.map { entry =>
+              val current = (entry.index.number, offset, entry.size)
+              offset += entry.size
+              current
+            }
+            val merged = absolutePrefix ++ tailObjs.toList
+            NonEmptyChunk.fromIterableOption(merged.sortBy(_._1)) match {
+              case None =>
+                Codecs.fail("linearized xref merge produced no entries")
+              case Some(combined) =>
+                val startxrefOffset = offset
+                Codecs.encodeBytes(GenerateXref.fromAbsolute(combined, trailer, startxrefOffset))(
+                  using summon[_root_.scodec.Codec[Xref]]
+                )
+            }
+        xrefBytes match {
           case _root_.scodec.Attempt.Successful(bytes) => ZChannel.write(Chunk.single(bytes))
           case _root_.scodec.Attempt.Failure(c) =>
             ZChannel.fail(new RuntimeException(s"encoding xref: ${c.messageWithContext}"))
@@ -254,7 +275,8 @@ object WritePdf {
     initialOffset: Long,
     initialPending: Chunk[Part[Trailer]] = Chunk.empty,
     terminalTrailer: Option[Trailer] = None,
-    append: Option[AppendContext] = None
+    append: Option[AppendContext] = None,
+    absolutePrefix: List[(Long, Long, Long)] = Nil
   ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {
 
     def processChunk(
@@ -277,7 +299,7 @@ object WritePdf {
         (chunk: Chunk[Part[Trailer]]) => processChunk(st, chunk),
         (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
         (_: Any) =>
-          finishLog(initialOffset, append)(
+          finishLog(initialOffset, append, absolutePrefix)(
             terminalTrailer.fold(st)(trailer => st.copy(trailer = Some(trailer)))
           )
       )
