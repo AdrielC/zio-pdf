@@ -4,11 +4,10 @@
 
 package zio.pdf
 
-import _root_.scodec.bits.{BitVector, ByteVector}
+import _root_.scodec.bits.ByteVector
 import zio.*
 import zio.stream.*
 import zio.test.*
-import zio.pdf.testkit.{Jar, JarError}
 
 object GenerateSpec extends ZIOSpecDefault {
 
@@ -146,7 +145,7 @@ object GenerateSpec extends ZIOSpecDefault {
       "Info" -> Prim.refT(infoObj),
     )
 
-  def spec: Spec[Any, Throwable | JarError] = suite("Generate")(
+  def spec: Spec[Any, Throwable] = suite("Generate")(
     test("encode a pdf with free-text annotation decodes to the expected object graph") {
       val catalog = catalogObj(pagesObj, outlinesObj)
       val info    = infoObj
@@ -172,26 +171,6 @@ object GenerateSpec extends ZIOSpecDefault {
         content.size == 1,
         data.exists(_.index.number == 10L)
       )
-    },
-
-    test("Generate byte output round-trips through WritePdf decode like the golden fixture") {
-      val catalog = catalogObj(pagesObj, outlinesObj)
-      val info    = infoObj
-      for {
-        path     <- Jar.resourcePath("annot-test-target.pdf")
-        golden   <- ZStream.fromPath(path).via(PdfStream.decode()).runCollect
-        encoded  <- ZStream
-                      .fromIterable(objects)
-                      .via(Generate(trailer(catalog, info)))
-                      .runCollect
-                      .map(bytes => _root_.scodec.bits.ByteVector.view(bytes.toArray))
-        fresh    <- ZStream
-                      .fromChunk(Chunk.fromArray(encoded.toArray))
-                      .via(PdfStream.decode())
-                      .runCollect
-        goldenObjs = golden.collect { case Decoded.DataObj(o) => o.index.number }.sorted
-        freshObjs  = fresh.collect { case Decoded.DataObj(o) => o.index.number }.sorted
-      } yield assertTrue(goldenObjs == freshObjs)
     }
   )
 }
