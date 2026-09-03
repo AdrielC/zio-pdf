@@ -50,11 +50,11 @@ object WritePdf {
 
   private val OutputChunkBytes = 64 * 1024
 
-  private final case class EncodeLog(entries: List[XrefObjMeta], trailer: Option[Trailer]) {
+  private[pdf] final case class EncodeLog(entries: List[XrefObjMeta], trailer: Option[Trailer]) {
     def entry(newEntry: XrefObjMeta): EncodeLog = copy(entries = newEntry :: entries)
   }
 
-  private val emptyLog: EncodeLog = EncodeLog(Nil, None)
+  private[pdf] val emptyLog: EncodeLog = EncodeLog(Nil, None)
 
   /** Try to encode the version header. */
   private[pdf] def encodeVersion(part: Option[Part[Trailer]]): Either[String, (ByteVector, Option[Part[Trailer]])] =
@@ -134,7 +134,7 @@ object WritePdf {
     }
 
   /** Emit the final xref + trailer + startxref. */
-  private def finishLog(
+  private[pdf] def finishLog(
     initialOffset: Long
   )(log: EncodeLog): ZChannel[Any, Any, Any, Any, Throwable, Chunk[ByteVector], Unit] =
     log match {
@@ -158,7 +158,7 @@ object WritePdf {
    * EncodeLog. Side-effecting channels are needed because
    * Part.StreamObj forwards a ZStream chunk-by-chunk.
    */
-  private def emitPart(
+  private[pdf] def emitPart(
     st: EncodeLog,
     part: Part[Trailer]
   ): ZChannel[Any, Throwable, Any, Any, Throwable, Chunk[ByteVector], EncodeLog] =

@@ -18,7 +18,10 @@ object Jar {
 
   def resourcePath(name: String): ZIO[Any, JarError, Path] =
     ZIO
-      .fromOption(Option(getClass.getClassLoader.getResource(name)))
+      .fromOption {
+        Option(Thread.currentThread.getContextClassLoader.getResource(name))
+          .orElse(Option(getClass.getClassLoader.getResource(name)))
+      }
       .orElseFail(noResource(name))
       .flatMap(url => ZIO.attempt(Paths.get(url.toURI)).mapError(e => JarError(e.getMessage)))
 
