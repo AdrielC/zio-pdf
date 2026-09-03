@@ -744,7 +744,14 @@ object PdfEngine:
     paths: NonEmptyChunk[java.nio.file.Path],
     opts: Options = Options.default
   ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
-    PdfMerge.fromPaths(paths, opts)
+    paths.toList match {
+      case head :: tail =>
+        ZIO
+          .foreach(head :: tail)(path => decode(path, opts))
+          .flatMap(chunks => PdfMerge.bytes(NonEmptyChunk(chunks.head, chunks.tail*)))
+      case Nil =>
+        ZIO.fail(new IllegalArgumentException("merge requires at least one path"))
+    }
 
   /** Append a sign/append revision after an existing PDF prefix. */
   def appendRevision(base: Chunk[Byte], revision: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
