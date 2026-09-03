@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## [0.2.0-RC8] — 2026-09-03
+
+### Added
+
+- Production PDF workflows for merge, append, byte-preserving linearize, and incremental `/Thumb` generation with injectable pixel sources.
+- Remaining legacy fs2-pdf surface on the ZIO rewrite: `Generate`, `Scodec`, `StreamUtil`, `JavaStream`, and a completed `WriteLinearized.pipe`.
+- README workflow documentation, PDFBox thumbnail examples, a linearize first-page benchmark script, and a browser hook for canvas-supplied thumbnail pixels.
+
+### Fixed
+
+- Scala.js compilation for PDF write workflows by keeping path-based merge on the JVM `PdfEngine` companion and encoding thumbnails through `WritePdf`.
+- Graft-preserving linearize for xref-stream PDFs, including synthesis of missing catalog and page-tree objects when only structural refs exist in literal top-level bytes.
+- `GenerateSpec` classpath handling so encode/decode coverage stays green on the main test suite.
+
 ## [0.2.0-RC7] — 2026-08-26
 
 ### Changed

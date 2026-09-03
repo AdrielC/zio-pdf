@@ -14,11 +14,11 @@ That distinction makes the raw path suitable for very large uploads while keepin
 
 ## Project status
 
-Release `0.2.0-RC7` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
+Release `0.2.0-RC8` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
 
 ```scala
-libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.0-RC7" // JVM
-libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.0-RC7" // Scala.js
+libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.0-RC8" // JVM
+libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.0-RC8" // Scala.js
 ```
 
 Only the JVM and Scala.js `zio-pdf` artifacts are publishable. Examples, benchmarks, the browser application, and the Kyo comparison module are build-only projects.
