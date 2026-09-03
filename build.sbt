@@ -70,6 +70,7 @@ lazy val root = (project in file("."))
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
       "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion % Test,
+      "org.apache.pdfbox" % "pdfbox" % "3.0.4" % Test,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt"      % zioVersion % Test
     ),

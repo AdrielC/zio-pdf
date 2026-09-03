@@ -20,10 +20,13 @@
  *                 of bytes the encoder will fail at end-of-stream.
  * `Meta`        - trailer / metadata side-channel.
  * `Version`     - PDF version header (must come first if present).
+ * `Preencoded`  - verbatim object bytes (including `obj` … `endobj`) for
+ *                 byte-identical grafting without parse/encode round-trip.
  */
 
 package zio.pdf
 
+import _root_.scodec.bits.ByteVector
 import zio.stream.ZStream
 
 sealed trait Part[+A]
@@ -32,6 +35,15 @@ object Part {
 
   /** A fully-materialised indirect object. */
   final case class Obj(obj: IndirectObj) extends Part[Nothing]
+
+  /**
+   * Raw indirect-object bytes grafted into the output stream unchanged.
+   *
+   * The encoder records [[index]] and `bytes.size` in the xref table without
+   * re-serialising the payload. Use when preserving byte-identical object
+   * sections from an existing PDF.
+   */
+  final case class Preencoded(index: zio.pdf.Obj.Index, bytes: ByteVector) extends Part[Nothing]
 
   /**
    * An indirect object with a streaming payload. `length` is the

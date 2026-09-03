@@ -89,6 +89,17 @@ object WritePdf {
   private val streamTrailer: ByteVector =
     ByteVector("\nendstream\nendobj\n".getBytes)
 
+  private[pdf] def streamTrailerBytes: ByteVector = streamTrailer
+
+  private[pdf] def streamTrailerSize: Long = streamTrailer.size
+
+  private[pdf] def encodeStreamHeaderForMeasure(
+    index: Obj.Index,
+    data: Prim,
+    length: Long
+  ): Either[Error, ByteVector] =
+    encodeStreamHeader(index, data, length)
+
   /**
    * Count at ZStream chunk granularity and fail before `endstream` is emitted
    * when a caller supplied an incorrect `/Length`. The payload remains fully
@@ -133,14 +144,31 @@ object WritePdf {
         Left(s"encoding object ${obj.obj.index.number}: ${c.messageWithContext}")
     }
 
+  /** Context for an incremental append revision (`/Prev` points at the prior startxref). */
+  private[pdf] final case class AppendContext(previousStartXref: Long, baseTrailer: Trailer)
+
   /** Emit the final xref + trailer + startxref. */
   private[pdf] def finishLog(
-    initialOffset: Long
+    initialOffset: Long,
+    append: Option[AppendContext] = None
   )(log: EncodeLog): ZChannel[Any, Any, Any, Any, Throwable, Chunk[ByteVector], Unit] =
     log match {
-      case EncodeLog(h :: t, Some(trailer)) =>
+      case EncodeLog(h :: t, Some(revisionTrailer)) =>
         val physicalOrder = (h :: t).reverse
         val entries       = NonEmptyChunk(physicalOrder.head, physicalOrder.tail*)
+        val trailer       = append match {
+          case Some(AppendContext(prev, base)) =>
+            val maxNum  = entries.map(_.index.number).max
+            val newSize = BigDecimal(math.max(base.size.toLong, maxNum + 1L))
+            val merged  = base.data.data ++ revisionTrailer.data.data
+            Trailer(
+              newSize,
+              Prim.Dict(merged.updated("Prev", Prim.Number(BigDecimal(prev)))),
+              revisionTrailer.root.orElse(base.root)
+            )
+          case None =>
+            revisionTrailer
+        }
         Codecs.encodeBytes(GenerateXref(entries, trailer, initialOffset))(using summon[_root_.scodec.Codec[Xref]]) match {
           case _root_.scodec.Attempt.Successful(bytes) => ZChannel.write(Chunk.single(bytes))
           case _root_.scodec.Attempt.Failure(c) =>
@@ -166,11 +194,16 @@ object WritePdf {
       case Part.Obj(obj) =>
         encodeObj(st, obj) match {
           case Right((bytes, next)) =>
-            (if (bytes.isEmpty) ZChannel.unit else ZChannel.write(Chunk.single(bytes))) *>
+            (if bytes.isEmpty then ZChannel.unit else ZChannel.write(Chunk.single(bytes))) *>
               ZChannel.succeed(next)
           case Left(msg) =>
             ZChannel.fail(new RuntimeException(msg))
         }
+
+      case Part.Preencoded(index, bytes) =>
+        val nextLog = st.entry(XrefObjMeta(index, bytes.size))
+        (if bytes.isEmpty then ZChannel.unit else ZChannel.write(Chunk.single(bytes))) *>
+          ZChannel.succeed(nextLog)
 
       case Part.StreamObj(index, data, length, payload) =>
         encodeStreamHeader(index, data, length) match {
@@ -220,7 +253,8 @@ object WritePdf {
   private[pdf] def tailEncoder(
     initialOffset: Long,
     initialPending: Chunk[Part[Trailer]] = Chunk.empty,
-    terminalTrailer: Option[Trailer] = None
+    terminalTrailer: Option[Trailer] = None,
+    append: Option[AppendContext] = None
   ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {
 
     def processChunk(
@@ -242,11 +276,21 @@ object WritePdf {
       ZChannel.readWithCause[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit](
         (chunk: Chunk[Part[Trailer]]) => processChunk(st, chunk),
         (cause: Cause[Throwable]) => ZChannel.refailCause(cause),
-        (_: Any) => finishLog(initialOffset)(terminalTrailer.fold(st)(trailer => st.copy(trailer = Some(trailer))))
+        (_: Any) =>
+          finishLog(initialOffset, append)(
+            terminalTrailer.fold(st)(trailer => st.copy(trailer = Some(trailer)))
+          )
       )
 
     processChunk(emptyLog, initialPending)
   }
+
+  /** Encode a revision appended after an existing PDF byte prefix (no version header). */
+  private[pdf] def appendParts(
+    baseSize: Long,
+    appendContext: AppendContext
+  ): ZPipeline[Any, Throwable, Part[Trailer], ByteVector] =
+    ZPipeline.fromChannel(tailEncoder(baseSize, append = Some(appendContext)))
 
   private def streamingEncode
       : ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {

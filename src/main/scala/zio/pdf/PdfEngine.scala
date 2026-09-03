@@ -726,3 +726,50 @@ object PdfEngine:
 
   def extractText(path: Path, opts: Options = Options.default): ZStream[PdfEngine, Throwable, PageText] =
     ZStream.serviceWithStream[PdfEngine](_.extractText(path, opts))
+
+  // --- encode / merge / append / linearize -----------------------------------
+
+  /** Encode a part stream to PDF bytes (symmetric with [[decode]]). */
+  def write(parts: ZStream[Any, Throwable, Part[Trailer]]): ZStream[Any, Throwable, Byte] =
+    parts.via(WritePdf.parts).mapConcatChunk(chunk => Chunk.fromArray(chunk.toArray))
+
+  def write(parts: Chunk[Part[Trailer]]): ZStream[Any, Throwable, Byte] =
+    write(ZStream.fromChunk(parts))
+
+  def writeBytes(parts: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
+    write(parts).runCollect
+
+  /** Merge filings in path order into one PDF. */
+  def merge(
+    paths: NonEmptyChunk[java.nio.file.Path],
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfMerge.fromPaths(paths, opts)
+
+  /** Append a sign/append revision after an existing PDF prefix. */
+  def appendRevision(base: Chunk[Byte], revision: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfAppend.append(base, revision)
+
+  /** Produce a linearized PDF tuned for fast first-page web display. */
+  def linearize(trailerData: Prim.Dict, parts: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfLinearize.bytes(trailerData, parts)
+
+  /** Linearize an existing PDF while preserving top-level object bytes. */
+  def linearize(bytes: Chunk[Byte]): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfLinearize.fromBytes(bytes)
+
+  /** Add placeholder `/Thumb` image XObjects to page parts (no renderer). */
+  def withThumbnails(
+    parts: Chunk[Part[Trailer]],
+    thumbStartNumber: Long,
+    options: PdfThumbnail.Options = PdfThumbnail.Options()
+  ): ZIO[Any, Throwable, Chunk[Part[Trailer]]] =
+    ZIO.fromEither(PdfThumbnail.enrichParts(parts, thumbStartNumber, options).left.map(new RuntimeException(_)))
+
+  /** Add `/Thumb` to an existing PDF (incremental for first page on large docs). */
+  def withThumbnailsBytes(bytes: Chunk[Byte], options: PdfThumbnail.Options = PdfThumbnail.Options()): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfThumbnail.enrichBytes(bytes, options)
+
+  /** Graft byte-identical objects from a donor PDF into preencoded parts. */
+  def graftObjects(donor: Chunk[Byte], objectNumbers: Set[Long]): ZIO[Any, Throwable, Chunk[Part.Preencoded]] =
+    PdfGraft.graft(donor, objectNumbers)

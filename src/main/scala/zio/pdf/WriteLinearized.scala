@@ -27,15 +27,18 @@ object WriteLinearized {
       extends RuntimeException(s"linearized layout expected $expected first-page parts but received $actual")
 
   def objectNumber[A]: Part[A] => Attempt[Long] = {
-    case Part.Obj(IndirectObj(Obj(Obj.Index(n, _), _), _)) => Attempt.successful(n)
-    case _                                                 => Codecs.fail("first part is not an object")
+    case Part.Obj(IndirectObj(Obj(Obj.Index(n, _), _), _))       => Attempt.successful(n)
+    case Part.Preencoded(Obj.Index(n, _), _)                    => Attempt.successful(n)
+    case _                                                     => Codecs.fail("first part is not an object")
   }
 
   def encode[A]: Part[A] => Attempt[EncodedObj] = {
-    case Part.Obj(obj)     => EncodedObj.indirect(obj)
-    case Part.Meta(_)      => Codecs.fail("trailer in first page data")
-    case Part.Version(_)   => Codecs.fail("Part.Version not at the head of stream")
-    case _: Part.StreamObj => Codecs.fail("Part.StreamObj in first page chunk")
+    case Part.Obj(obj)       => EncodedObj.indirect(obj)
+    case Part.Preencoded(index, bytes) =>
+      Attempt.successful(EncodedObj(XrefObjMeta(index, bytes.size), bytes))
+    case Part.Meta(_)        => Codecs.fail("trailer in first page data")
+    case Part.Version(_)     => Codecs.fail("Part.Version not at the head of stream")
+    case _: Part.StreamObj   => Codecs.fail("Part.StreamObj in first page chunk")
   }
 
   val xrefStatic: String =
@@ -164,7 +167,29 @@ object WriteLinearized {
       0,
     )
 
-  /** Linearization object bytes, first-page xref, then each first-page object chunk. */
+  /** Linearization object bytes, optional hint stream, first-page xref, then first-page objects. */
+  def encodeLinearizedPrefix(
+    trailerData: Prim.Dict,
+    totalCount: Int,
+    headerSize: Long,
+    params: LinearizationParams,
+    firstPage: Chunk[Part[Trailer]],
+    hintStream: Option[IndirectObj] = None
+  ): Attempt[Chunk[ByteVector]] =
+    encodeFirstPage(trailerData, totalCount)(headerSize)(firstPage).flatMap { fp =>
+      createLinearizationBytes(fp.firstObjNumber - 1, params).flatMap { lin =>
+        val hintBytes = hintStream.flatMap(obj =>
+          EncodedObj.indirect(obj).toOption.map(_.bytes)
+        )
+        val prefix = hintBytes match {
+          case Some(hint) => Chunk(lin, hint, fp.xref) ++ Chunk.fromIterable(fp.data.toList)
+          case None       => Chunk(lin, fp.xref) ++ Chunk.fromIterable(fp.data.toList)
+        }
+        Attempt.successful(prefix)
+      }
+    }
+
+  /** @deprecated prefer [[encodeLinearizedPrefix]] with explicit [[LinearizationParams]] */
   def encodeLinearizedPrefix(
     trailerData: Prim.Dict,
     totalCount: Int,
@@ -172,11 +197,13 @@ object WriteLinearized {
     fileSize: Long,
     firstPage: Chunk[Part[Trailer]]
   ): Attempt[Chunk[ByteVector]] =
-    encodeFirstPage(trailerData, totalCount)(headerSize)(firstPage).flatMap { fp =>
-      createLinearizationBytes(fp.firstObjNumber - 1, linParams(totalCount, fileSize)).map { lin =>
-        Chunk(lin, fp.xref) ++ Chunk.fromIterable(fp.data.toList)
-      }
-    }
+    encodeLinearizedPrefix(
+      trailerData,
+      totalCount,
+      headerSize,
+      linParams(totalCount, fileSize),
+      firstPage
+    )
 
   /**
    * fs2-pdf-compatible streaming layout writer.
@@ -194,23 +221,34 @@ object WriteLinearized {
     totalCount: Int,
     fileSize: Long
   ): ZPipeline[Any, Throwable, Part[Trailer], ByteVector] =
-    ZPipeline.fromChannel(encodeLayout(trailerData, firstPageCount, totalCount, fileSize))
+    pipeWithHints(trailerData, firstPageCount, totalCount, linParams(totalCount, fileSize), None)
+
+  /** Linearized layout writer with explicit params and an optional ISO hint stream. */
+  def pipeWithHints(
+    trailerData: Prim.Dict,
+    firstPageCount: Int,
+    totalCount: Int,
+    params: LinearizationParams,
+    hintStream: Option[IndirectObj]
+  ): ZPipeline[Any, Throwable, Part[Trailer], ByteVector] =
+    ZPipeline.fromChannel(encodeLayout(trailerData, firstPageCount, totalCount, params, hintStream))
 
   private def encodeLayout(
     trailerData: Prim.Dict,
     firstPageCount: Int,
     totalCount: Int,
-    fileSize: Long
+    params: LinearizationParams,
+    hintStream: Option[IndirectObj]
   ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] = {
-    if firstPageCount <= 0 || totalCount < firstPageCount || fileSize < 0L then
-      ZChannel.fail(InvalidLayout(firstPageCount, totalCount, fileSize))
+    if firstPageCount <= 0 || totalCount < firstPageCount || params.fileSize < 0L then
+      ZChannel.fail(InvalidLayout(firstPageCount, totalCount, params.fileSize))
     else {
       def startTail(
         headerSize: Long,
         firstPage: Chunk[Part[Trailer]],
         pending: Chunk[Part[Trailer]]
       ): ZChannel[Any, Throwable, Chunk[Part[Trailer]], Any, Throwable, Chunk[ByteVector], Unit] =
-        encodeLinearizedPrefix(trailerData, totalCount, headerSize, fileSize, firstPage) match {
+        encodeLinearizedPrefix(trailerData, totalCount, headerSize, params, firstPage, hintStream) match {
           case _root_.scodec.Attempt.Failure(error) =>
             ZChannel.fail(new RuntimeException(s"encoding linearized first page: ${error.messageWithContext}"))
           case _root_.scodec.Attempt.Successful(prefix) =>
