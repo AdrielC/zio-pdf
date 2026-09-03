@@ -29,7 +29,7 @@ object PdfAppend {
     var last   = -1
     var index  = start
     while index <= arr.length - needle.length do
-      if java.util.Arrays.equals(arr, index, index + needle.length, needle, 0, needle.length) then last = index
+      if bytesEqualAt(arr, index, needle) then last = index
       index += 1
     if last < 0 then Left(NoStartXref)
     else
@@ -39,6 +39,14 @@ object PdfAppend {
         .takeWhile(c => c.isDigit || c == '-' )
         .toLongOption
         .toRight(NoStartXref)
+  }
+
+  private def bytesEqualAt(source: Array[Byte], offset: Int, needle: Array[Byte]): Boolean = {
+    var index = 0
+    while index < needle.length do
+      if source(offset + index) != needle(index) then return false
+      index += 1
+    true
   }
 
   /** Latest trailer from a decoded timeline (last xref wins for incremental files). */
