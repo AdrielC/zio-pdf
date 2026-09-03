@@ -208,6 +208,45 @@ object ZioPdfDemo:
   def analyzeBlob(input: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
     analyzeSource(PdfSource.fromBlob(input), input.size.toLong, (_, _, _) => ())
 
+  /**
+   * Attach a first-page `/Thumb` to PDF bytes.
+   *
+   * - omit `grayPixels` for deterministic placeholders (Scala.js-safe)
+   * - pass PDF.js canvas grayscale bytes for a rendered preview tile
+   */
+  @JSExport
+  def attachFirstPageThumbnail(
+    input: Uint8Array,
+    grayPixels: js.UndefOr[Uint8Array],
+    width: Int,
+    height: Int
+  ): js.Promise[Uint8Array] =
+    val source = Chunk.fromArray(JsBinary.bytes(input))
+    val options =
+      if grayPixels.isDefined then
+        val gray = JsBinary.bytes(grayPixels.get)
+        PdfThumbnail.renderedOptions(
+          (_, w, h) =>
+            val need = w * h
+            if gray.length >= need then Right(gray.take(need))
+            else Left(s"thumbnail pixels: expected $need bytes, got ${gray.length}"),
+          width = width,
+          height = height
+        )
+      else
+        PdfThumbnail.placeholderOptions(width = width, height = height)
+
+    val effect =
+      PdfThumbnail.enrichBytes(source, options).map { output =>
+        JsBinary.uint8(output, 0, output.length)
+      }
+
+    Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .runToFuture(effect)
+        .toJSPromise
+    }
+
   /** Emit actual phase and byte boundaries while a browser source is consumed. */
   @JSExport
   def analyzeBlobWithProgress(

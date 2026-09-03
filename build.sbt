@@ -245,6 +245,7 @@ lazy val examples = (project in file("examples"))
   .settings(
     name           := "zio-pdf-examples",
     publish / skip := true,
+    libraryDependencies += "org.apache.pdfbox" % "pdfbox" % "3.0.4",
     Compile / mainClass := Some("zio.pdf.examples.ReadAndDecode"),
     Compile / unmanagedResourceDirectories +=
       (LocalRootProject / Test / resourceDirectory).value

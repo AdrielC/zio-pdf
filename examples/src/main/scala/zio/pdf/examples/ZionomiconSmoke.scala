@@ -66,12 +66,20 @@ object ZionomiconSmoke extends ZIOAppDefault:
 
   private def smokeThumbnails(source: Chunk[Byte], output: Path): ZIO[Any, Throwable, Unit] =
     for {
-      bytes <- PdfEngine.withThumbnailsBytes(
-                 source,
-                 PdfThumbnail.Options(scope = PdfThumbnail.Scope.FirstPageOnly, width = 64, height = 64)
-               )
+      rendered <- ZIO.succeed(sys.env.get("RENDER_THUMBS").exists(_.equalsIgnoreCase("true")))
+      options =
+        if rendered then
+          PdfThumbnail.renderedOptions(
+            PdfBoxRenderer.pixelSource(source.toArray),
+            width = 64,
+            height = 64
+          )
+        else
+          PdfThumbnail.placeholderOptions(width = 64, height = 64)
+      bytes <- PdfEngine.withThumbnailsBytes(source, options)
       _     <- ZStream.fromChunk(bytes).run(PdfIO.writer(output))
-      _     <- Console.printLine(s"thumbnail: ${bytes.size} bytes (incremental first-page /Thumb) -> $output")
+      mode   = if rendered then "PDFBox-rendered" else "placeholder"
+      _     <- Console.printLine(s"thumbnail: ${bytes.size} bytes ($mode first-page /Thumb) -> $output")
     } yield ()
 
   private def inspectFile(label: String, path: Path): ZIO[Any, Throwable, Unit] =

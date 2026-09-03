@@ -27,6 +27,23 @@ object PdfThumbnail {
     pixelSource: Option[PixelSource] = None
   )
 
+  /** Deterministic placeholder tiles — works on JVM and Scala.js without a renderer. */
+  def placeholderOptions(
+    width: Int = 64,
+    height: Int = 64,
+    scope: Scope = Scope.FirstPageOnly
+  ): Options =
+    Options(width = width, height = height, scope = scope)
+
+  /** Caller-supplied DeviceGray pixels (PDFBox on JVM, PDF.js canvas in the browser). */
+  def renderedOptions(
+    pixelSource: PixelSource,
+    width: Int = 64,
+    height: Int = 64,
+    scope: Scope = Scope.FirstPageOnly
+  ): Options =
+    Options(width = width, height = height, scope = scope, pixelSource = Some(pixelSource))
+
   /** Apply thumbnails to an existing PDF without rewriting the body. */
   def enrichBytes(bytes: Chunk[Byte], options: Options = Options()): ZIO[Any, Throwable, Chunk[Byte]] =
     options.scope match {

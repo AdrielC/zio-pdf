@@ -134,6 +134,79 @@ val part = Part.StreamObj(
 
 Cross-reference offsets are generated in physical output order. Tests compare every xref row with the actual object position, and CI validates rendered output with independent PDF tools when available.
 
+## Production PDF workflows
+
+`PdfEngine` exposes cross-platform write paths for filings and web delivery. Merge and path-based APIs are JVM-only; append, linearize, and thumbnail enrichment work on any platform that can hold the input bytes.
+
+Merge two filings in path order:
+
+```scala
+import java.nio.file.Path
+import zio.*
+import zio.pdf.*
+
+val merged =
+  PdfEngine
+    .merge(NonEmptyChunk(Path.of("left.pdf"), Path.of("right.pdf")))
+    .provide(PdfEngine.live)
+```
+
+Append an incremental revision without rewriting the original prefix:
+
+```scala
+val revision = Chunk(
+  Part.Obj(IndirectObj.nostream(100L, Prim.dict("Producer" -> Prim.Name("zio-pdf")))),
+  Part.Meta(Trailer(BigDecimal(101), Prim.dict("Info" -> Prim.Ref(100L, 0)), None))
+)
+
+val updated = PdfAppend.append(existingBytes, revision)
+```
+
+Linearize for fast first-page web display while preserving top-level object bytes:
+
+```scala
+val linearized = PdfLinearize.fromBytes(existingBytes)
+val firstPagePrefix = PdfLinearize.firstPageByteLength(linearized)
+```
+
+Attach `/Thumb` image XObjects. The shared API stays renderer-agnostic; inject pixels at the platform edge:
+
+| Platform | Renderer | When to use |
+| --- | --- | --- |
+| JVM server | [PDFBox](https://pdfbox.apache.org/) via `PdfBoxRenderer.pixelSource` | filing prep, batch linearization with real previews |
+| Browser | [PDF.js](https://mozilla.github.io/pdf.js/) canvas → grayscale bytes | workbench export, client-side `/Thumb` without shipping PDFBox |
+| Either | `PdfThumbnail.placeholderOptions()` | structure tests, linearized layout proofs, no native deps |
+
+```scala
+// Shared — placeholders everywhere (JVM + Scala.js)
+val placeholder = PdfThumbnail.placeholderOptions()
+
+// Backend — PDFBox at the application edge (examples/tests only; not in the published jar)
+val server = PdfThumbnail.renderedOptions(PdfBoxRenderer.pixelSource(pdfBytes))
+
+// Frontend — PDF.js renders to canvas; pass DeviceGray bytes into the JS export
+// ZioPdfDemo.attachFirstPageThumbnail(input, grayPixels, width, height)
+val browser = PdfThumbnail.renderedOptions((_, w, h) => Right(canvasGrayBytes.take(w * h)))
+```
+
+```scala
+val previewable = PdfEngine.withThumbnailsBytes(existingBytes, server)
+```
+
+[Gotenberg](https://gotenberg.dev/) fits HTML and office-to-PDF conversion on the server, but it does not rasterize existing PDF pages to pixels. Use PDFBox or Poppler on the backend; use PDF.js on the frontend.
+
+On the JVM, runnable examples live under `examples/`:
+
+```bash
+MERGE_LEFT=a.pdf MERGE_RIGHT=b.pdf OUTPUT_PDF=merged.pdf sbt 'examples/runMain zio.pdf.examples.MergeFilings'
+INPUT_PDF=doc.pdf OUTPUT_PDF=signed.pdf sbt 'examples/runMain zio.pdf.examples.AppendRevision'
+INPUT_PDF=doc.pdf OUTPUT_PDF=web.pdf sbt 'examples/runMain zio.pdf.examples.LinearizeFromFile'
+INPUT_PDF=doc.pdf OUTPUT_PDF=thumb.pdf RENDER_THUMBS=true sbt 'examples/runMain zio.pdf.examples.ThumbnailsFromPdf'
+bash scripts/benchmark-linearized-first-page.sh /path/to/large.pdf
+```
+
+The benchmark script linearizes a file, reports the measured first-page prefix size, and compares a byte-range fetch (`curl -r`) against downloading the full linearized file.
+
 ## Inspection and evidence
 
 Inspection plans are immutable and publicly inspectable. They have no private runtime dependency and no opaque callback leaves.
@@ -248,7 +321,7 @@ Production invariants are recorded in [`docs/PRODUCTION_INVARIANTS.md`](docs/PRO
 | `src/` | JVM parser, scanner, engine, writer, evidence, transform, diff | yes |
 | `js/` | Scala.js platform implementations and tests | yes |
 | `examples-js/` | interactive Vite and Scala.js application | no |
-| `examples/` | runnable JVM examples | no |
+| `examples/` | runnable JVM examples (PDFBox optional for rendered thumbnails) | no |
 | `scan-kyo/` | experimental scan-algebra comparison | no |
 | `bench/`, `bench-fs2/` | JMH projects | no |
 | `legacy/` | archived fs2-pdf source for provenance | no |
