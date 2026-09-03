@@ -82,6 +82,12 @@ object TextExtract {
       )
     }
 
+  /** Page object numbers in document order (handles nested `/Pages` trees). */
+  private[pdf] def orderedPageObjectNumbers(decoded: Chunk[Decoded]): List[Long] = {
+    val acc = Elements.foldSync(decoded).foldLeft(Acc())(fold)
+    selectedPages(acc).map(_.index.number).toList
+  }
+
   def fromElements(elements: Chunk[Element]): Chunk[PageText] = {
     var acc = Acc()
     val it  = elements.iterator
