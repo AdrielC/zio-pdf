@@ -76,7 +76,12 @@ object WriteLinearized {
         case Some(encNec) =>
           val xrefs = encNec.map(_.xref)
           val bytes = encNec.map(_.bytes)
-          val t = Trailer(BigDecimal(count), trailer ++ Prim.dict("Size" -> Prim.num(count)), None)
+          val maxNumber = xrefs.map(_.index.number).max
+          val t = Trailer(
+            BigDecimal(count),
+            trailer ++ Prim.dict("Size" -> Prim.num(maxNumber + 1L)),
+            None
+          )
           Attempt.successful((xrefs, bytes, t))
       }
     }
@@ -99,16 +104,15 @@ object WriteLinearized {
       case Some(firstPage) =>
         for {
           firstNumber <- objectNumber(firstPage.head)
-          xrefOffset = headerSize + linearizationSize
-          triple       <- encodeFirstPageParts(firstPage, totalCount, trailerData)
+          triple      <- encodeFirstPageParts(firstPage, totalCount, trailerData)
           (entries, data, trailer) = triple
-          xrefLength <- calculateXrefLength(entries.size + 1, totalCount, trailer.data)
-          encXref    <- encodeXrefBytes(entries, trailer, xrefOffset + xrefLength)
+          xrefLength  <- calculateXrefLength(entries.size + 1, totalCount, trailer.data)
+          encXref     <- encodeXrefBytes(entries, trailer, headerSize + xrefLength)
         } yield FirstPage(
           encXref,
-          xrefOffset + data.toList.map(_.size).sum + xrefLength,
+          headerSize + data.toList.map(_.size).sum + xrefLength,
           data,
-          firstNumber,
+          firstNumber
         )
     }
 
@@ -168,6 +172,11 @@ object WriteLinearized {
     )
 
   /** Linearization object bytes, optional hint stream, first-page xref, then first-page objects. */
+  final case class PrefixResult(
+    bytes: Chunk[ByteVector],
+    absoluteObjects: List[(Long, Long, Long)]
+  )
+
   def encodeLinearizedPrefix(
     trailerData: Prim.Dict,
     totalCount: Int,
@@ -175,18 +184,47 @@ object WriteLinearized {
     params: LinearizationParams,
     firstPage: Chunk[Part[Trailer]],
     hintStream: Option[IndirectObj] = None
-  ): Attempt[Chunk[ByteVector]] =
-    encodeFirstPage(trailerData, totalCount)(headerSize)(firstPage).flatMap { fp =>
-      createLinearizationBytes(fp.firstObjNumber - 1, params).flatMap { lin =>
-        val hintBytes = hintStream.flatMap(obj =>
-          EncodedObj.indirect(obj).toOption.map(_.bytes)
-        )
-        val prefix = hintBytes match {
-          case Some(hint) => Chunk(lin, hint, fp.xref) ++ Chunk.fromIterable(fp.data.toList)
-          case None       => Chunk(lin, fp.xref) ++ Chunk.fromIterable(fp.data.toList)
+  ): Attempt[PrefixResult] =
+    NonEmptyChunk.fromIterableOption(firstPage) match {
+      case None => Codecs.fail("first page objects")
+      case Some(firstPageNec) =>
+        for {
+          firstNumber <- objectNumber(firstPageNec.head)
+          triple      <- encodeFirstPageParts(firstPageNec, totalCount, trailerData)
+          (entries, data, trailer) = triple
+          linNumber = if firstNumber > 1L then firstNumber - 1L else entries.map(_.index.number).max + 1L
+          lin         <- createLinearizationBytes(linNumber, params)
+          hintBytes   <- hintStream match {
+                           case None =>
+                             Attempt.successful(Option.empty[ByteVector])
+                           case Some(obj) =>
+                             EncodedObj.indirect(obj).map(encoded => Some(encoded.bytes))
+                         }
+          xrefLength  <- calculateXrefLength(entries.size + 1, totalCount, trailer.data)
+          dataStart    = headerSize + lin.size + hintBytes.fold(0L)(_.size) + xrefLength
+          encXref     <- encodeXrefBytes(entries, trailer, dataStart)
+        } yield {
+          var offset = headerSize
+          val linEntry = (linNumber, offset, lin.size.toLong)
+          offset += lin.size
+          val hintEntry = hintBytes.map { hint =>
+            val current = (linNumber + 1L, offset, hint.size.toLong)
+            offset += hint.size
+            current
+          }
+          offset += encXref.size
+          val pageObjects = data.toList.zip(entries.toList).map { case (bytes, meta) =>
+            val current = (meta.index.number, offset, bytes.size.toLong)
+            offset += bytes.size
+            current
+          }
+          val absoluteObjects = linEntry :: hintEntry.toList ++ pageObjects
+          val prefix = hintBytes match {
+            case Some(hint) => Chunk(lin, hint, encXref) ++ Chunk.fromIterable(data.toList)
+            case None       => Chunk(lin, encXref) ++ Chunk.fromIterable(data.toList)
+          }
+          PrefixResult(prefix, absoluteObjects)
         }
-        Attempt.successful(prefix)
-      }
     }
 
   /** @deprecated prefer [[encodeLinearizedPrefix]] with explicit [[LinearizationParams]] */
@@ -202,8 +240,9 @@ object WriteLinearized {
       totalCount,
       headerSize,
       linParams(totalCount, fileSize),
-      firstPage
-    )
+      firstPage,
+      None
+    ).map(_.bytes)
 
   /**
    * fs2-pdf-compatible streaming layout writer.
@@ -251,15 +290,20 @@ object WriteLinearized {
         encodeLinearizedPrefix(trailerData, totalCount, headerSize, params, firstPage, hintStream) match {
           case _root_.scodec.Attempt.Failure(error) =>
             ZChannel.fail(new RuntimeException(s"encoding linearized first page: ${error.messageWithContext}"))
-          case _root_.scodec.Attempt.Successful(prefix) =>
-            val prefixSize = prefix.foldLeft(0L)(_ + _.size)
+          case _root_.scodec.Attempt.Successful(prefixResult) =>
+            val prefixSize = prefixResult.bytes.foldLeft(0L)(_ + _.size)
             val finalTrailer = Trailer(
-              BigDecimal(totalCount - firstPageCount),
+              BigDecimal(totalCount),
               trailerData,
-              trailerData("Root").collect { case root: Prim.Ref => root }
+              trailerData.data.get("Root").collect { case root: Prim.Ref => root }
             )
-            ZChannel.write(prefix) *>
-              WritePdf.tailEncoder(headerSize + prefixSize, pending, Some(finalTrailer))
+            ZChannel.write(prefixResult.bytes) *>
+              WritePdf.tailEncoder(
+                headerSize + prefixSize,
+                pending,
+                Some(finalTrailer),
+                absolutePrefix = prefixResult.absoluteObjects
+              )
         }
 
       def collectFirstPage(

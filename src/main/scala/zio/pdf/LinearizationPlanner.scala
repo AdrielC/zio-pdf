@@ -17,7 +17,11 @@ object LinearizationPlanner {
     hintStream: Option[IndirectObj]
   )
 
-  def plan(parts: Chunk[Part[Trailer]], graph: Option[PageDependencyGraph.Graph] = None): Either[String, FullPlan] =
+  def plan(
+    parts: Chunk[Part[Trailer]],
+    graph: Option[PageDependencyGraph.Graph] = None,
+    enableHints: Boolean = true
+  ): Either[String, FullPlan] =
     for {
       measured           <- PartLayout.measure(parts)
       _                  <- measured.trailer.toRight("linearization requires Part.Meta trailer")
@@ -34,7 +38,9 @@ object LinearizationPlanner {
         if filteredFirstPage.nonEmpty then filteredFirstPage.take(firstPageCount).toSet
         else objectParts.take(firstPageCount).flatMap(objectNumber).toSet
       pageNumbers       <- pageNumbersFrom(objectParts, graph, firstPageNumbers)
-      maybeTables       <- LinearizationHints.fromMeasured(measured, pageNumbers, firstPageNumbers, graph)
+      maybeTables <-
+        if !enableHints then Right(None)
+        else LinearizationHints.fromMeasured(measured, pageNumbers, firstPageNumbers, graph)
       hintStream        <- maybeTables match {
                              case None =>
                                Right(None)
@@ -51,11 +57,12 @@ object LinearizationPlanner {
                  hintBytes.getOrElse(ByteVector.empty),
                  firstPageCount,
                  objectParts.size,
-                 hintStream.isDefined
+                 hintStream.isDefined,
+                 enableHints
                )
     } yield FullPlan(
       firstPageCount = firstPageCount,
-      totalCount = objectParts.size + (if hintStream.isDefined then 2 else 1),
+      totalCount = objectParts.size + 1,
       params = params,
       hintStream = hintStream
     )
@@ -64,10 +71,11 @@ object LinearizationPlanner {
   def bytes(
     trailerData: Prim.Dict,
     parts: Chunk[Part[Trailer]],
-    graph: Option[PageDependencyGraph.Graph] = None
+    graph: Option[PageDependencyGraph.Graph] = None,
+    enableHints: Boolean = true
   ): ZIO[Any, Throwable, Chunk[Byte]] =
     for {
-      initial <- ZIO.fromEither(plan(parts, graph)).mapError(msg => new RuntimeException(msg))
+      initial <- ZIO.fromEither(plan(parts, graph, enableHints)).mapError(msg => new RuntimeException(msg))
       pass1 <- ZStream
                  .fromChunk(parts)
                  .via(
@@ -123,26 +131,33 @@ object LinearizationPlanner {
     hintBytes: ByteVector,
     firstPageCount: Int,
     objectCount: Int,
-    hasHintStream: Boolean
+    hasHintStream: Boolean,
+    enableHints: Boolean
   ): WriteLinearized.LinearizationParams = {
     val headerSize     = measured.headerSize
-    val linSize        = WriteLinearized.linearizationSize
-    val hintOffset     = headerSize + linSize
-    val firstPageStart = hintOffset + hintBytes.size
-    val firstPageEnd   = firstPageStart + estimateFirstPageSection(firstPageCount, measured)
-    val hintOverhead   = if hasHintStream then hintBytes.size + WriteLinearized.linearizationSize else WriteLinearized.linearizationSize
+    val linEstimate    = WriteLinearized.linearizationSize
+    val hintBytesLen   = if enableHints && hasHintStream then hintBytes.size else 0L
+    val hintOffset     = if enableHints && hasHintStream then headerSize + linEstimate else 0L
+    val firstPageData  = estimateFirstPageSection(firstPageCount, measured)
+    val firstPageXref  = estimateFirstPageXref(firstPageCount)
+    val firstPageStart = headerSize + linEstimate + hintBytesLen + firstPageXref
+    val firstPageEnd   = firstPageStart + firstPageData
+    val hintOverhead   = if enableHints && hasHintStream then hintBytesLen + linEstimate else linEstimate
     val mainXrefOffset = headerSize + estimateBody(objectCount, hintOverhead, measured)
-    val fileSize       = mainXrefOffset + estimateXref(objectCount + (if hasHintStream then 2 else 1))
+    val fileSize       = mainXrefOffset + estimateXref(objectCount + 1)
     WriteLinearized.LinearizationParams(
       fileSize = fileSize,
       firstPageObjNumber = pageNumbers.headOption.getOrElse(1L),
       hintStreamOffset = hintOffset,
-      hintStreamLength = hintBytes.size,
+      hintStreamLength = hintBytesLen,
       firstPageEndOffset = firstPageEnd,
       pageCount = math.max(1, pageNumbers.size),
       mainXrefOffset = mainXrefOffset
     )
   }
+
+  private def estimateFirstPageXref(firstPageCount: Int): Long =
+    math.max(64L, firstPageCount.toLong * 24L + 64L)
 
   private def estimateFirstPageSection(firstPageCount: Int, measured: PartLayout.Measured): Long =
     measured.entries.take(firstPageCount).foldLeft(0L)((sum, entry) => sum + entry.size)

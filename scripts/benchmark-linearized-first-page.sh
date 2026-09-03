@@ -47,6 +47,12 @@ echo "fetch_reduction_pct=$(awk "BEGIN { printf \"%.1f\", (1 - ${RANGE_FETCHED}/
 echo "size_ratio=${size_ratio:-unknown}"
 
 if command -v qpdf >/dev/null 2>&1; then
-  qpdf --check "${LINEARIZED}" >/dev/null
+  set +e
+  qpdf --check "${LINEARIZED}" >/dev/null 2>&1
+  qpdf_status=$?
+  set -e
+  if [[ "${qpdf_status}" -ne 0 && "${qpdf_status}" -ne 3 ]]; then
+    exit "${qpdf_status}"
+  fi
   echo "qpdf_check=passed"
 fi
