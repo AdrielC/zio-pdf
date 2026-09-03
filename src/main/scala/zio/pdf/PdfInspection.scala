@@ -22,7 +22,7 @@ object PdfInspection:
 
   /** A signal a plan can discover while decoding PDF objects. */
   enum Finding:
-    case Linearized, PdfA, Thumbnail, Encrypted, JavaScript
+    case Linearized, PdfA, Thumbnail, Encrypted, JavaScript, AcroForm
 
   /** How directly the parser can establish a reported fact. */
   enum Confidence:
@@ -55,6 +55,7 @@ object PdfInspection:
   final case class Thumbnail(pageObjectNumber: Long, image: Prim.Ref)
   final case class Encryption(reference: Option[Prim.Ref])
   final case class JavaScript(objectNumber: Long)
+  final case class AcroForm(objectNumber: Long, fieldCount: Int, needAppearances: Boolean)
 
   /** A decoded font dictionary available to a document-level transform. */
   final case class Font(
@@ -77,6 +78,7 @@ object PdfInspection:
     thumbnail: Option[Thumbnail] = None,
     encryption: Option[Encryption] = None,
     javaScript: Option[JavaScript] = None,
+    acroForm: Option[AcroForm] = None,
     fonts: Chunk[Font] = Chunk.empty,
     imageCount: Long = 0L,
     attachmentCount: Long = 0L,
@@ -91,6 +93,7 @@ object PdfInspection:
         case Finding.Thumbnail  => thumbnail.nonEmpty
         case Finding.Encrypted  => encryption.nonEmpty
         case Finding.JavaScript => javaScript.nonEmpty
+        case Finding.AcroForm   => acroForm.nonEmpty
 
     def linearizationEvidence: Option[Evidence[Linearization]] =
       linearization.map(Evidence(_, Confidence.Structural, "The object dictionary declares /Linearized."))
@@ -103,6 +106,9 @@ object PdfInspection:
 
     def encryptionEvidence: Option[Evidence[Encryption]] =
       encryption.map(Evidence(_, Confidence.Structural, "The trailer contains an /Encrypt entry."))
+
+    def acroFormEvidence: Option[Evidence[AcroForm]] =
+      acroForm.map(Evidence(_, Confidence.Structural, "A catalog or form dictionary contains /AcroForm or /Fields."))
 
     def imageCountEvidence: Evidence[Long] =
       Evidence(imageCount, Confidence.Structural, "Counted decoded XObject streams whose /Subtype is /Image.")
@@ -120,6 +126,7 @@ object PdfInspection:
   /** A policy rejected the document before the decoder read another element. */
   enum Violation:
     case JavaScript(found: PdfInspection.JavaScript)
+    case Encrypted(found: PdfInspection.Encryption)
 
   /** A completed preflight run, including any partial report on rejection. */
   enum Outcome:
@@ -139,8 +146,10 @@ object PdfInspection:
     case CountAttachments extends Op[Element, Element]
     case CountTableCandidates extends Op[Element, Element]
     case ObserveJavaScript extends Op[Element, Element]
+    case ObserveAcroForm extends Op[Element, Element]
     case InventoryFonts extends Op[Element, Element]
     case RejectJavaScript extends Op[Element, Element]
+    case RejectEncrypted extends Op[Element, Element]
 
   /** A caller-supplied static interpretation of one named plan operation. */
   trait Analyzer[+A]:
@@ -206,6 +215,25 @@ object PdfInspection:
     def rememberJavaScript(found: Option[JavaScript]): State =
       copy(report = report.copy(javaScript = report.javaScript.orElse(found)))
 
+    def rememberAcroForm(found: Option[AcroForm]): State =
+      found match
+        case Some(next) =>
+          report.acroForm match
+            case Some(existing) if existing.fieldCount >= next.fieldCount && existing.objectNumber != 0L =>
+              this
+            case Some(existing) =>
+              copy(report = report.copy(acroForm = Some(
+                AcroForm(
+                  objectNumber = if existing.objectNumber != 0L then existing.objectNumber else next.objectNumber,
+                  fieldCount = math.max(existing.fieldCount, next.fieldCount),
+                  needAppearances = existing.needAppearances || next.needAppearances
+                )
+              )))
+            case None =>
+              copy(report = report.copy(acroForm = Some(next)))
+        case None =>
+          this
+
     def addFont(found: Option[Font]): State =
       found match
         case Some(font) if !report.fonts.exists(_.objectNumber == font.objectNumber) =>
@@ -234,8 +262,10 @@ object PdfInspection:
         case Op.CountAttachments      => Profile(Set.empty, requiresFullScan = true)
         case Op.CountTableCandidates  => Profile(Set.empty, requiresFullScan = true)
         case Op.ObserveJavaScript    => Profile(Set(Finding.JavaScript), requiresFullScan = false)
+        case Op.ObserveAcroForm      => Profile(Set(Finding.AcroForm), requiresFullScan = true)
         case Op.InventoryFonts       => Profile(Set.empty, requiresFullScan = true)
         case Op.RejectJavaScript     => Profile(Set.empty, requiresFullScan = true)
+        case Op.RejectEncrypted      => Profile(Set.empty, requiresFullScan = false)
 
   /** Derive the stream-consumption profile from the public plan structure. */
   def profile(plan: Plan): Profile = plan.analyze(profileAnalysis)
@@ -274,6 +304,9 @@ object PdfInspection:
    */
   val fontInventory: Plan = observed(Op.InventoryFonts)
 
+  /** Detect a catalog `/AcroForm` or a form dictionary with `/Fields`. */
+  val acroForm: Plan = observed(Op.ObserveAcroForm)
+
   /**
    * Reject on the first JavaScript action or payload. The successful path reads
    * the complete input, since no earlier point can prove JavaScript is absent.
@@ -282,13 +315,20 @@ object PdfInspection:
     Plan.single(Op.RejectJavaScript)
 
   /**
+   * Reject on the first trailer `/Encrypt` entry. Write workflows use this
+   * because the library does not decrypt.
+   */
+  val forbidEncrypted: Plan =
+    Plan.single(Op.RejectEncrypted)
+
+  /**
    * A complete document profile expressed entirely as ordinary plan
    * composition. Consumers can remove or replace any component without
    * entering a second, special-case inspection API.
    */
   val documentProfile: Plan =
-    linearized >>> pdfA >>> thumbnail >>> encryption >>> fontInventory >>> imageCount >>> attachmentCount >>>
-      tableCandidates >>> forbidJavaScript
+    linearized >>> pdfA >>> thumbnail >>> encryption >>> acroForm >>> fontInventory >>> imageCount >>>
+      attachmentCount >>> tableCandidates >>> forbidJavaScript
 
   /** Run a composed plan over an already-decoded PDF element stream. */
   def run[R, E](source: ZStream[R, E, Element], plan: Plan): ZIO[R, E, Outcome] =
@@ -329,11 +369,17 @@ object PdfInspection:
         case Op.CountAttachments     => current = current.addAttachment(element)
         case Op.CountTableCandidates => current = current.addTableCandidate(element)
         case Op.ObserveJavaScript    => current = current.rememberJavaScript(javaScriptOf(element))
+        case Op.ObserveAcroForm      => current = current.rememberAcroForm(acroFormOf(element))
         case Op.InventoryFonts       => current = current.addFont(fontOf(element))
         case Op.RejectJavaScript =>
           javaScriptOf(element).foreach { found =>
             current = current.rememberJavaScript(Some(found))
             failure = Some(Violation.JavaScript(found))
+          }
+        case Op.RejectEncrypted =>
+          encryptionOf(element).foreach { found =>
+            current = current.rememberEncryption(Some(found))
+            failure = Some(Violation.Encrypted(found))
           }
     (current, failure)
 
@@ -451,6 +497,31 @@ object PdfInspection:
 
   private def nameAt(data: Prim, key: String): Option[String] =
     Prim.tryDict(key)(data).collect { case Prim.Name(value) => value }
+
+  private def acroFormOf(element: Element): Option[AcroForm] =
+    objectOf(element).flatMap { obj =>
+      obj.data match
+        case Prim.tpe("Catalog", data) if data.data.contains("AcroForm") =>
+          val form = data.data.get("AcroForm")
+          val fieldCount = form match
+            case Some(Prim.Dict(values)) =>
+              values.get("Fields") match
+                case Some(Prim.Array(fields)) => fields.length
+                case _                        => 0
+            case _ => 0
+          val need = form match
+            case Some(Prim.Dict(values)) => values.get("NeedAppearances").contains(Prim.Bool(true))
+            case _                       => false
+          Some(AcroForm(obj.index.number, fieldCount, need))
+        case dict: Prim.Dict if dict.data.contains("Fields") && !dict.data.get("Type").contains(Prim.Name("Page")) =>
+          val fieldCount = dict.data.get("Fields") match
+            case Some(Prim.Array(fields)) => fields.length
+            case _                        => 0
+          val need = dict.data.get("NeedAppearances").contains(Prim.Bool(true))
+          Some(AcroForm(obj.index.number, fieldCount, need))
+        case _ =>
+          None
+    }
 
   private def javaScriptOf(element: Element): Option[JavaScript] =
     objectOf(element).collect {

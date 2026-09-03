@@ -14,6 +14,9 @@ declare module "zio-pdf-demo" {
     encrypted: boolean;
     encryptionObject?: number;
     javaScriptObject?: number;
+    acroFormObject?: number;
+    acroFormFields: number;
+    acroFormNeedAppearances: boolean;
     fonts: FontResource[];
   }
 
@@ -85,7 +88,15 @@ declare module "zio-pdf-demo" {
     maxMaterializedBytes: number;
   }
 
-export const ZioPdfDemo: {
+  export interface WorkflowExecution {
+    kind: "linearize" | "merge" | "append" | "flatten";
+    chunks: Uint8Array[];
+    outputBytes: number;
+    maxMaterializedBytes: number;
+    firstPagePrefixBytes?: number;
+  }
+
+  export const ZioPdfDemo: {
   analyze(input: Uint8Array): Promise<Analysis>;
   analyzeBlob(input: Blob): Promise<Analysis>;
   analyzeBlobWithProgress(
@@ -107,5 +118,15 @@ export const ZioPdfDemo: {
     tokenize: boolean,
     tokenizer: "characters" | "words"
   ): Promise<TransformExecution>;
+  linearizeBlob(input: Blob): Promise<WorkflowExecution>;
+  mergeBlobs(primary: Blob, secondary: Blob): Promise<WorkflowExecution>;
+  appendRevisionBlob(input: Blob): Promise<WorkflowExecution>;
+  flattenFormsBlob(input: Blob): Promise<WorkflowExecution>;
+  attachFirstPageThumbnail(
+    input: Uint8Array,
+    grayPixels: Uint8Array | undefined,
+    width: number,
+    height: number
+  ): Promise<Uint8Array>;
 };
 }

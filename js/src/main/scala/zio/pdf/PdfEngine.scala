@@ -425,3 +425,41 @@ object PdfEngine:
     opts: Options
   ): ZIO[R & PdfEngine, Throwable, Validation[CompareError, Unit]] =
     ComparePdfs.fromDecoded(decode(old, opts), decode(updated, opts))
+
+  def write(parts: ZStream[Any, Throwable, Part[Trailer]]): ZStream[Any, Throwable, Byte] =
+    parts.via(WritePdf.parts).mapConcatChunk(chunk => Chunk.fromArray(chunk.toArray))
+
+  def write(parts: Chunk[Part[Trailer]]): ZStream[Any, Throwable, Byte] =
+    write(ZStream.fromChunk(parts))
+
+  def writeBytes(parts: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
+    write(parts).runCollect
+
+  def mergeBytes(
+    sources: NonEmptyChunk[Chunk[Byte]],
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfMerge.fromBytes(sources, opts)
+
+  def appendRevision(base: Chunk[Byte], revision: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfAppend.append(base, revision)
+
+  def linearize(trailerData: Prim.Dict, parts: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfLinearize.bytes(trailerData, parts)
+
+  def linearize(bytes: Chunk[Byte]): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfLinearize.fromBytes(bytes)
+
+  def withThumbnailsBytes(
+    bytes: Chunk[Byte],
+    options: PdfThumbnail.Options = PdfThumbnail.Options()
+  ): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfThumbnail.enrichBytes(bytes, options)
+
+  def graftObjects(donor: Chunk[Byte], objectNumbers: Set[Long]): ZIO[Any, Throwable, Chunk[Part.Preencoded]] =
+    PdfGraft.graft(donor, objectNumbers)
+
+  def flattenForms(bytes: Chunk[Byte], opts: Options = Options.default): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    decode(bytes, opts).flatMap { decoded =>
+      ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *> PdfAcroForm.flatten(decoded)
+    }

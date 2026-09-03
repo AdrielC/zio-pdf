@@ -14,11 +14,11 @@ That distinction makes the raw path suitable for very large uploads while keepin
 
 ## Project status
 
-Release `0.2.0-RC8` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
+Release `0.2.0` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
 
 ```scala
-libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.0-RC8" // JVM
-libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.0-RC8" // Scala.js
+libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.0" // JVM
+libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.0" // Scala.js
 ```
 
 Only the JVM and Scala.js `zio-pdf` artifacts are publishable. Examples, benchmarks, the browser application, and the Kyo comparison module are build-only projects.
@@ -136,9 +136,18 @@ Cross-reference offsets are generated in physical output order. Tests compare ev
 
 ## Production PDF workflows
 
-`PdfEngine` exposes cross-platform write paths for filings and web delivery. Merge and path-based APIs are JVM-only; append, linearize, and thumbnail enrichment work on any platform that can hold the input bytes.
+`PdfEngine` exposes cross-platform write paths for filings and web delivery. Path-based `merge` is JVM-only; `mergeBytes`, append, linearize, thumbnail enrichment, and structural form flatten work on any platform that can hold the input bytes. Encrypted PDFs are detected and rejected before rewrite.
 
-Merge two filings in path order:
+Merge two filings from owned bytes (JVM or Scala.js):
+
+```scala
+val merged =
+  PdfEngine
+    .mergeBytes(NonEmptyChunk(leftBytes, rightBytes))
+    .provide(PdfEngine.live)
+```
+
+Merge two filings in path order (JVM):
 
 ```scala
 import java.nio.file.Path
@@ -160,6 +169,13 @@ val revision = Chunk(
 )
 
 val updated = PdfAppend.append(existingBytes, revision)
+```
+
+Inventory or structurally flatten AcroForm widgets (appearances are not baked into content streams):
+
+```scala
+val inventory = PdfAcroForm.extract(decoded)
+val flattened = PdfEngine.flattenForms(existingBytes)
 ```
 
 Linearize for fast first-page web display while preserving top-level object bytes:

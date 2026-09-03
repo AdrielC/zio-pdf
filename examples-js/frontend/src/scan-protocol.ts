@@ -1,4 +1,4 @@
-import type { Analysis, TransformExecution } from "zio-pdf-demo";
+import type { Analysis, TransformExecution, WorkflowExecution } from "zio-pdf-demo";
 
 export type ScanWorkerRequest =
   | {
@@ -15,6 +15,27 @@ export type ScanWorkerRequest =
       readonly targetFont: string;
       readonly tokenize: boolean;
       readonly tokenizer: "characters" | "words";
+    }
+  | {
+      readonly kind: "linearize";
+      readonly id: number;
+      readonly file: File;
+    }
+  | {
+      readonly kind: "merge";
+      readonly id: number;
+      readonly file: File;
+      readonly secondary: File;
+    }
+  | {
+      readonly kind: "append";
+      readonly id: number;
+      readonly file: File;
+    }
+  | {
+      readonly kind: "flatten";
+      readonly id: number;
+      readonly file: File;
     };
 
 export type ScanWorkerMessage =
@@ -34,6 +55,11 @@ export type ScanWorkerMessage =
       readonly kind: "transform-complete";
       readonly id: number;
       readonly execution: TransformExecution;
+    }
+  | {
+      readonly kind: "workflow-complete";
+      readonly id: number;
+      readonly execution: WorkflowExecution;
     }
   | {
       readonly kind: "error";

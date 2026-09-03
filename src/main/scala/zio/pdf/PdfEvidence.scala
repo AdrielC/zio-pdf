@@ -305,6 +305,7 @@ object PdfEvidence:
         field("thumbnail", report.thumbnail.fold("null")(thumbnailJson)) + "," +
         field("encryption", report.encryption.fold("null")(encryptionJson)) + "," +
         field("javaScript", report.javaScript.fold("null")(value => number(value.objectNumber))) + "," +
+        field("acroForm", report.acroForm.fold("null")(acroFormJson)) + "," +
         field("fonts", array(report.fonts.iterator.map(fontJson))) + "," +
         field("imageCount", report.imageCount.toString) + "," +
         field("attachmentCount", report.attachmentCount.toString) + "," +
@@ -328,6 +329,13 @@ object PdfEvidence:
     private def encryptionJson(value: PdfInspection.Encryption): String =
       s"{" + field("objectNumber", value.reference.fold("null")(ref => number(ref.number))) + "}"
 
+    private def acroFormJson(value: PdfInspection.AcroForm): String =
+      s"{" +
+        field("objectNumber", number(value.objectNumber)) + "," +
+        field("fieldCount", value.fieldCount.toString) + "," +
+        field("needAppearances", value.needAppearances.toString) +
+        "}"
+
     private def fontJson(value: PdfInspection.Font): String =
       s"{" +
         field("objectNumber", number(value.objectNumber)) + "," +
@@ -340,6 +348,11 @@ object PdfEvidence:
       value match
         case PdfInspection.Violation.JavaScript(found) =>
           s"{" + field("kind", quote("JavaScript")) + "," + field("objectNumber", number(found.objectNumber)) + "}"
+        case PdfInspection.Violation.Encrypted(found) =>
+          s"{" +
+            field("kind", quote("Encrypted")) + "," +
+            field("objectNumber", found.reference.fold("null")(ref => number(ref.number))) +
+            "}"
 
     private def textJson(value: NativeText, digest: Chunk[Byte]): String =
       s"{" +

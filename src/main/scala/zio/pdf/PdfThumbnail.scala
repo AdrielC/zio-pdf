@@ -78,6 +78,7 @@ object PdfThumbnail {
   def appendFirstPage(bytes: Chunk[Byte], options: Options = Options()): ZIO[Any, Throwable, Chunk[Byte]] =
     for {
       decoded <- ZStream.fromChunk(bytes).via(PdfStream.decode()).runCollect
+      _       <- ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded))
       trailer <- ZIO.fromOption(PdfAppend.latestTrailer(decoded)).orElseFail(PdfAppend.NoTrailer)
       pageNumber <- ZIO.fromOption(TextExtract.orderedPageObjectNumbers(decoded).headOption)
                       .orElseFail(new RuntimeException("thumbnail append: no pages found"))

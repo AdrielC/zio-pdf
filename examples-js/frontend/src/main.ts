@@ -24,7 +24,7 @@ import {
   X,
   createIcons
 } from "lucide";
-import type { Analysis, Citation, FontResource, TextRecoveryRequest, TransformExecution, TransformPlan } from "zio-pdf-demo";
+import type { Analysis, Citation, FontResource, TextRecoveryRequest, TransformExecution, TransformPlan, WorkflowExecution } from "zio-pdf-demo";
 import type { ScanWorkerMessage } from "./scan-protocol";
 import "./styles.css";
 
@@ -99,6 +99,16 @@ const swapFontsButton = document.querySelector<HTMLButtonElement>("#swap-fonts")
 const runTransformButton = document.querySelector<HTMLButtonElement>("#run-transform")!;
 const transformDownload = document.querySelector<HTMLAnchorElement>("#transform-download")!;
 const transformStatus = document.querySelector<HTMLElement>("#transform-status")!;
+const workflowPlan = document.querySelector<HTMLElement>("#workflow-plan")!;
+const workflowBadge = document.querySelector<HTMLElement>("#workflow-badge")!;
+const workflowCopy = document.querySelector<HTMLElement>("#workflow-copy")!;
+const workflowStatus = document.querySelector<HTMLElement>("#workflow-status")!;
+const workflowDownload = document.querySelector<HTMLAnchorElement>("#workflow-download")!;
+const runLinearizeButton = document.querySelector<HTMLButtonElement>("#run-linearize")!;
+const runAppendButton = document.querySelector<HTMLButtonElement>("#run-append")!;
+const runFlattenButton = document.querySelector<HTMLButtonElement>("#run-flatten")!;
+const runMergeButton = document.querySelector<HTMLButtonElement>("#run-merge")!;
+const mergeFileInput = document.querySelector<HTMLInputElement>("#merge-file")!;
 const mappingRoute = document.querySelector<HTMLElement>("#mapping-route")!;
 const mappingRouteCopy = document.querySelector<HTMLElement>("#mapping-route-copy")!;
 const mappingRouteState = document.querySelector<HTMLElement>("#mapping-route-state")!;
@@ -142,6 +152,12 @@ let citations: Citation[] = [];
 let textRecoveryRequests: TextRecoveryRequest[] = [];
 let citationOpen = false;
 let transformDownloadUrl = "";
+let workflowDownloadUrl = "";
+let lastInspectionEncrypted = false;
+let lastInspectionHasForm = false;
+let workflowGeneration = 0;
+let activeWorkflowWorker: Worker | undefined;
+let activeWorkflowCancel: (() => void) | undefined;
 
 const PREVIEW_RANGE_BYTES = 256 * 1024;
 const MAX_PREVIEW_RANGE_BYTES = 1024 * 1024;
@@ -496,6 +512,129 @@ function clearTransformDownload(): void {
   transformDownload.removeAttribute("href");
 }
 
+function clearWorkflowDownload(): void {
+  if (workflowDownloadUrl) URL.revokeObjectURL(workflowDownloadUrl);
+  workflowDownloadUrl = "";
+  workflowDownload.hidden = true;
+  workflowDownload.removeAttribute("href");
+}
+
+function stopActiveWorkflow(): boolean {
+  const wasRunning = activeWorkflowWorker !== undefined;
+  workflowGeneration += 1;
+  if (activeWorkflowCancel) activeWorkflowCancel();
+  else activeWorkflowWorker?.terminate();
+  activeWorkflowCancel = undefined;
+  activeWorkflowWorker = undefined;
+  return wasRunning;
+}
+
+function syncWorkflowControls(): void {
+  const ready = selectedFile !== undefined && !lastInspectionEncrypted;
+  runLinearizeButton.disabled = !ready;
+  runAppendButton.disabled = !ready;
+  runFlattenButton.disabled = !ready || !lastInspectionHasForm;
+  runMergeButton.disabled = !ready || mergeFileInput.files?.[0] === undefined;
+  workflowBadge.textContent = lastInspectionEncrypted ? "Encrypted" : ready ? "Ready" : "Run inspection";
+  workflowCopy.textContent = lastInspectionEncrypted
+    ? "This filing is encrypted. zio-pdf will not rewrite it."
+    : "Encrypted PDFs are rejected before rewrite. Form flatten is structural only.";
+}
+
+function workflowInWorker(
+  kind: "linearize" | "append" | "flatten" | "merge",
+  file: File,
+  id: number,
+  secondary?: File
+): Promise<WorkflowExecution> {
+  const worker = new Worker(new URL("./scan.worker.ts", import.meta.url), {
+    type: "module",
+    name: "zio-pdf-workflow"
+  });
+  activeWorkflowWorker = worker;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (): void => {
+      if (activeWorkflowWorker === worker) activeWorkflowWorker = undefined;
+      if (activeWorkflowCancel === cancel) activeWorkflowCancel = undefined;
+      worker.terminate();
+    };
+    const cancel = (): void => {
+      if (settled) return;
+      settled = true;
+      finish();
+      reject(new DOMException("PDF workflow cancelled", "AbortError"));
+    };
+    activeWorkflowCancel = cancel;
+
+    worker.onmessage = (event: MessageEvent<ScanWorkerMessage>) => {
+      const message = event.data;
+      if (message.id !== id || id !== workflowGeneration) return;
+      if (message.kind === "workflow-complete") {
+        settled = true;
+        finish();
+        resolve(message.execution);
+      } else if (message.kind === "error") {
+        settled = true;
+        finish();
+        reject(new Error(message.message));
+      }
+    };
+    worker.onerror = (event) => {
+      settled = true;
+      finish();
+      reject(new Error(event.message || "The PDF workflow worker could not start."));
+    };
+
+    if (kind === "merge" && secondary) worker.postMessage({ kind, id, file, secondary });
+    else if (kind !== "merge") worker.postMessage({ kind, id, file });
+    else reject(new Error("Choose a second PDF to merge."));
+  });
+}
+
+async function executeWorkflow(kind: "linearize" | "append" | "flatten" | "merge"): Promise<void> {
+  if (!selectedFile) return;
+  if (activeWorkflowWorker) {
+    stopActiveWorkflow();
+    workflowStatus.textContent = "Workflow cancelled.";
+    syncWorkflowControls();
+    return;
+  }
+
+  const file = selectedFile;
+  const generation = ++workflowGeneration;
+  const secondary = mergeFileInput.files?.[0];
+  clearWorkflowDownload();
+  workflowPlan.dataset.state = "running";
+  workflowBadge.textContent = "Running";
+  workflowStatus.textContent = `Running ${kind} in a worker…`;
+
+  try {
+    const execution = await workflowInWorker(kind, file, generation, secondary);
+    if (generation !== workflowGeneration) return;
+    const blob = new Blob(execution.chunks.map((chunk) => chunk.buffer as ArrayBuffer), { type: "application/pdf" });
+    workflowDownloadUrl = URL.createObjectURL(blob);
+    workflowDownload.href = workflowDownloadUrl;
+    workflowDownload.download = `${file.name.replace(/\.pdf$/i, "") || "document"}.${kind}.pdf`;
+    workflowDownload.hidden = false;
+    workflowPlan.dataset.state = "complete";
+    workflowBadge.textContent = "Complete";
+    const prefix = execution.firstPagePrefixBytes === undefined
+      ? ""
+      : ` First-page prefix ${execution.firstPagePrefixBytes.toLocaleString()} bytes.`;
+    workflowStatus.textContent = `${kind} wrote ${execution.outputBytes.toLocaleString()} bytes.${prefix}`;
+  } catch (error) {
+    if (generation !== workflowGeneration) return;
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    workflowPlan.dataset.state = "error";
+    workflowBadge.textContent = "Error";
+    workflowStatus.textContent = error instanceof Error ? error.message : "The workflow could not run.";
+  } finally {
+    if (generation === workflowGeneration) syncWorkflowControls();
+  }
+}
+
 function stopActiveTransform(): boolean {
   const wasRunning = activeTransformWorker !== undefined;
   transformGeneration += 1;
@@ -607,6 +746,19 @@ function resetReport(): void {
   emptyStateCopy.textContent = "No inspection results.";
   transformPlan.hidden = true;
   transformPlan.removeAttribute("open");
+  lastInspectionEncrypted = false;
+  lastInspectionHasForm = false;
+  stopActiveWorkflow();
+  workflowPlan.hidden = true;
+  workflowPlan.removeAttribute("open");
+  workflowBadge.textContent = "Run inspection";
+  workflowStatus.textContent = "Run inspection to enable write workflows.";
+  workflowCopy.textContent = "Encrypted PDFs are rejected before rewrite. Form flatten is structural only.";
+  clearWorkflowDownload();
+  mergeFileInput.value = "";
+  [runLinearizeButton, runAppendButton, runFlattenButton, runMergeButton].forEach((button) => {
+    button.disabled = true;
+  });
   planSourceFont.replaceChildren(new Option("Run inspection first", ""));
   planTargetFont.replaceChildren(new Option("Run inspection first", ""));
   planSourceFont.disabled = true;
@@ -650,6 +802,7 @@ function selectFile(file: File | undefined): void {
   resetButton.disabled = false;
   emptyStateCopy.textContent = "Run Evidence Scan.";
   transformPlan.hidden = false;
+  workflowPlan.hidden = false;
   dropZone.dataset.selected = "true";
   dropTitle.textContent = "Replace PDF";
   dropCopy.textContent = "choose another file";
@@ -730,7 +883,7 @@ function syncPlanControls(): void {
       && source.resource.baseFont !== target.resource.baseFont
   );
   const hasOperation = remapEnabled || tokenizeEnabled;
-  runTransformButton.disabled = running ? false : !selectedFile || !hasOperation || !remapReady;
+  runTransformButton.disabled = running ? false : lastInspectionEncrypted || !selectedFile || !hasOperation || !remapReady;
 
   if (activeTransformWorker) return;
   const pipelineState = transformPlan.dataset.state;
@@ -1120,7 +1273,12 @@ function renderAnalysis(analysis: Analysis): void {
   setText("#digest-result", `SHA-256 ${analysis.sha256.slice(0, 12)}…`);
 
   renderFontInventory(inspection.fonts);
+  lastInspectionEncrypted = inspection.encrypted;
+  lastInspectionHasForm = inspection.acroFormObject !== undefined || inspection.acroFormFields > 0;
   transformPlan.setAttribute("open", "");
+  workflowPlan.setAttribute("open", "");
+  workflowPlan.dataset.state = lastInspectionEncrypted ? "error" : "ready";
+  syncWorkflowControls();
   void compileTransformPlan();
   citations = content.citations.filter((citation) => citation.excerpt.length > 0);
   textRecoveryRequests = content.textRecoveryRequests;
@@ -1154,6 +1312,16 @@ function renderAnalysis(analysis: Analysis): void {
     inspection.thumbnailPageObject === undefined ? "No embedded thumb" : `Page object #${inspection.thumbnailPageObject}`,
     inspection.thumbnailPageObject === undefined ? "The visual panel is the rendered preview" : `Image object #${inspection.thumbnailImageObject ?? "?"}`,
     inspection.thumbnailPageObject === undefined ? "neutral" : "positive"
+  );
+  addObservation(
+    "AcroForm",
+    inspection.acroFormObject === undefined && inspection.acroFormFields === 0
+      ? "No form dictionary"
+      : `${inspection.acroFormFields} field${inspection.acroFormFields === 1 ? "" : "s"}`,
+    inspection.acroFormObject === undefined
+      ? "No catalog /AcroForm"
+      : `Form object #${inspection.acroFormObject}${inspection.acroFormNeedAppearances ? " · NeedAppearances" : ""}`,
+    inspection.acroFormFields > 0 ? "review" : "neutral"
   );
   addObservation(
     "Encryption",
@@ -1363,6 +1531,12 @@ window.addEventListener("resize", () => {
 window.addEventListener("beforeunload", clearTransformDownload);
 window.addEventListener("beforeunload", () => previewWorker?.terminate());
 runTransformButton.addEventListener("click", () => void executeTransform());
+runLinearizeButton.addEventListener("click", () => void executeWorkflow("linearize"));
+runAppendButton.addEventListener("click", () => void executeWorkflow("append"));
+runFlattenButton.addEventListener("click", () => void executeWorkflow("flatten"));
+runMergeButton.addEventListener("click", () => void executeWorkflow("merge"));
+mergeFileInput.addEventListener("change", () => syncWorkflowControls());
+window.addEventListener("beforeunload", clearWorkflowDownload);
 [planRemap, planTokenize].forEach((control) => control.addEventListener("change", () => {
   clearTransformDownload();
   renderMappingRoute();

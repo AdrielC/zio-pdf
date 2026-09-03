@@ -16,6 +16,32 @@ object PdfMerge {
 
   final case class NoPages(sourceIndex: Int) extends Error(s"source $sourceIndex has no pages")
 
+  /**
+   * Merge caller-owned PDF bytes. Each source is decoded under
+   * [[PdfEngine.Options.maxMaterializedDocumentBytes]] and rejected if encrypted.
+   */
+  def fromBytes(
+    sources: NonEmptyChunk[Chunk[Byte]],
+    opts: PdfEngine.Options = PdfEngine.Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] = {
+    val total = sources.foldLeft(0L)((sum, source) => sum + source.size.toLong)
+    if total > opts.maxMaterializedDocumentBytes.toLong then
+      ZIO.fail(PdfEngine.MaterializedDocumentLimitExceeded(opts.maxMaterializedDocumentBytes, total))
+    else
+      ZIO
+        .foreach(sources) { source =>
+          PdfEngine.decode(source, opts).tap { decoded =>
+            ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded))
+          }
+        }
+        .flatMap { decoded =>
+          decoded.toList match {
+            case head :: tail => bytes(NonEmptyChunk(head, tail*))
+            case Nil          => ZIO.fail(new IllegalArgumentException("merge requires at least one source"))
+          }
+        }
+  }
+
   /** Merge decoded documents; pages appear in source order. */
   def parts(sources: NonEmptyChunk[Chunk[Decoded]]): Either[Error, Chunk[Part[Trailer]]] =
     mergeSources(sources).map { case (objects, trailer) =>

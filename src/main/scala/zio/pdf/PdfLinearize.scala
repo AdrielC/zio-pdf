@@ -56,6 +56,7 @@ object PdfLinearize {
     for {
       raw         <- ZIO.fromEither(PdfGraft.rawObjectParts(bytes.toArray).left.map(new RuntimeException(_)))
       decoded     <- ZStream.fromChunk(bytes).via(PdfStream.decode()).runCollect
+      _           <- ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded))
       trailerData <- ZIO.fromEither(trailerDataFromDecoded(decoded).toRight(new RuntimeException("missing trailer")))
       rootNumber  <- ZIO.fromEither(rootObjectNumber(trailerData).toRight(new RuntimeException("missing /Root")))
       topLevel     = raw.objects.map(_.index.number).toSet

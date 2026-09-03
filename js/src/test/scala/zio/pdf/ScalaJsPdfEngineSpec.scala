@@ -329,6 +329,19 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
           case _ => assertTrue(false)
         }
     },
+    test("Scala.js write helpers linearize and merge caller-owned bytes") {
+      minimalPdfBytes.flatMap { bytes =>
+        for
+          linearized <- PdfEngine.linearize(bytes)
+          merged     <- PdfEngine.mergeBytes(NonEmptyChunk(bytes, bytes)).provide(PdfEngine.live)
+          trailer    <- ZIO.fromEither(PdfAppend.trailerFromTail(bytes))
+        yield assertTrue(
+          linearized.nonEmpty,
+          merged.size > bytes.size,
+          trailer.size.toLong > 0L
+        )
+      }
+    },
     test("browser byte-stream decode is independent of collected-document limits") {
       val limit = ByteLimit.fromBytes(8L).toOption.get
       minimalPdfBytes.flatMap { bytes =>

@@ -8,6 +8,26 @@ const workerScope = self as unknown as {
 
 workerScope.addEventListener("message", (event) => {
   const request = event.data;
+  if (request.kind === "linearize" || request.kind === "append" || request.kind === "flatten" || request.kind === "merge") {
+    const pending =
+      request.kind === "linearize" ? ZioPdfDemo.linearizeBlob(request.file)
+      : request.kind === "append" ? ZioPdfDemo.appendRevisionBlob(request.file)
+      : request.kind === "flatten" ? ZioPdfDemo.flattenFormsBlob(request.file)
+      : ZioPdfDemo.mergeBlobs(request.file, request.secondary);
+    void pending.then(
+      (execution) => workerScope.postMessage(
+        { kind: "workflow-complete", id: request.id, execution },
+        { transfer: execution.chunks.map((chunk) => chunk.buffer) }
+      ),
+      (error: unknown) => workerScope.postMessage({
+        kind: "error",
+        id: request.id,
+        message: error instanceof Error ? error.message : "The PDF workflow worker stopped unexpectedly."
+      })
+    );
+    return;
+  }
+
   if (request.kind === "transform") {
     void ZioPdfDemo.executeTransformBlob(
       request.file,

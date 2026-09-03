@@ -748,10 +748,18 @@ object PdfEngine:
       case head :: tail =>
         ZIO
           .foreach(head :: tail)(path => decode(path, opts))
+          .tap(chunks => ZIO.foreachDiscard(chunks)(decoded => ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded))))
           .flatMap(chunks => PdfMerge.bytes(NonEmptyChunk(chunks.head, chunks.tail*)))
       case Nil =>
         ZIO.fail(new IllegalArgumentException("merge requires at least one path"))
     }
+
+  /** Merge caller-owned PDF bytes in source order. */
+  def mergeBytes(
+    sources: NonEmptyChunk[Chunk[Byte]],
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfMerge.fromBytes(sources, opts)
 
   /** Append a sign/append revision after an existing PDF prefix. */
   def appendRevision(base: Chunk[Byte], revision: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
@@ -780,3 +788,9 @@ object PdfEngine:
   /** Graft byte-identical objects from a donor PDF into preencoded parts. */
   def graftObjects(donor: Chunk[Byte], objectNumbers: Set[Long]): ZIO[Any, Throwable, Chunk[Part.Preencoded]] =
     PdfGraft.graft(donor, objectNumbers)
+
+  /** Structural AcroForm flatten of caller-owned PDF bytes. */
+  def flattenForms(bytes: Chunk[Byte], opts: Options = Options.default): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    decode(bytes, opts).flatMap { decoded =>
+      ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *> PdfAcroForm.flatten(decoded)
+    }

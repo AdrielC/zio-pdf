@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## [0.2.0] — 2026-09-03
+
+### Added
+
+- Browser workbench workflows for linearize, merge, incremental append, and structural AcroForm flatten, with matching Scala.js `PdfEngine` write helpers (`mergeBytes`, `linearize`, `appendRevision`, `flattenForms`).
+- `PdfInspection.forbidEncrypted` and `PdfInspection.acroForm`, plus `PdfAcroForm` inventory/flatten for filing prep.
+- `PdfAppend.trailerFromTail` so conventional incremental updates can read the last trailer without a full decode.
+- `PdfMerge.fromBytes` honors `maxMaterializedDocumentBytes` and rejects encrypted sources before rewrite.
+
+### Changed
+
+- Merge, linearize, append, thumbnail, and transform write paths fail closed on trailer `/Encrypt`. The library still does not decrypt.
+
+### Fixed
+
+- `PdfAppend.previousStartXref` uses a portable byte compare so Scala.js `fullLinkJS` succeeds.
+
 ## [0.2.0-RC8] — 2026-09-03
 
 ### Added

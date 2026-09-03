@@ -9,6 +9,8 @@ package zio.pdf
 
 import java.nio.charset.StandardCharsets
 
+import _root_.scodec.Attempt
+import _root_.scodec.bits.BitVector
 import zio.*
 import zio.stream.ZStream
 
@@ -19,6 +21,29 @@ object PdfAppend {
   case object NoStartXref extends Error("no startxref marker found in PDF bytes")
 
   case object NoTrailer extends Error("decoded PDF has no trailer")
+
+  /**
+   * Parse the last conventional `trailer` dictionary from the trailing 256 KiB
+   * without decoding the rest of the document. Xref-stream files fall back to
+   * a full decode in [[append]].
+   */
+  def trailerFromTail(bytes: Chunk[Byte]): Either[Error, Trailer] = {
+    val arr    = bytes.toArray
+    val needle = "trailer".getBytes(StandardCharsets.US_ASCII)
+    val window = math.min(arr.length, 256 * 1024)
+    val start  = arr.length - window
+    var last   = -1
+    var index  = start
+    while index <= arr.length - needle.length do
+      if bytesEqualAt(arr, index, needle) then last = index
+      index += 1
+    if last < 0 then Left(NoTrailer)
+    else
+      Xref.Codec_Trailer.decode(BitVector(arr.drop(last))) match {
+        case Attempt.Successful(decoded) => Right(decoded.value)
+        case Attempt.Failure(_)          => Left(NoTrailer)
+      }
+  }
 
   /** Locate the last `startxref` offset in a byte buffer (searches the trailing 256 KiB). */
   def previousStartXref(bytes: Chunk[Byte]): Either[Error, Long] = {
@@ -74,15 +99,23 @@ object PdfAppend {
   ): ZIO[Any, Throwable, Chunk[Byte]] =
     for {
       prevXref <- ZIO.fromEither(previousStartXref(base))
-      decoded  <- ZStream.fromChunk(base).via(PdfStream.decode()).runCollect
-      trailer  <- ZIO.fromOption(latestTrailer(decoded)).orElseFail(NoTrailer)
-      startAt  = nextObjectNumber(decoded, trailer)
+      trailer  <- resolveTrailer(base)
+      _        <- ZIO.fromEither(PdfCrypto.requireUnencrypted(trailer))
+      startAt  = trailer.size.toLong
       prepared <- ZIO.attempt(prepareRevision(revision, startAt, preserveNumbers))
       appended <- ZStream
                     .fromChunk(prepared)
                     .via(WritePdf.appendParts(base.size.toLong, WritePdf.AppendContext(prevXref, trailer)))
                     .runFold(Chunk.empty[Byte])((acc, chunk) => acc ++ Chunk.fromArray(chunk.toArray))
     } yield base ++ appended
+
+  private def resolveTrailer(base: Chunk[Byte]): ZIO[Any, Throwable, Trailer] =
+    ZIO.fromEither(trailerFromTail(base)).catchAll { _ =>
+      ZStream.fromChunk(base).via(PdfStream.decode()).runCollect.flatMap { decoded =>
+        ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *>
+          ZIO.fromOption(latestTrailer(decoded)).orElseFail(NoTrailer)
+      }
+    }
 
   private def prepareRevision(
     revision: Chunk[Part[Trailer]],

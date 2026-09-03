@@ -164,6 +164,114 @@ object PdfWorkflowSpec extends ZIOSpecDefault {
         }
       )
     },
+    test("mergeBytes combines two caller-owned PDFs") {
+      for {
+        left   <- singlePagePdf("A")
+        right  <- singlePagePdf("B")
+        merged <- PdfEngine.mergeBytes(NonEmptyChunk(left, right))
+        pages  <- ZStream.fromChunk(merged).via(PdfStream.decode()).runCollect
+      } yield assertTrue(TextExtract.orderedPageObjectNumbers(pages).size == 2)
+    },
+    test("trailerFromTail reads the last conventional trailer without a full decode") {
+      for {
+        base <- singlePagePdf("tail")
+        trailer <- ZIO.fromEither(PdfAppend.trailerFromTail(base))
+      } yield assertTrue(trailer.size == BigDecimal(5), trailer.root.contains(Prim.Ref(1L, 0)))
+    },
+    test("linearize and merge reject encrypted PDFs") {
+      val encryptedParts = singlePageParts("secret").map {
+        case Part.Meta(trailer) =>
+          Part.Meta(
+            Trailer(
+              trailer.size,
+              Prim.Dict(trailer.data.data.updated("Encrypt", Prim.Ref(5L, 0))),
+              trailer.root
+            )
+          )
+        case other => other
+      }
+      for {
+        encrypted <- PdfEngine.writeBytes(encryptedParts)
+        plain     <- singlePagePdf("open")
+        linearized <- PdfEngine.linearize(encrypted).either
+        merged     <- PdfEngine.mergeBytes(NonEmptyChunk(encrypted, plain)).either
+        appended   <- PdfEngine.appendRevision(
+                        encrypted,
+                        Chunk(Part.Meta(Trailer(BigDecimal(6), Prim.dict(), None)))
+                      ).either
+      } yield assertTrue(
+        linearized.isLeft,
+        merged.isLeft,
+        appended.isLeft
+      )
+    },
+    test("flatten removes catalog /AcroForm and widget annotations") {
+      val formParts = Chunk(
+        Part.Obj(IndirectObj.nostream(1L, Prim.dict("Type" -> Prim.Name("Catalog"), "Pages" -> Prim.Ref(2L, 0), "AcroForm" -> Prim.Ref(5L, 0)))),
+        Part.Obj(
+          IndirectObj.nostream(
+            2L,
+            Prim.dict("Type" -> Prim.Name("Pages"), "Kids" -> Prim.Array(Prim.Ref(3L, 0)), "Count" -> Prim.Number(1))
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            3L,
+            Prim.dict(
+              "Type"     -> Prim.Name("Page"),
+              "Parent"   -> Prim.Ref(2L, 0),
+              "MediaBox" -> Prim.Array.nums(0, 0, 612, 792),
+              "Annots"   -> Prim.Array(Prim.Ref(6L, 0))
+            )
+          )
+        ),
+        Part.Obj(IndirectObj.nostream(4L, Prim.dict())),
+        Part.Obj(
+          IndirectObj.nostream(
+            5L,
+            Prim.dict("Fields" -> Prim.Array(Prim.Ref(6L, 0)), "NeedAppearances" -> Prim.Bool(true))
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            6L,
+            Prim.dict("Subtype" -> Prim.Name("Widget"), "T" -> Prim.str("Name"), "FT" -> Prim.Name("Tx"), "V" -> Prim.str("Ada"))
+          )
+        ),
+        Part.Meta(Trailer(BigDecimal(7), Prim.dict("Root" -> Prim.Ref(1L, 0)), Some(Prim.Ref(1L, 0))))
+      )
+      for {
+        source    <- PdfEngine.writeBytes(formParts)
+        decoded   <- PdfEngine.decode(source)
+        inventory  = PdfAcroForm.extract(decoded)
+        flattened <- PdfEngine.flattenForms(source)
+        after     <- PdfEngine.decode(flattened)
+        outcome   <- PdfEngine.inspect(flattened, PdfInspection.acroForm)
+      } yield assertTrue(
+        inventory.fields.nonEmpty,
+        inventory.fields.exists(_.name.contains("Name")),
+        PdfAcroForm.extract(after).catalogObjectNumber.isEmpty,
+        outcome match {
+          case PdfInspection.Outcome.Accepted(report) => report.acroForm.forall(_.fieldCount == 0)
+          case PdfInspection.Outcome.Rejected(report, _) => report.acroForm.forall(_.fieldCount == 0)
+        }
+      )
+    },
+    test("govinfo court order exposes an AcroForm inventory") {
+      val path = java.nio.file.Path.of("src/test/resources/court-corpus/govinfo-district-court-order.pdf")
+      for {
+        source    <- zio.pdf.io.PdfIO.readAll(path)
+        decoded   <- PdfEngine.decode(source)
+        inventory  = PdfAcroForm.extract(decoded)
+        outcome   <- PdfEngine.inspect(source, PdfInspection.acroForm)
+      } yield assertTrue(
+        inventory.fields.nonEmpty || inventory.catalogObjectNumber.nonEmpty || inventory.formObjectNumber.nonEmpty,
+        outcome match {
+          case PdfInspection.Outcome.Accepted(report) => report.acroForm.nonEmpty
+          case PdfInspection.Outcome.Rejected(report, _) => report.acroForm.nonEmpty
+        }
+      )
+    },
     test("Preencoded graft preserves donor object bytes") {
       for {
         donor <- singlePagePdf("graft")

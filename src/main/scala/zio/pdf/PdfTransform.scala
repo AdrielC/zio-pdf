@@ -56,9 +56,11 @@ final class PdfTransform[+A] private[pdf] (
     options: PdfEngine.Options = PdfEngine.Options.default
   ): ZIO[R & PdfEngine, Throwable, Output[A]] =
     PdfEngine.decode(source.via(PdfEngine.materializedInputLimit(options)), options).runCollect.flatMap { decoded =>
-      ZIO.fromEither(Document.fromDecoded(decoded)).flatMap { document =>
-        ZIO.fromEither(PdfTransform.compile(plan, document)).flatMap { case (runtime, rewritten) =>
-          ZIO.fromEither(result.read(runtime)).map(value => Output(value, rewritten.render))
+      ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)).flatMap { _ =>
+        ZIO.fromEither(Document.fromDecoded(decoded)).flatMap { document =>
+          ZIO.fromEither(PdfTransform.compile(plan, document)).flatMap { case (runtime, rewritten) =>
+            ZIO.fromEither(result.read(runtime)).map(value => Output(value, rewritten.render))
+          }
         }
       }
     }

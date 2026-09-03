@@ -209,5 +209,36 @@ object PdfInspectionSpec extends ZIOSpecDefault:
           )
         case _ => assertTrue(false)
       }
+    },
+    test("forbidEncrypted rejects a trailer /Encrypt entry immediately") {
+      PdfInspection.run(ZStream(encryptedTrailer, harmless), PdfInspection.forbidEncrypted).map {
+        case PdfInspection.Outcome.Rejected(report, PdfInspection.Violation.Encrypted(found)) =>
+          assertTrue(
+            found == PdfInspection.Encryption(Some(Prim.Ref(77L, 0))),
+            report.encryption.contains(found),
+            report.elementsRead == 1L,
+            report.completion == PdfInspection.Completion.RejectedEarly
+          )
+        case _ => assertTrue(false)
+      }
+    },
+    test("acroForm observes catalog and field dictionaries") {
+      val catalog = data(
+        20L,
+        Prim.dict("Type" -> Prim.Name("Catalog"), "AcroForm" -> Prim.Ref(21L, 0))
+      )
+      val form = data(
+        21L,
+        Prim.dict("Fields" -> Prim.Array(Prim.Ref(22L, 0)), "NeedAppearances" -> Prim.Bool(true))
+      )
+      PdfInspection.run(ZStream(catalog, form), PdfInspection.acroForm).map {
+        case PdfInspection.Outcome.Accepted(report) =>
+          assertTrue(
+            report.acroForm.exists(_.fieldCount == 1),
+            report.acroForm.exists(_.needAppearances),
+            report.completion == PdfInspection.Completion.EndOfInput
+          )
+        case _ => assertTrue(false)
+      }
     }
   )

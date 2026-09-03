@@ -296,11 +296,106 @@ object ZioPdfDemo:
         .toJSPromise
     }
 
+  @JSExport
+  def linearizeBlob(input: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      PdfEngine.linearize(bytes).map { output =>
+        val prefix = PdfLinearize.firstPageByteLength(output).toOption
+        workflowSummary("linearize", output, prefix)
+      }
+    }
+
+  @JSExport
+  def mergeBlobs(primary: dom.Blob, secondary: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
+    val effect =
+      admitBlob(primary).zip(admitBlob(secondary)).flatMap { (left, right) =>
+        PdfEngine
+          .mergeBytes(NonEmptyChunk(left, right), browserTransformOptions)
+          .flatMap(output => boundedWorkflow("merge", output))
+      }
+    runBrowser(effect)
+
+  @JSExport
+  def appendRevisionBlob(input: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      val revision = Chunk(
+        Part.Obj(IndirectObj.nostream(99L, Prim.dict("Producer" -> Prim.Name("zio-pdf")))),
+        Part.Meta(Trailer(BigDecimal(100), Prim.dict("Info" -> Prim.Ref(99L, 0)), None))
+      )
+      PdfEngine.appendRevision(bytes, revision).map(output => workflowSummary("append", output, None))
+    }
+
+  @JSExport
+  def flattenFormsBlob(input: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      PdfEngine.flattenForms(bytes, browserTransformOptions).map(output => workflowSummary("flatten", output, None))
+    }
+
+  private def admitBlob(input: dom.Blob): Task[Chunk[Byte]] =
+    if input.size > browserTransformLimit.toLong then
+      ZIO.fail(PdfEngine.MaterializedDocumentLimitExceeded(browserTransformLimit, input.size.toLong))
+    else
+      PdfSource.fromBlob(input).bytes.runCollect.flatMap { bytes =>
+        if bytes.size.toLong > browserTransformLimit.toLong then
+          ZIO.fail(PdfEngine.MaterializedDocumentLimitExceeded(browserTransformLimit, bytes.size.toLong))
+        else ZIO.succeed(bytes)
+      }
+
+  private def runWorkflow(input: dom.Blob)(
+    run: Chunk[Byte] => ZIO[PdfEngine, Throwable, js.Dictionary[js.Any]]
+  ): js.Promise[js.Dictionary[js.Any]] =
+    runBrowser(
+      admitBlob(input).flatMap(run).flatMap { summary =>
+        val outputBytes = summary.get("outputBytes").fold(0L)(_.asInstanceOf[Double].toLong)
+        if outputBytes > browserTransformLimit.toLong then
+          ZIO.fail(PdfEngine.MaterializedDocumentLimitExceeded(browserTransformLimit, outputBytes))
+        else ZIO.succeed(summary)
+      }
+    )
+
+  private def workflowSummary(
+    kind: String,
+    output: Chunk[Byte],
+    firstPagePrefix: Option[Long]
+  ): js.Dictionary[js.Any] =
+    val chunks = output
+      .grouped(outputChunkBytes)
+      .map(chunk => JsBinary.uint8(chunk, 0, chunk.length))
+      .toSeq
+      .toJSArray
+    val summary = js.Dictionary[js.Any](
+      "kind" -> kind,
+      "chunks" -> chunks,
+      "outputBytes" -> output.size.toDouble,
+      "maxMaterializedBytes" -> browserTransformLimit.bytes.toDouble
+    )
+    firstPagePrefix.foreach(value => summary("firstPagePrefixBytes") = value.toDouble)
+    summary
+
+  private def boundedWorkflow(kind: String, output: Chunk[Byte]): Task[js.Dictionary[js.Any]] =
+    if output.size.toLong > browserTransformLimit.toLong then
+      ZIO.fail(PdfEngine.MaterializedDocumentLimitExceeded(browserTransformLimit, output.size.toLong))
+    else ZIO.succeed(workflowSummary(kind, output, None))
+
+  private def runBrowser(effect: ZIO[PdfEngine, Throwable, js.Dictionary[js.Any]]): js.Promise[js.Dictionary[js.Any]] =
+    val browserEffect = effect.mapError(browserTransformError)
+    Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .runToFuture(browserEffect.provide(PdfEngine.live))
+        .toJSPromise
+    }
+
   private def inspectionJson(outcome: PdfInspection.Outcome): js.Dictionary[js.Any] =
     val (report, status, violation) = outcome match
       case PdfInspection.Outcome.Accepted(value) => (value, "accepted", js.undefined)
       case PdfInspection.Outcome.Rejected(value, PdfInspection.Violation.JavaScript(found)) =>
         (value, "rejected", s"JavaScript in object ${found.objectNumber}")
+      case PdfInspection.Outcome.Rejected(value, PdfInspection.Violation.Encrypted(found)) =>
+        (
+          value,
+          "rejected",
+          found.reference.fold("encrypted trailer")(ref => s"encrypted object ${ref.number}")
+        )
 
     js.Dictionary(
       "status" -> status,
@@ -317,6 +412,9 @@ object ZioPdfDemo:
       "encrypted" -> report.encryption.nonEmpty,
       "encryptionObject" -> report.encryption.flatMap(_.reference).fold[js.Any](js.undefined)(_.number.toDouble),
       "javaScriptObject" -> report.javaScript.fold[js.Any](js.undefined)(_.objectNumber.toDouble),
+      "acroFormObject" -> report.acroForm.fold[js.Any](js.undefined)(_.objectNumber.toDouble),
+      "acroFormFields" -> report.acroForm.fold(0d)(_.fieldCount.toDouble),
+      "acroFormNeedAppearances" -> report.acroForm.exists(_.needAppearances),
       "fonts" -> report.fonts.map { font =>
         js.Dictionary(
           "objectNumber" -> font.objectNumber.toDouble,
