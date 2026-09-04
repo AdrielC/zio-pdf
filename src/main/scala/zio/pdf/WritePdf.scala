@@ -81,13 +81,13 @@ object WritePdf {
           val obj = Obj(index, Prim.Dict(dictionary.updated("Length", Prim.Number(BigDecimal(length)))))
           Codecs.encodeBytes(obj)(using IndirectObj.preStream) match
             case _root_.scodec.Attempt.Successful(headerBytes) =>
-              Right(headerBytes ++ ByteVector("stream\n".getBytes))
+              Right(headerBytes ++ ascii"stream\n")
             case _root_.scodec.Attempt.Failure(c) =>
               Left(StreamHeaderEncodingFailed(index.number, c.messageWithContext))
         case _ => Left(StreamDictionaryRequired(index.number))
 
   private val streamTrailer: ByteVector =
-    ByteVector("\nendstream\nendobj\n".getBytes)
+    ascii"\nendstream\nendobj\n"
 
   private[pdf] def streamTrailerBytes: ByteVector = streamTrailer
 

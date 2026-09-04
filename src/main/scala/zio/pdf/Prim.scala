@@ -294,8 +294,8 @@ private[pdf] trait PrimCodec {
       .xmap({ case (n, g) => Prim.Ref(n, g) }, r => (r.number, r.generation))
 
   private val encodeBool: Encoder[Prim.Bool] = Encoder {
-    case Prim.Bool(true)  => Attempt.successful(BitVector("true".getBytes))
-    case Prim.Bool(false) => Attempt.successful(BitVector("false".getBytes))
+    case Prim.Bool(true)  => Attempt.successful(ascii"true".bits)
+    case Prim.Bool(false) => Attempt.successful(ascii"false".bits)
   }
 
   private val decodeBool: Decoder[Prim.Bool] =

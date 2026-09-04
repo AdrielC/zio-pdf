@@ -91,7 +91,7 @@ private[pdf] object Content {
         }
     }
 
-  val endstream: ByteVector = ByteVector("endstream".getBytes)
+  val endstream: ByteVector = ascii"endstream"
 
   def endstreamIndex(bytes: ByteVector): Attempt[Long] =
     bytes.indexOfSlice(endstream) match {

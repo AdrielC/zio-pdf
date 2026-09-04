@@ -29,7 +29,7 @@ object PdfAppend {
    */
   def trailerFromTail(bytes: Chunk[Byte]): Either[Error, Trailer] = {
     val arr    = bytes.toArray
-    val needle = "trailer".getBytes(StandardCharsets.US_ASCII)
+    val needle = asciiBytes"trailer"
     val window = math.min(arr.length, 256 * 1024)
     val start  = arr.length - window
     var last   = -1
@@ -48,7 +48,7 @@ object PdfAppend {
   /** Locate the last `startxref` offset in a byte buffer (searches the trailing 256 KiB). */
   def previousStartXref(bytes: Chunk[Byte]): Either[Error, Long] = {
     val arr    = bytes.toArray
-    val needle = "startxref".getBytes(StandardCharsets.US_ASCII)
+    val needle = asciiBytes"startxref"
     val window = math.min(arr.length, 256 * 1024)
     val start  = arr.length - window
     var last   = -1

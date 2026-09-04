@@ -528,7 +528,7 @@ object PdfInspection:
       case obj if containsJavaScript(obj.data) => JavaScript(obj.index.number)
     }
 
-  private val pdfAIdentifier = ByteVector("pdfaid:part".getBytes(StandardCharsets.US_ASCII))
+  private val pdfAIdentifier = ascii"pdfaid:part"
 
   private def containsPdfAIdentifier(bits: BitVector): Boolean =
     bits.bytes.indexOfSlice(pdfAIdentifier) >= 0L

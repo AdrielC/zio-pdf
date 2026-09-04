@@ -143,7 +143,7 @@ private[pdf] object StructuralIndex {
   }
 
   private def allXrefs(bytes: Array[Byte]): Option[Chunk[IndexedXref]] = {
-    val markers = allIndicesOf(bytes, "startxref".getBytes("US-ASCII"))
+    val markers = allIndicesOf(bytes, asciiBytes"startxref")
     val result  = scala.collection.mutable.Map.empty[Int, IndexedXref]
     val it      = markers.iterator
 
