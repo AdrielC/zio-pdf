@@ -109,6 +109,7 @@ Use the API that matches the ownership model:
 
 | Input and result | API | Memory behavior |
 | --- | --- | --- |
+| owned bytes, object boundaries | `PdfObjectScanner.scan(chunk)` | one carry-bounded window, no Reader copy |
 | Blocks `Reader[Byte]` / `Sink`, object boundaries | `PdfObjectScanner.scan` / `sink` | tight `readBytes` pull, no per-item ZIO |
 | ZStream of boundary windows | `PdfObjectScanner.streamWindows` | one stream step per pulled window |
 | arbitrary upload, object boundaries | `PdfObjectScanner.step` | bounded carry, no payload collection |

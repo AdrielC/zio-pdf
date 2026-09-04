@@ -8,6 +8,7 @@ All notable changes to this project are documented here.
 
 - `BlocksLift` pulls ZIO Blocks `Reader` / `Stream` into `ZStream` / `ZChannel` on JVM and Scala.js, using Blocks `Scope` for stream lifetime, `Context` + `Config` for mailbox options, and an MPSC ring-buffer mailbox (sequential on JS; mailbox hops are for a JVM thread boundary only).
 - `PdfObjectScanner.scan` / `sink` stay on a Blocks `Reader` and pull with `readBytes` + `stepChunkBytes`. `streamWindows` emits boundary windows, not one object per ZStream step.
+- In-memory `scan(Chunk)` / `scan(Array)` decode in one carry-bounded window and skip discarded boundary-mode events (`DataObj`, xref, comments).
 - `BlocksLift.fromBytes` / `toByteWriter` move byte windows with `readBytes` / `writeBytes`.
 - Serializable filing-prep programs (`PdfPrep.Program`, `PdfEngine.applyPrep`) derive `zio.blocks.schema.Schema` and round-trip through JSON / `DynamicValue` so a saved program can be applied later.
 - Prep operations include date stamps, Bates labels, catalog `/PageLabels`, redaction boxes (overlay + show-text blanking), and TrueType font embedding.
