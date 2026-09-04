@@ -356,15 +356,31 @@
                 <select id="watermark-placement" name="watermark-placement">
                   <option value="center" selected>Center</option>
                   <option value="top-left">Top left</option>
+                  <option value="top-center">Top center</option>
                   <option value="top-right">Top right</option>
+                  <option value="middle-left">Middle left</option>
+                  <option value="middle-right">Middle right</option>
                   <option value="bottom-left">Bottom left</option>
+                  <option value="bottom-center">Bottom center</option>
                   <option value="bottom-right">Bottom right</option>
                 </select>
+              </label>
+              <label class="workflow-merge">Rotation
+                <input id="watermark-rotation" name="watermark-rotation" type="number" min="-180" max="180" value="0" />
+              </label>
+              <label class="workflow-merge">Font size
+                <input id="watermark-font-size" name="watermark-font-size" type="number" min="0" max="144" value="0" />
               </label>
               <label class="workflow-merge">
                 <input id="watermark-diagonal" name="watermark-diagonal" type="checkbox" checked />
                 Diagonal stamp
               </label>
+              <label class="workflow-merge">Prep program (JSON)
+                <textarea id="prep-program" name="prep-program" rows="6" spellcheck="false">{"operations":[{"DateStamp":{"stamp":{"source":{"Fixed":{"isoDate":"2026-09-04"}}}}},{"Bates":{"label":{"prefix":"EX-","start":1,"width":4}}},{"SetPageLabels":{"labels":{"prefix":"A-"}}}]}</textarea>
+              </label>
+              <div class="workflow-actions">
+                <button class="run-transform" id="run-prep" type="button" disabled>Apply program</button>
+              </div>
               <label class="workflow-merge" id="watermark-image-wrap" hidden>Image stamp
                 <input id="watermark-image" name="watermark-image" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" />
               </label>

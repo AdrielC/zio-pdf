@@ -11,7 +11,7 @@ workerScope.addEventListener("message", (event) => {
   if (
     request.kind === "linearize" || request.kind === "append" || request.kind === "flatten" ||
     request.kind === "merge" || request.kind === "extract" || request.kind === "rotate" ||
-    request.kind === "split" || request.kind === "watermark"
+    request.kind === "split" || request.kind === "watermark" || request.kind === "prep"
   ) {
     const pending =
       request.kind === "linearize" ? ZioPdfDemo.linearizeBlob(request.file)
@@ -20,6 +20,7 @@ workerScope.addEventListener("message", (event) => {
       : request.kind === "extract" ? ZioPdfDemo.extractPagesBlob(request.file, request.fromPage, request.toPage)
       : request.kind === "rotate" ? ZioPdfDemo.rotatePagesBlob(request.file, request.degrees, request.fromPage, request.toPage)
       : request.kind === "split" ? ZioPdfDemo.splitPagesBlob(request.file)
+      : request.kind === "prep" ? ZioPdfDemo.applyPrepBlob(request.file, request.programJson)
       : request.kind === "watermark"
         ? request.mode === "image" && request.imageBytes && request.imageFormat && request.imageWidth && request.imageHeight
           ? ZioPdfDemo.watermarkImageBlob(
@@ -47,7 +48,9 @@ workerScope.addEventListener("message", (event) => {
               request.opacity ?? 1,
               request.placement ?? "center",
               request.fromPage,
-              request.toPage
+              request.toPage,
+              request.rotationDegrees ?? 0,
+              request.fontSize ?? 0
             )
       : ZioPdfDemo.mergeBlobs(request.file, request.secondary);
     void pending.then(

@@ -498,3 +498,10 @@ object PdfEngine:
     opts: Options = Options.default
   ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
     PdfWatermark.fromBytes(bytes, stamp, opts)
+
+  def applyPrep(
+    bytes: Chunk[Byte],
+    program: PdfPrep.Program,
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfPrep.apply(bytes, program, opts)

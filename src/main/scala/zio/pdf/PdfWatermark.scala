@@ -78,7 +78,7 @@ object PdfWatermark {
   }
 
   enum Placement {
-    case Center, TopLeft, TopRight, BottomLeft, BottomRight
+    case Center, TopLeft, TopCenter, TopRight, MiddleLeft, MiddleRight, BottomLeft, BottomCenter, BottomRight
 
     private[pdf] def marginFactor: Double = 0.08
   }
@@ -97,6 +97,8 @@ object PdfWatermark {
     opacity: Double = 1.0,
     placement: Placement = Placement.Center,
     diagonal: Boolean = true,
+    rotationDegrees: Double = 0.0,
+    fontSize: Option[Double] = None,
     fromPage: Int = 1,
     toPage: Option[Int] = None
   ) extends Stamp
@@ -394,10 +396,11 @@ object PdfWatermark {
     val (x1, y1, x2, y2) = normalize(box)
     val width            = math.max(x2 - x1, 1.0)
     val height           = math.max(y2 - y1, 1.0)
-    val size             = math.max(18.0, math.min(width, height) * 0.12)
+    val size             = stamp.fontSize.getOrElse(math.max(18.0, math.min(width, height) * 0.12))
     val estimated        = math.max(size, text.length.toDouble * size * 0.5)
     val angle =
-      if stamp.diagonal && stamp.placement == Placement.Center then math.atan2(height, width)
+      if stamp.rotationDegrees != 0.0 then math.toRadians(stamp.rotationDegrees)
+      else if stamp.diagonal && stamp.placement == Placement.Center then math.atan2(height, width)
       else 0.0
     val cos = math.cos(angle)
     val sin = math.sin(angle)
@@ -456,13 +459,21 @@ object PdfWatermark {
       case Placement.Center =>
         (x1 + (x2 - x1) / 2.0, y1 + (y2 - y1) / 2.0)
       case Placement.TopLeft =>
-        (x1 + margin + textWidth / 2.0 * math.cos(angle), y2 - margin - textHeight / 2.0 * math.sin(angle))
+        (x1 + margin + textWidth / 2.0 * math.cos(angle), y2 - margin - textHeight / 2.0)
+      case Placement.TopCenter =>
+        (x1 + (x2 - x1) / 2.0, y2 - margin - textHeight / 2.0)
       case Placement.TopRight =>
-        (x2 - margin - textWidth / 2.0 * math.cos(angle), y2 - margin - textHeight / 2.0 * math.sin(angle))
+        (x2 - margin - textWidth / 2.0 * math.cos(angle), y2 - margin - textHeight / 2.0)
+      case Placement.MiddleLeft =>
+        (x1 + margin + textWidth / 2.0, y1 + (y2 - y1) / 2.0)
+      case Placement.MiddleRight =>
+        (x2 - margin - textWidth / 2.0, y1 + (y2 - y1) / 2.0)
       case Placement.BottomLeft =>
-        (x1 + margin + textWidth / 2.0 * math.cos(angle), y1 + margin + textHeight / 2.0 * math.sin(angle))
+        (x1 + margin + textWidth / 2.0 * math.cos(angle), y1 + margin + textHeight / 2.0)
+      case Placement.BottomCenter =>
+        (x1 + (x2 - x1) / 2.0, y1 + margin + textHeight / 2.0)
       case Placement.BottomRight =>
-        (x2 - margin - textWidth / 2.0 * math.cos(angle), y1 + margin + textHeight / 2.0 * math.sin(angle))
+        (x2 - margin - textWidth / 2.0 * math.cos(angle), y1 + margin + textHeight / 2.0)
     }
   }
 
@@ -475,11 +486,15 @@ object PdfWatermark {
     val (x1, y1, x2, y2) = normalize(box)
     val margin             = math.min(x2 - x1, y2 - y1) * placement.marginFactor
     placement match {
-      case Placement.Center     => (x1 + (x2 - x1 - drawW) / 2.0, y1 + (y2 - y1 - drawH) / 2.0)
-      case Placement.TopLeft    => (x1 + margin, y2 - margin - drawH)
-      case Placement.TopRight   => (x2 - margin - drawW, y2 - margin - drawH)
-      case Placement.BottomLeft => (x1 + margin, y1 + margin)
-      case Placement.BottomRight => (x2 - margin - drawW, y1 + margin)
+      case Placement.Center       => (x1 + (x2 - x1 - drawW) / 2.0, y1 + (y2 - y1 - drawH) / 2.0)
+      case Placement.TopLeft      => (x1 + margin, y2 - margin - drawH)
+      case Placement.TopCenter    => (x1 + (x2 - x1 - drawW) / 2.0, y2 - margin - drawH)
+      case Placement.TopRight     => (x2 - margin - drawW, y2 - margin - drawH)
+      case Placement.MiddleLeft   => (x1 + margin, y1 + (y2 - y1 - drawH) / 2.0)
+      case Placement.MiddleRight  => (x2 - margin - drawW, y1 + (y2 - y1 - drawH) / 2.0)
+      case Placement.BottomLeft   => (x1 + margin, y1 + margin)
+      case Placement.BottomCenter => (x1 + (x2 - x1 - drawW) / 2.0, y1 + margin)
+      case Placement.BottomRight  => (x2 - margin - drawW, y1 + margin)
     }
   }
 

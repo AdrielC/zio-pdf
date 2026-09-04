@@ -6,7 +6,9 @@ All notable changes to this project are documented here.
 
 ### Added
 
-- Text watermarks (`PdfWatermark`, `PdfEngine.watermark`) stamp standard-14 text or DeviceGray/RGB/JPEG image XObjects onto a page range, with font/color/opacity/placement options and a workbench control that reloads the preview.
+- Serializable filing-prep programs (`PdfPrep.Program`, `PdfEngine.applyPrep`) derive `zio.blocks.schema.Schema` and round-trip through JSON / `DynamicValue` so a saved program can be applied later.
+- Prep operations include date stamps, Bates labels, catalog `/PageLabels`, redaction boxes (overlay + show-text blanking), and TrueType font embedding.
+- Text watermarks (`PdfWatermark`, `PdfEngine.watermark`) stamp standard-14 text or DeviceGray/RGB/JPEG image XObjects onto a page range, with font/color/opacity/placement/rotation/size options and a workbench control that reloads the preview.
 - AcroForm inventory walks nested `/Kids` and reports qualified field names (`Address.Street`).
 - Visual flatten honors Form XObject `/Matrix` when mapping `/BBox` onto the widget `/Rect`.
 - Workbench flatten updates the preview and reports how many appearances were baked.

@@ -372,7 +372,9 @@ object ZioPdfDemo:
     opacity: Double,
     placement: String,
     fromPage: Int,
-    toPage: Int
+    toPage: Int,
+    rotationDegrees: Double = 0.0,
+    fontSize: Double = 0.0
   ): js.Promise[js.Dictionary[js.Any]] =
     runWorkflow(input) { bytes =>
       val stamp = PdfWatermark.Text(
@@ -382,6 +384,8 @@ object ZioPdfDemo:
         opacity = opacity,
         placement = parseWatermarkPlacement(placement),
         diagonal = diagonal,
+        rotationDegrees = rotationDegrees,
+        fontSize = if fontSize > 0 then Some(fontSize) else None,
         fromPage = fromPage,
         toPage = Some(toPage)
       )
@@ -472,11 +476,28 @@ object ZioPdfDemo:
 
   private def parseWatermarkPlacement(name: String): PdfWatermark.Placement =
     name.toLowerCase match {
-      case "top-left"     => PdfWatermark.Placement.TopLeft
-      case "top-right"    => PdfWatermark.Placement.TopRight
-      case "bottom-left"  => PdfWatermark.Placement.BottomLeft
-      case "bottom-right" => PdfWatermark.Placement.BottomRight
-      case _              => PdfWatermark.Placement.Center
+      case "top-left"      => PdfWatermark.Placement.TopLeft
+      case "top-center"    => PdfWatermark.Placement.TopCenter
+      case "top-right"     => PdfWatermark.Placement.TopRight
+      case "middle-left"   => PdfWatermark.Placement.MiddleLeft
+      case "middle-right"  => PdfWatermark.Placement.MiddleRight
+      case "bottom-left"   => PdfWatermark.Placement.BottomLeft
+      case "bottom-center" => PdfWatermark.Placement.BottomCenter
+      case "bottom-right"  => PdfWatermark.Placement.BottomRight
+      case _               => PdfWatermark.Placement.Center
+    }
+
+  @JSExport
+  def applyPrepBlob(input: dom.Blob, programJson: String): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      ZIO.fromEither(PdfPrep.fromJson(programJson)).flatMap { program =>
+        PdfEngine.applyPrep(bytes, program, browserTransformOptions).map { output =>
+          val summary = workflowSummary("prep", output, None)
+          val facts   = PdfPrep.profile(program)
+          summary("prepOperations") = facts.operations.mkString(", ")
+          summary
+        }
+      }
     }
 
   @JSExport

@@ -385,6 +385,23 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
           }
       }
     },
+    test("Scala.js applyPrep round-trips a schema program and stamps a date") {
+      val program = PdfPrep.Program.of(
+        PdfPrep.Op.DateStamp(PdfPrep.StampDate(PdfPrep.DateSource.Fixed("2026-09-04"), pattern = "yyyy-MM-dd"))
+      )
+      val json = PdfPrep.toJson(program)
+      minimalPdfBytes.flatMap { bytes =>
+        ZIO.fromEither(PdfPrep.fromJson(json)).flatMap { decoded =>
+          PdfEngine
+            .applyPrep(bytes, decoded)
+            .provide(PdfEngine.live)
+            .map { stamped =>
+              val text = new String(stamped.toArray, java.nio.charset.StandardCharsets.ISO_8859_1)
+              assertTrue(decoded == program, text.contains("(2026-09-04)"))
+            }
+        }
+      }
+    },
     test("Scala.js image watermark embeds an Image XObject") {
       val pixels = Chunk.fromArray(Array.fill[Byte](64)(0x70.toByte))
       minimalPdfBytes.flatMap { bytes =>

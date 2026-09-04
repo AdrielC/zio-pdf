@@ -103,7 +103,7 @@ declare module "zio-pdf-demo" {
   }
 
   export interface WorkflowExecution {
-    kind: "linearize" | "merge" | "append" | "flatten" | "extract" | "rotate" | "split" | "watermark";
+    kind: "linearize" | "merge" | "append" | "flatten" | "extract" | "rotate" | "split" | "watermark" | "prep";
     chunks: Uint8Array[];
     outputBytes: number;
     maxMaterializedBytes: number;
@@ -120,6 +120,7 @@ declare module "zio-pdf-demo" {
     watermarkOpacity?: number;
     watermarkPlacement?: string;
     watermarkScale?: number;
+    prepOperations?: string;
   }
 
   export const ZioPdfDemo: {
@@ -168,8 +169,11 @@ declare module "zio-pdf-demo" {
     opacity: number,
     placement: string,
     fromPage: number,
-    toPage: number
+    toPage: number,
+    rotationDegrees?: number,
+    fontSize?: number
   ): Promise<WorkflowExecution>;
+  applyPrepBlob(input: Blob, programJson: string): Promise<WorkflowExecution>;
   watermarkImageBlob(
     input: Blob,
     format: string,

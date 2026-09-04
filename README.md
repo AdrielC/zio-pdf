@@ -193,6 +193,15 @@ val logo      = PdfEngine.watermark(
                   filing,
                   PdfWatermark.GrayImage(width = 64, height = 64, pixels = grayPixels, opacity = 0.35, scale = 0.2)
                 )
+
+val program = PdfPrep.Program.of(
+  PdfPrep.Op.DateStamp(PdfPrep.StampDate(PdfPrep.DateSource.Today)),
+  PdfPrep.Op.Bates(PdfPrep.BatesLabel(prefix = "EX-", start = 1, width = 6)),
+  PdfPrep.Op.SetPageLabels(PdfPrep.PageLabels(prefix = "A-")),
+  PdfPrep.Op.RedactBoxes(PdfPrep.Redact(List(PdfPrep.RedactRect(1, 72, 700, 120, 16))))
+)
+val json    = PdfPrep.toJson(program)
+val applied = PdfEngine.applyPrep(filing, PdfPrep.fromJson(json).toOption.get)
 ```
 
 Inventory or flatten AcroForm widgets. Flatten walks nested `/Kids`, bakes `/AP` appearances (honoring Form `/Matrix`) into page content, or falls back to `/V` text, then strips the form:

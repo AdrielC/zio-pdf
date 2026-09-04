@@ -121,6 +121,10 @@ const watermarkImageInput = document.querySelector<HTMLInputElement>("#watermark
 const watermarkScaleWrap = document.querySelector<HTMLElement>("#watermark-scale-wrap")!;
 const watermarkScaleInput = document.querySelector<HTMLInputElement>("#watermark-scale")!;
 const watermarkScaleLabel = document.querySelector<HTMLElement>("#watermark-scale-label")!;
+const watermarkRotationInput = document.querySelector<HTMLInputElement>("#watermark-rotation")!;
+const watermarkFontSizeInput = document.querySelector<HTMLInputElement>("#watermark-font-size")!;
+const prepProgramInput = document.querySelector<HTMLTextAreaElement>("#prep-program")!;
+const runPrepButton = document.querySelector<HTMLButtonElement>("#run-prep")!;
 const runMergeButton = document.querySelector<HTMLButtonElement>("#run-merge")!;
 const runExtractButton = document.querySelector<HTMLButtonElement>("#run-extract")!;
 const runRotateButton = document.querySelector<HTMLButtonElement>("#run-rotate")!;
@@ -647,7 +651,9 @@ async function buildWatermarkRequest(id: number, file: File): Promise<ScanWorker
     font: watermarkFontSelect.value,
     ...color,
     opacity: watermarkOpacity(),
-    placement: watermarkPlacementSelect.value
+    placement: watermarkPlacementSelect.value,
+    rotationDegrees: Number.parseFloat(watermarkRotationInput.value) || 0,
+    fontSize: Number.parseFloat(watermarkFontSizeInput.value) || 0
   };
 }
 
@@ -671,6 +677,7 @@ function syncWorkflowControls(): void {
   runAppendButton.disabled = !ready;
   runFlattenButton.disabled = !ready || !lastInspectionHasForm;
   runWatermarkButton.disabled = !ready || !watermarkReady;
+  runPrepButton.disabled = !ready || prepProgramInput.value.trim() === "";
   runExtractButton.disabled = !ready;
   runRotateButton.disabled = !ready;
   runSplitButton.disabled = !ready || lastInspectionPages < 2;
@@ -683,7 +690,7 @@ function syncWorkflowControls(): void {
   syncWatermarkMode();
 }
 
-type WorkflowKind = "linearize" | "append" | "flatten" | "merge" | "extract" | "rotate" | "split" | "watermark";
+type WorkflowKind = "linearize" | "append" | "flatten" | "merge" | "extract" | "rotate" | "split" | "watermark" | "prep";
 
 function workflowInWorker(
   kind: WorkflowKind,
@@ -739,6 +746,7 @@ function workflowInWorker(
       const transfers = watermarkRequest.imageBytes ? [watermarkRequest.imageBytes.buffer] : [];
       worker.postMessage(watermarkRequest, { transfer: transfers });
     }
+    else if (kind === "prep" && watermarkRequest?.kind === "prep") worker.postMessage(watermarkRequest);
     else if (kind !== "merge") worker.postMessage({ kind, id, file });
     else reject(new Error("Choose a second PDF to merge."));
   });
@@ -762,7 +770,10 @@ async function executeWorkflow(kind: WorkflowKind): Promise<void> {
   workflowStatus.textContent = `Running ${kind} in a worker…`;
 
   try {
-    const watermarkRequest = kind === "watermark" ? await buildWatermarkRequest(generation, file) : undefined;
+    const watermarkRequest =
+      kind === "watermark" ? await buildWatermarkRequest(generation, file)
+      : kind === "prep" ? { kind: "prep" as const, id: generation, file, programJson: prepProgramInput.value.trim() }
+      : undefined;
     const execution = await workflowInWorker(kind, file, generation, secondary, watermarkRequest);
     if (generation !== workflowGeneration) return;
     const blob = new Blob(execution.chunks.map((chunk) => chunk.buffer as ArrayBuffer), { type: "application/pdf" });
@@ -789,7 +800,7 @@ async function executeWorkflow(kind: WorkflowKind): Promise<void> {
         workflowDownloads.append(link);
       }
     }
-    if (kind === "flatten" || kind === "watermark") {
+    if (kind === "flatten" || kind === "watermark" || kind === "prep") {
       if (kind === "flatten") {
         const baked = execution.appearancesPlaced ?? 0;
         const fallbacks = execution.textFallbacks ?? 0;
@@ -804,6 +815,10 @@ async function executeWorkflow(kind: WorkflowKind): Promise<void> {
           workflowStatus.textContent = `Image watermark at ${Math.round((execution.watermarkScale ?? watermarkScale()) * 100)}% scale` +
             (execution.watermarkPlacement ? ` (${execution.watermarkPlacement.replace("-", " ")})` : "") +
             `. Preview updated.`;
+        } else if (kind === "prep") {
+          workflowStatus.textContent = execution.prepOperations
+            ? `Applied program (${execution.prepOperations}). Preview updated.`
+            : `Applied prep program. Preview updated.`;
         } else {
           const label = execution.watermarkText || watermarkTextInput.value.trim() || "FILED";
           workflowStatus.textContent = `Watermarked “${label}”` +
@@ -1784,6 +1799,7 @@ runLinearizeButton.addEventListener("click", () => void executeWorkflow("lineari
 runAppendButton.addEventListener("click", () => void executeWorkflow("append"));
 runFlattenButton.addEventListener("click", () => void executeWorkflow("flatten"));
 runWatermarkButton.addEventListener("click", () => void executeWorkflow("watermark"));
+runPrepButton.addEventListener("click", () => void executeWorkflow("prep"));
 runMergeButton.addEventListener("click", () => void executeWorkflow("merge"));
 runExtractButton.addEventListener("click", () => void executeWorkflow("extract"));
 runRotateButton.addEventListener("click", () => void executeWorkflow("rotate"));
@@ -1791,6 +1807,7 @@ runSplitButton.addEventListener("click", () => void executeWorkflow("split"));
 runThumbnailButton.addEventListener("click", () => void executeThumbnail());
 mergeFileInput.addEventListener("change", () => syncWorkflowControls());
 watermarkTextInput.addEventListener("input", () => syncWorkflowControls());
+prepProgramInput.addEventListener("input", () => syncWorkflowControls());
 watermarkModeSelect.addEventListener("change", () => syncWorkflowControls());
 watermarkImageInput.addEventListener("change", () => syncWorkflowControls());
 watermarkOpacityInput.addEventListener("input", () => {

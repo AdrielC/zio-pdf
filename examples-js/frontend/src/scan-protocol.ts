@@ -79,6 +79,14 @@ export type ScanWorkerRequest =
       readonly imageHeight?: number;
       readonly imageBytes?: Uint8Array;
       readonly imageScale?: number;
+      readonly rotationDegrees?: number;
+      readonly fontSize?: number;
+    }
+  | {
+      readonly kind: "prep";
+      readonly id: number;
+      readonly file: File;
+      readonly programJson: string;
     };
 
 export type ScanWorkerMessage =
