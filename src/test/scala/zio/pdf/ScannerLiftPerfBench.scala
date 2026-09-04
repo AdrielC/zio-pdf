@@ -88,6 +88,13 @@ object ScannerLiftPerfBench extends ZIOSpecDefault {
         s"\n=== PdfObjectScanner lift (${bytes.length} bytes, $nExpect objects, lower is better) ==="
       )
 
+      val scanChunkNs = timeNanos("scan(Chunk[Byte])  [no Reader]", warmup, repeats) {
+        PdfObjectScanner.scan(bytes) match {
+          case Right(found) => found.length
+          case Left(err)    => throw err
+        }
+      }
+
       val stepNs = timeNanos("step(whole Chunk)  [decode baseline]", warmup, repeats) {
         PdfObjectScanner.step(PdfObjectScanner.Config.default, PdfObjectScanner.initial, bytes) match {
           case Right((_, found)) => found.length
@@ -156,13 +163,13 @@ object ScannerLiftPerfBench extends ZIOSpecDefault {
       def us(ns: Long): String = f"${ns / 1000.0}%.1f"
 
       println(
-        s"  step=${us(stepNs)}µs  scanIS=${us(scanInNs)}µs  scan=${us(scanNs)}µs  sink=${us(sinkNs)}µs  " +
+        s"  scanChunk=${us(scanChunkNs)}µs  step=${us(stepNs)}µs  scanIS=${us(scanInNs)}µs  scan=${us(scanNs)}µs  sink=${us(sinkNs)}µs  " +
           s"windows=${us(windowsNs)}µs  flatten=${us(streamNs)}µs  " +
           s"zstream=${us(zstreamNs)}µs  oldLift=${us(oldWindowNs)}µs  " +
           s"perByte=${us(perByteNs)}µs  perByteScan=${us(perByteScanNs)}µs"
       )
 
-      val scanned = PdfObjectScanner.scan(Reader.fromChunk(BlocksLift.toBlocksChunk(bytes)))
+      val scanned = PdfObjectScanner.scan(bytes)
       assertTrue(
         expected.isRight,
         scanned.exists(_.length == nExpect),

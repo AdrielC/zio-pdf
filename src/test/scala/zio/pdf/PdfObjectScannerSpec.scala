@@ -99,7 +99,7 @@ object PdfObjectScannerSpec extends ZIOSpecDefault {
       assertTrue(
         result.left.exists {
           case PdfObjectScanner.Error.CarryLimit(maxBytes, observedBytes) =>
-            maxBytes == 64 && observedBytes == 65L
+            maxBytes == 64 && observedBytes > 64L
           case _                                                          => false
         }
       )

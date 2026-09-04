@@ -16,6 +16,10 @@ import zio.stream.{ZPipeline, ZStream}
 object PdfObjectScanner {
 
   private val MaxStepBytes = 64 * 1024
+  private val MaxPullBytes = 1024 * 1024
+
+  private def pullBuffer(config: Config): Array[Byte] =
+    new Array[Byte](math.min(MaxPullBytes, math.max(MaxStepBytes, config.maxCarryBytes)))
 
   final case class Config(maxCarryBytes: Int = 1024 * 1024) {
     require(maxCarryBytes > 0, "maxCarryBytes must be positive")
@@ -107,7 +111,7 @@ object PdfObjectScanner {
       while pos < end do
         val retained = StreamingDecode.structuralCarryBytes(parser)
         val headroom = math.max(1L, config.maxCarryBytes.toLong - retained)
-        val stepSize = math.min(math.min(MaxStepBytes.toLong, headroom), (end - pos).toLong).toInt
+        val stepSize = math.min(headroom, (end - pos).toLong).toInt
         val (events, next) = StreamingDecode.stepChunkBytes(config.decoder, parser, buf, pos, stepSize)
         events.foreach {
           case StreamingDecoded.ObjectEnd(index, nextByteOffset) =>
@@ -127,13 +131,30 @@ object PdfObjectScanner {
         Left(asError(error))
     }
 
+  /** In-memory scan — no Reader copy. Same decode as [[step]] plus [[finish]]. */
+  def scan(bytes: Chunk[Byte], config: Config): Either[Error, Chunk[Boundary]] =
+    step(config, initial, bytes).flatMap { (cursor, found) =>
+      finish(cursor).map(_ => found)
+    }
+
+  def scan(bytes: Chunk[Byte]): Either[Error, Chunk[Boundary]] =
+    scan(bytes, Config.default)
+
+  def scan(bytes: Array[Byte], config: Config): Either[Error, Chunk[Boundary]] =
+    stepBytes(config, initial, bytes, 0, bytes.length).flatMap { (cursor, found) =>
+      finish(cursor).map(_ => found)
+    }
+
+  def scan(bytes: Array[Byte]): Either[Error, Chunk[Boundary]] =
+    scan(bytes, Config.default)
+
   /**
    * Tight pull on a Blocks [[Reader]]: `readBytes` into one reused buffer,
    * decode with [[stepBytes]], no ZIO per object or per byte.
    */
   def scan(reader: Reader[Byte], config: Config = Config.default): Either[Error, Chunk[Boundary]] =
     try {
-      val buf    = new Array[Byte](MaxStepBytes)
+      val buf    = pullBuffer(config)
       var cursor = initial
       val out    = Chunk.newBuilder[Boundary]
       var n      = reader.readBytes(buf, 0, buf.length)
@@ -193,7 +214,7 @@ object PdfObjectScanner {
     ZStream.unwrapScoped {
       ZIO.acquireRelease(ZIO.attempt(acquire).mapError(asError))(reader => ZIO.succeed(reader.close())).map { reader =>
         ZStream
-          .unfoldZIO(WindowPull(initial, new Array[Byte](MaxStepBytes))) { pull =>
+          .unfoldZIO(WindowPull(initial, pullBuffer(config))) { pull =>
             ZIO.attempt(reader.readBytes(pull.buf, 0, pull.buf.length)).mapError(asError).flatMap { n =>
               if n < 0 then
                 ZIO.fromEither(finish(pull.cursor)).as(None)

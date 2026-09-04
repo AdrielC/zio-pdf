@@ -31,7 +31,6 @@ class ScannerLiftBench {
   private var bytes: Chunk[Byte] = uninitialized
   private var raw: Array[Byte]   = uninitialized
   private val runtime            = Runtime.default
-  private val window             = 64 * 1024
 
   @Setup(Level.Trial)
   def setup(): Unit = {
@@ -53,6 +52,13 @@ class ScannerLiftBench {
   private def run[A](effect: zio.ZIO[Any, Any, A]): A =
     Unsafe.unsafe { implicit u =>
       runtime.unsafe.run(effect).getOrThrowFiberFailure()
+    }
+
+  @Benchmark
+  def scanChunk: Int =
+    PdfObjectScanner.scan(bytes) match {
+      case Right(found) => found.length
+      case Left(err)    => throw err
     }
 
   @Benchmark

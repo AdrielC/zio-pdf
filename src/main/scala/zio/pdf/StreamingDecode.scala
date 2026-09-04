@@ -79,6 +79,9 @@ object StreamingDecode {
   private[pdf] final case class SkippingStreamPayload(index: Obj.Index, remaining: Long, carry: BitVector) extends State
   private[pdf] final case class ConsumingTrailer(index: Obj.Index, carry: BitVector) extends State
 
+  private inline def boundaryOnly(cfg: Config): Boolean =
+    cfg.emitObjectEnds && !cfg.emitContentEvents
+
   private def headerToEvent(
     cfg: Config,
     event: HeaderEvent,
@@ -86,15 +89,19 @@ object StreamingDecode {
     dup: DuplicateFilterState.Mutable
   ): (Chunk[StreamingDecoded], State) = event match {
     case HeaderEvent.V(v) =>
-      (Chunk.single(StreamingDecoded.VersionT(v)), WaitingHeader(remainingBits))
+      if boundaryOnly(cfg) then (Chunk.empty, WaitingHeader(remainingBits))
+      else (Chunk.single(StreamingDecoded.VersionT(v)), WaitingHeader(remainingBits))
     case HeaderEvent.C(b) =>
-      (Chunk.single(StreamingDecoded.CommentT(b)), WaitingHeader(remainingBits))
+      if boundaryOnly(cfg) then (Chunk.empty, WaitingHeader(remainingBits))
+      else (Chunk.single(StreamingDecoded.CommentT(b)), WaitingHeader(remainingBits))
     case HeaderEvent.S(s) =>
       DuplicateFilterState.enterUpdateMode(dup)
-      (Chunk.single(StreamingDecoded.StartXrefT(s)), WaitingHeader(remainingBits))
+      if boundaryOnly(cfg) then (Chunk.empty, WaitingHeader(remainingBits))
+      else (Chunk.single(StreamingDecoded.StartXrefT(s)), WaitingHeader(remainingBits))
     case HeaderEvent.X(x) =>
       DuplicateFilterState.enterUpdateMode(dup)
-      (Chunk.single(StreamingDecoded.XrefT(x)), WaitingHeader(remainingBits))
+      if boundaryOnly(cfg) then (Chunk.empty, WaitingHeader(remainingBits))
+      else (Chunk.single(StreamingDecoded.XrefT(x)), WaitingHeader(remainingBits))
     case HeaderEvent.W(_) =>
       (Chunk.empty, WaitingHeader(remainingBits))
     case HeaderEvent.H(IndirectObj.IndirectObjHeader(obj, streamLen)) =>
@@ -109,7 +116,10 @@ object StreamingDecode {
       else
         streamLen match {
           case None =>
-            (Chunk.single(StreamingDecoded.DataObj(obj)), ConsumingTrailerNoStream(obj.index, remainingBits))
+            val events =
+              if boundaryOnly(cfg) then Chunk.empty
+              else Chunk.single(StreamingDecoded.DataObj(obj))
+            (events, ConsumingTrailerNoStream(obj.index, remainingBits))
           case Some(length) =>
             if !cfg.emitContentEvents then
               if length == 0L then (Chunk.empty, ConsumingTrailer(obj.index, remainingBits))
@@ -279,7 +289,7 @@ object StreamingDecode {
     bytesSeen: Long
   ): (Chunk[StreamingDecoded], State) = {
     val incoming =
-      if (offset == 0 && length == buf.length) BitVector.view(buf)
+      if (offset == 0) BitVector.view(buf, length.toLong * 8L)
       else BitVector(ByteVector.view(buf, offset, length))
     def appendCarry(c: BitVector): BitVector =
       if (c.isEmpty) incoming else c ++ incoming
@@ -439,7 +449,9 @@ object StreamingDecode {
     val nextBytesSeen    = Math.addExact(fs.bytesSeen, length.toLong)
     val (out, nextState) = feedBytes(config, fs.state, fs.dupFilter, buf, offset, length, nextBytesSeen)
     val updatedBase      = fs.copy(state = nextState, bytesSeen = nextBytesSeen)
-    val updated          = out.foldLeft(updatedBase)(updateAccumulators)
+    val updated          =
+      if boundaryOnly(config) || out.isEmpty then updatedBase
+      else out.foldLeft(updatedBase)(updateAccumulators)
     (out, updated)
   }
 
