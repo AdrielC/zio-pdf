@@ -7,6 +7,7 @@
 
 package zio.pdf
 
+import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -80,8 +81,8 @@ object ScannerLiftPerfBench extends ZIOSpecDefault {
       val bytes    = load()
       val expected = PdfObjectScanner.step(PdfObjectScanner.Config.default, PdfObjectScanner.initial, bytes)
       val nExpect  = expected.map(_._2.length).getOrElse(-1)
-      val warmup   = 8
-      val repeats  = 40
+      val warmup   = 25
+      val repeats  = 50
 
       println(
         s"\n=== PdfObjectScanner lift (${bytes.length} bytes, $nExpect objects, lower is better) ==="
@@ -91,6 +92,14 @@ object ScannerLiftPerfBench extends ZIOSpecDefault {
         PdfObjectScanner.step(PdfObjectScanner.Config.default, PdfObjectScanner.initial, bytes) match {
           case Right((_, found)) => found.length
           case Left(err)         => throw err
+        }
+      }
+
+      val scanInNs = timeNanos("scan(InputStream Reader)  [bulk readBytes]", warmup, repeats) {
+        val reader = Reader.fromInputStream(new ByteArrayInputStream(bytes.toArray))
+        PdfObjectScanner.scan(reader) match {
+          case Right(found) => found.length
+          case Left(err)    => throw err
         }
       }
 
@@ -147,7 +156,7 @@ object ScannerLiftPerfBench extends ZIOSpecDefault {
       def us(ns: Long): String = f"${ns / 1000.0}%.1f"
 
       println(
-        s"  step=${us(stepNs)}µs  scan=${us(scanNs)}µs  sink=${us(sinkNs)}µs  " +
+        s"  step=${us(stepNs)}µs  scanIS=${us(scanInNs)}µs  scan=${us(scanNs)}µs  sink=${us(sinkNs)}µs  " +
           s"windows=${us(windowsNs)}µs  flatten=${us(streamNs)}µs  " +
           s"zstream=${us(zstreamNs)}µs  oldLift=${us(oldWindowNs)}µs  " +
           s"perByte=${us(perByteNs)}µs  perByteScan=${us(perByteScanNs)}µs"

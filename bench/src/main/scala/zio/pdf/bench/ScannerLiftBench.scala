@@ -6,6 +6,7 @@
 
 package zio.pdf.bench
 
+import java.io.ByteArrayInputStream
 import java.util.concurrent.TimeUnit
 
 import org.openjdk.jmh.annotations.*
@@ -28,6 +29,7 @@ import scala.compiletime.uninitialized
 class ScannerLiftBench {
 
   private var bytes: Chunk[Byte] = uninitialized
+  private var raw: Array[Byte]   = uninitialized
   private val runtime            = Runtime.default
   private val window             = 64 * 1024
 
@@ -35,8 +37,9 @@ class ScannerLiftBench {
   def setup(): Unit = {
     val is = getClass.getResourceAsStream("/court-corpus/oknd-general-order-2024-09.pdf")
     require(is != null, "oknd-general-order-2024-09.pdf not on classpath")
-    bytes = Chunk.fromArray(is.readAllBytes())
+    raw = is.readAllBytes()
     is.close()
+    bytes = Chunk.fromArray(raw)
   }
 
   private def asError(error: Throwable): PdfObjectScanner.Error =
@@ -58,6 +61,15 @@ class ScannerLiftBench {
       case Right((_, found)) => found.length
       case Left(err)         => throw err
     }
+
+  @Benchmark
+  def scanInputStream: Int = {
+    val reader = Reader.fromInputStream(new ByteArrayInputStream(raw))
+    PdfObjectScanner.scan(reader) match {
+      case Right(found) => found.length
+      case Left(err)    => throw err
+    }
+  }
 
   @Benchmark
   def scanReader: Int = {
