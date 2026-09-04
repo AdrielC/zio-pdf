@@ -7,6 +7,7 @@ val zioBlocksSchemaVersion     = "0.0.51"
 val zioBlocksMediaTypeVersion  = "0.0.51"
 val zioBlocksRingbufferVersion = "0.0.51"
 val zioBlocksChunkVersion      = "0.0.51"
+val zioBlocksStreamsVersion    = "0.0.51"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.5"
 val kyoVersion                 = "1.0.0-RC4"
@@ -67,9 +68,13 @@ lazy val root = (project in file("."))
       "dev.zio"   %% "zio-blocks-schema"     % zioBlocksSchemaVersion,
       "dev.zio"   %% "zio-blocks-mediatype"  % zioBlocksMediaTypeVersion,
       "dev.zio"   %% "zio-blocks-chunk"      % zioBlocksChunkVersion,
+      "dev.zio"   %% "zio-blocks-streams"    % zioBlocksStreamsVersion,
+      "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion,
+      "dev.zio"   %% "zio-blocks-scope"      % zioBlocksSchemaVersion,
+      "dev.zio"   %% "zio-blocks-context"    % zioBlocksSchemaVersion,
+      "dev.zio"   %% "zio-blocks-config"     % zioBlocksSchemaVersion,
       "org.scodec" %% "scodec-core"          % scodecCoreVersion,
       "org.scodec" %% "scodec-bits"          % scodecBitsVersion,
-      "dev.zio"   %% "zio-blocks-ringbuffer" % zioBlocksRingbufferVersion % Test,
       "org.apache.pdfbox" % "pdfbox" % "3.0.4" % Test,
       "dev.zio"   %% "zio-test"          % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt"      % zioVersion % Test
@@ -130,6 +135,11 @@ lazy val scalaJs = (project in file("js"))
       "dev.zio"      % "zio-blocks-schema_sjs1_3"     % zioBlocksSchemaVersion,
       "dev.zio"      % "zio-blocks-mediatype_sjs1_3"  % zioBlocksMediaTypeVersion,
       "dev.zio"      % "zio-blocks-chunk_sjs1_3"      % zioBlocksChunkVersion,
+      "dev.zio"      % "zio-blocks-streams_sjs1_3"    % zioBlocksStreamsVersion,
+      "dev.zio"      % "zio-blocks-ringbuffer_sjs1_3" % zioBlocksRingbufferVersion,
+      "dev.zio"      % "zio-blocks-scope_sjs1_3"      % zioBlocksSchemaVersion,
+      "dev.zio"      % "zio-blocks-context_sjs1_3"    % zioBlocksSchemaVersion,
+      "dev.zio"      % "zio-blocks-config_sjs1_3"     % zioBlocksSchemaVersion,
       "org.scodec"   % "scodec-core_sjs1_3"           % scodecCoreVersion,
       "org.scodec"   % "scodec-bits_sjs1_3"           % scodecBitsVersion,
       "org.scala-js" % "scalajs-dom_sjs1_3"           % scalaJsDomVersion,

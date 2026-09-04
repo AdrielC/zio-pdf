@@ -428,6 +428,15 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("Scala.js BlocksLift and MpscMailbox stay on the published JS path") {
+      val mailbox = BlocksLift.MpscMailbox[String](8)
+      val reader  = zio.blocks.streams.io.Reader.fromChunk(zio.blocks.chunk.Chunk(1, 2, 3))
+      for
+        pulled <- BlocksLift.fromReader(reader, -1).runCollect
+        _      <- mailbox.offerZIO("ok")
+        got    <- mailbox.pollZIO
+      yield assertTrue(pulled == Chunk(1, 2, 3), got.contains("ok"))
+    },
     test("browser byte-stream decode is independent of collected-document limits") {
       val limit = ByteLimit.fromBytes(8L).toOption.get
       minimalPdfBytes.flatMap { bytes =>

@@ -2,7 +2,11 @@ package zio.pdf
 
 import scala.util.control.NonFatal
 
-import zio.Chunk
+import zio.blocks.chunk.{Chunk as BlocksChunk}
+import zio.blocks.streams.{Stream as BlocksStream}
+import zio.blocks.streams.io.Reader
+import zio.stream.{ZPipeline, ZStream}
+import zio.{Chunk, ZIO}
 
 /** Incremental PDF object-boundary scanner with bounded parser carry.
   *
@@ -104,5 +108,72 @@ object PdfObjectScanner {
       case NonFatal(error) =>
         val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
         Left(Error.Malformed(s"Malformed or unsupported PDF structure: $detail", error))
+    }
+
+  /** Scan byte windows as they arrive. Does not call [[finish]]; use [[stream]] for a complete source. */
+  def pipeline(config: Config = Config.default): ZPipeline[Any, Error, Chunk[Byte], Boundary] =
+    ZPipeline.unwrap {
+      zio.Ref.make(initial).map { cursorRef =>
+        ZPipeline.mapChunksZIO[Any, Error, Chunk[Byte], Boundary] { windows =>
+          ZIO.foldLeft(windows)(Chunk.empty[Boundary]) { (acc, window) =>
+            cursorRef.get.flatMap { cursor =>
+              ZIO.fromEither(step(config, cursor, window)).flatMap { (next, bounds) =>
+                cursorRef.set(next).as(acc ++ bounds)
+              }
+            }
+          }
+        }
+      }
+    }
+
+  def stream[R](
+    windows: ZStream[R, Error, Chunk[Byte]],
+    config: Config = Config.default
+  ): ZStream[R, Error, Boundary] =
+    ZStream.unwrapScoped {
+      zio.Ref.make(initial).map { cursorRef =>
+        windows
+          .mapZIO { window =>
+            cursorRef.get.flatMap { cursor =>
+              ZIO.fromEither(step(config, cursor, window)).flatMap { (next, bounds) =>
+                cursorRef.set(next).as(bounds)
+              }
+            }
+          }
+          .flattenChunks
+          .concat(ZStream.fromZIO(cursorRef.get.flatMap(cursor => ZIO.fromEither(finish(cursor)))).drain)
+      }
+    }
+
+  def stream(
+    reader: => Reader[BlocksChunk[Byte]],
+    config: Config
+  ): ZStream[Any, Error, Boundary] =
+    stream(
+      BlocksLift.fromReader(reader, null).mapError(asError).map(BlocksLift.toZioChunk),
+      config
+    )
+
+  def stream(reader: => Reader[BlocksChunk[Byte]]): ZStream[Any, Error, Boundary] =
+    stream(reader, Config.default)
+
+  def stream(
+    source: BlocksStream[Nothing, BlocksChunk[Byte]],
+    config: Config
+  ): ZStream[Any, Error, Boundary] =
+    stream(
+      BlocksLift.fromStream(source, null).mapError(asError).map(BlocksLift.toZioChunk),
+      config
+    )
+
+  def stream(source: BlocksStream[Nothing, BlocksChunk[Byte]]): ZStream[Any, Error, Boundary] =
+    stream(source, Config.default)
+
+  private def asError(error: Throwable): Error =
+    error match {
+      case err: Error => err
+      case other =>
+        val detail = Option(other.getMessage).filter(_.nonEmpty).getOrElse(other.getClass.getSimpleName)
+        Error.Malformed(s"Malformed or unsupported PDF structure: $detail", other)
     }
 }

@@ -328,7 +328,11 @@ The build uses the current Maven Central releases of:
 - `zio-blocks-schema` 0.0.51 for structural schemas and derivation;
 - `zio-blocks-chunk` 0.0.51 for allocation-conscious chunk operations;
 - `zio-blocks-mediatype` 0.0.51 for media-type boundaries;
-- `zio-blocks-ringbuffer` 0.0.51 only in tests and benchmarks.
+- `zio-blocks-streams` 0.0.51 for pull `Reader` / `Writer` / `Stream` (lifted into `ZStream` / `ZChannel` by `BlocksLift`);
+- `zio-blocks-scope` / `zio-blocks-context` / `zio-blocks-config` 0.0.51 for resource handles, typed settings, and `Config.load`;
+- `zio-blocks-ringbuffer` 0.0.51 for the cross-platform MPSC mailbox (lock-free on the JVM, sequential on Scala.js).
+
+`BlocksLift.fromReader` / `fromStream` pull a Blocks source on the current fiber. `PdfObjectScanner.stream` accepts a Blocks `Reader` or `Stream` of byte windows and emits object boundaries through `ZStream`. JVM-only Blocks APIs (virtual threads, NIO sinks) are not used, so the same path ships in the Scala.js jar.
 
 `ScodecDeriver` implements all seven ZIO Blocks derivation shapes: primitive, record, variant, wrapper, sequence, map, and dynamic. Primitive coverage includes Java time values, currency, UUID, `BigInt`, and `BigDecimal`; the artifact gate rejects placeholder markers.
 
