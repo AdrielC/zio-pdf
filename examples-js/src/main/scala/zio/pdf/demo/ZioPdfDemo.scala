@@ -331,6 +331,41 @@ object ZioPdfDemo:
       PdfEngine.flattenForms(bytes, browserTransformOptions).map(output => workflowSummary("flatten", output, None))
     }
 
+  @JSExport
+  def extractPagesBlob(input: dom.Blob, fromPage: Int, toPage: Int): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      PdfEngine.extractPages(bytes, fromPage, toPage, browserTransformOptions).map { output =>
+        workflowSummary("extract", output, None)
+      }
+    }
+
+  @JSExport
+  def rotatePagesBlob(input: dom.Blob, degrees: Int, fromPage: Int, toPage: Int): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      PdfEngine.rotatePages(bytes, degrees, fromPage, toPage, browserTransformOptions).map { output =>
+        workflowSummary("rotate", output, None)
+      }
+    }
+
+  @JSExport
+  def splitPagesBlob(input: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      PdfEngine.splitPages(bytes, browserTransformOptions).map { pdfs =>
+        val documents = pdfs.zipWithIndex.map { (pdf, index) =>
+          js.Dictionary[js.Any](
+            "name" -> s"page-${index + 1}.pdf",
+            "chunks" -> chunked(pdf),
+            "outputBytes" -> pdf.size.toDouble
+          )
+        }
+        val first = pdfs.head
+        val summary = workflowSummary("split", first, None)
+        summary("documents") = documents.toSeq.toJSArray
+        summary("pageCount") = pdfs.size.toDouble
+        summary
+      }
+    }
+
   private def admitBlob(input: dom.Blob): Task[Chunk[Byte]] =
     if input.size > browserTransformLimit.toLong then
       ZIO.fail(PdfEngine.MaterializedDocumentLimitExceeded(browserTransformLimit, input.size.toLong))
@@ -353,16 +388,19 @@ object ZioPdfDemo:
       }
     )
 
+  private def chunked(output: Chunk[Byte]): js.Array[Uint8Array] =
+    output
+      .grouped(outputChunkBytes)
+      .map(chunk => JsBinary.uint8(chunk, 0, chunk.length))
+      .toSeq
+      .toJSArray
+
   private def workflowSummary(
     kind: String,
     output: Chunk[Byte],
     firstPagePrefix: Option[Long]
   ): js.Dictionary[js.Any] =
-    val chunks = output
-      .grouped(outputChunkBytes)
-      .map(chunk => JsBinary.uint8(chunk, 0, chunk.length))
-      .toSeq
-      .toJSArray
+    val chunks = chunked(output)
     val summary = js.Dictionary[js.Any](
       "kind" -> kind,
       "chunks" -> chunks,

@@ -342,6 +342,20 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("Scala.js extract, split, and rotate page helpers") {
+      minimalPdfBytes.flatMap { bytes =>
+        for
+          merged   <- PdfEngine.mergeBytes(NonEmptyChunk(bytes, bytes)).provide(PdfEngine.live)
+          extracted <- PdfEngine.extractPages(merged, 1, 1).provide(PdfEngine.live)
+          split    <- PdfEngine.splitPages(merged).provide(PdfEngine.live)
+          rotated  <- PdfEngine.rotatePages(merged, 180, 1, 2).provide(PdfEngine.live)
+        yield assertTrue(
+          extracted.nonEmpty,
+          split.size == 2,
+          rotated.nonEmpty
+        )
+      }
+    },
     test("browser byte-stream decode is independent of collected-document limits") {
       val limit = ByteLimit.fromBytes(8L).toOption.get
       minimalPdfBytes.flatMap { bytes =>

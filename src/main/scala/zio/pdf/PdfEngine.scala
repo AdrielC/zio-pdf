@@ -794,3 +794,29 @@ object PdfEngine:
     decode(bytes, opts).flatMap { decoded =>
       ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *> PdfAcroForm.flatten(decoded)
     }
+
+  /** Extract a 1-based inclusive page range into a new PDF. */
+  def extractPages(
+    bytes: Chunk[Byte],
+    fromPage: Int,
+    toPage: Int,
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfSplit.extractBytes(bytes, fromPage, toPage, opts)
+
+  /** Split every page into its own PDF, preserving page order. */
+  def splitPages(
+    bytes: Chunk[Byte],
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, NonEmptyChunk[Chunk[Byte]]] =
+    PdfSplit.splitBytes(bytes, opts)
+
+  /** Add a multiple-of-90 `/Rotate` to a 1-based inclusive page range. */
+  def rotatePages(
+    bytes: Chunk[Byte],
+    degrees: Int,
+    fromPage: Int,
+    toPage: Int,
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfSplit.rotateBytes(bytes, degrees, fromPage, toPage, opts)

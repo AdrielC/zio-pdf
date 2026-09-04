@@ -463,3 +463,26 @@ object PdfEngine:
     decode(bytes, opts).flatMap { decoded =>
       ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *> PdfAcroForm.flatten(decoded)
     }
+
+  def extractPages(
+    bytes: Chunk[Byte],
+    fromPage: Int,
+    toPage: Int,
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfSplit.extractBytes(bytes, fromPage, toPage, opts)
+
+  def splitPages(
+    bytes: Chunk[Byte],
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, NonEmptyChunk[Chunk[Byte]]] =
+    PdfSplit.splitBytes(bytes, opts)
+
+  def rotatePages(
+    bytes: Chunk[Byte],
+    degrees: Int,
+    fromPage: Int,
+    toPage: Int,
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfSplit.rotateBytes(bytes, degrees, fromPage, toPage, opts)

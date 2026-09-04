@@ -164,6 +164,60 @@ object PdfWorkflowSpec extends ZIOSpecDefault {
         }
       )
     },
+    test("extractPages keeps only the requested 1-based range") {
+      for {
+        left    <- singlePagePdf("A")
+        right   <- singlePagePdf("B")
+        merged  <- PdfEngine.mergeBytes(NonEmptyChunk(left, right))
+        second  <- PdfEngine.extractPages(merged, 2, 2)
+        first   <- PdfEngine.extractPages(merged, 1, 1)
+        decoded <- ZStream.fromChunk(second).via(PdfStream.decode()).runCollect
+        text    <- PdfEngine.extractText(ZStream.fromChunk(second)).runCollect
+        firstText <- PdfEngine.extractText(ZStream.fromChunk(first)).runCollect
+      } yield assertTrue(
+        TextExtract.orderedPageObjectNumbers(decoded).size == 1,
+        text.exists(_.text.contains("B")),
+        firstText.exists(_.text.contains("A"))
+      )
+    },
+    test("splitPages emits one PDF per page") {
+      for {
+        left   <- singlePagePdf("A")
+        right  <- singlePagePdf("B")
+        merged <- PdfEngine.mergeBytes(NonEmptyChunk(left, right))
+        parts  <- PdfEngine.splitPages(merged)
+        counts <- ZIO.foreach(parts) { pdf =>
+                    ZStream.fromChunk(pdf).via(PdfStream.decode()).runCollect.map(TextExtract.orderedPageObjectNumbers(_).size)
+                  }
+      } yield assertTrue(parts.size == 2, counts.forall(_ == 1))
+    },
+    test("rotatePages writes /Rotate on the selected range") {
+      for {
+        left    <- singlePagePdf("A")
+        right   <- singlePagePdf("B")
+        merged  <- PdfEngine.mergeBytes(NonEmptyChunk(left, right))
+        rotated <- PdfEngine.rotatePages(merged, 90, 2, 2)
+        decoded <- PdfEngine.decode(rotated)
+        pages    = TextExtract.orderedPageObjectNumbers(decoded)
+        rotations = pages.map { number =>
+                      decoded.collectFirst {
+                        case Decoded.DataObj(obj) if obj.index.number == number =>
+                          obj.data match {
+                            case dict: Prim.Dict =>
+                              dict.data.get("Rotate").collect { case Prim.Number(value) => value.toInt }.getOrElse(0)
+                            case _ => 0
+                          }
+                      }.getOrElse(0)
+                    }
+      } yield assertTrue(rotations == List(0, 90))
+    },
+    test("extractPages rejects an empty or inverted range") {
+      for {
+        source <- singlePagePdf("only")
+        empty  <- PdfEngine.extractPages(source, 2, 2).either
+        invert <- PdfEngine.extractPages(source, 2, 1).either
+      } yield assertTrue(empty.isLeft, invert.isLeft)
+    },
     test("mergeBytes combines two caller-owned PDFs") {
       for {
         left   <- singlePagePdf("A")

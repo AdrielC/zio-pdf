@@ -295,16 +295,31 @@
             <summary>
               <span>
                 <strong id="workflow-plan-title">Filing workflows</strong>
-                <small>Linearize, merge, append, or flatten forms in the browser.</small>
+                <small>Linearize, merge, extract, rotate, split, or flatten in the browser.</small>
               </span>
               <span class="plan-badge" id="workflow-badge">Run inspection</span>
             </summary>
             <div class="transform-plan-body">
               <p class="workflow-copy" id="workflow-copy">Encrypted PDFs are rejected before rewrite. Form flatten is structural only.</p>
+              <div class="workflow-range">
+                <label>From page <input id="page-from" name="page-from" type="number" min="1" value="1" /></label>
+                <label>To page <input id="page-to" name="page-to" type="number" min="1" value="1" /></label>
+                <label>Rotate
+                  <select id="page-rotate" name="page-rotate">
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                  </select>
+                </label>
+              </div>
               <div class="workflow-actions">
                 <button class="run-transform" id="run-linearize" type="button" disabled>Linearize</button>
+                <button class="run-transform" id="run-extract" type="button" disabled>Extract pages</button>
+                <button class="run-transform" id="run-rotate" type="button" disabled>Rotate pages</button>
+                <button class="run-transform" id="run-split" type="button" disabled>Split pages</button>
                 <button class="run-transform" id="run-append" type="button" disabled>Append revision</button>
                 <button class="run-transform" id="run-flatten" type="button" disabled>Flatten forms</button>
+                <button class="run-transform" id="run-thumbnail" type="button" disabled>Attach thumbnail</button>
               </div>
               <label class="workflow-merge">Merge with a second filing
                 <input id="merge-file" name="merge-file" type="file" accept="application/pdf,.pdf" />
@@ -313,6 +328,7 @@
                 <button class="run-transform" id="run-merge" type="button" disabled>Merge PDFs</button>
                 <a class="transform-download" id="workflow-download" href="#" download hidden>Download workflow PDF</a>
               </div>
+              <div class="workflow-actions" id="workflow-downloads" hidden></div>
               <p id="workflow-status" role="status" aria-live="polite">Run inspection to enable write workflows.</p>
             </div>
           </details>

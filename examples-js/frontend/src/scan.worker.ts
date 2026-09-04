@@ -8,16 +8,25 @@ const workerScope = self as unknown as {
 
 workerScope.addEventListener("message", (event) => {
   const request = event.data;
-  if (request.kind === "linearize" || request.kind === "append" || request.kind === "flatten" || request.kind === "merge") {
+  if (
+    request.kind === "linearize" || request.kind === "append" || request.kind === "flatten" ||
+    request.kind === "merge" || request.kind === "extract" || request.kind === "rotate" || request.kind === "split"
+  ) {
     const pending =
       request.kind === "linearize" ? ZioPdfDemo.linearizeBlob(request.file)
       : request.kind === "append" ? ZioPdfDemo.appendRevisionBlob(request.file)
       : request.kind === "flatten" ? ZioPdfDemo.flattenFormsBlob(request.file)
+      : request.kind === "extract" ? ZioPdfDemo.extractPagesBlob(request.file, request.fromPage, request.toPage)
+      : request.kind === "rotate" ? ZioPdfDemo.rotatePagesBlob(request.file, request.degrees, request.fromPage, request.toPage)
+      : request.kind === "split" ? ZioPdfDemo.splitPagesBlob(request.file)
       : ZioPdfDemo.mergeBlobs(request.file, request.secondary);
     void pending.then(
       (execution) => workerScope.postMessage(
         { kind: "workflow-complete", id: request.id, execution },
-        { transfer: execution.chunks.map((chunk) => chunk.buffer) }
+        { transfer: [
+          ...execution.chunks.map((chunk) => chunk.buffer),
+          ...(execution.documents ?? []).flatMap((document) => document.chunks.map((chunk) => chunk.buffer))
+        ] }
       ),
       (error: unknown) => workerScope.postMessage({
         kind: "error",

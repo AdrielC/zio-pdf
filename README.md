@@ -171,6 +171,14 @@ val revision = Chunk(
 val updated = PdfAppend.append(existingBytes, revision)
 ```
 
+Extract a 1-based page range, split every page, or add `/Rotate`:
+
+```scala
+val excerpt   = PdfEngine.extractPages(filing, 3, 7)
+val pages     = PdfEngine.splitPages(filing)
+val landscape = PdfEngine.rotatePages(filing, 90, 1, 2)
+```
+
 Inventory or structurally flatten AcroForm widgets (appearances are not baked into content streams):
 
 ```scala

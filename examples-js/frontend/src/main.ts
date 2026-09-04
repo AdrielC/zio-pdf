@@ -108,7 +108,15 @@ const runLinearizeButton = document.querySelector<HTMLButtonElement>("#run-linea
 const runAppendButton = document.querySelector<HTMLButtonElement>("#run-append")!;
 const runFlattenButton = document.querySelector<HTMLButtonElement>("#run-flatten")!;
 const runMergeButton = document.querySelector<HTMLButtonElement>("#run-merge")!;
+const runExtractButton = document.querySelector<HTMLButtonElement>("#run-extract")!;
+const runRotateButton = document.querySelector<HTMLButtonElement>("#run-rotate")!;
+const runSplitButton = document.querySelector<HTMLButtonElement>("#run-split")!;
+const runThumbnailButton = document.querySelector<HTMLButtonElement>("#run-thumbnail")!;
 const mergeFileInput = document.querySelector<HTMLInputElement>("#merge-file")!;
+const pageFromInput = document.querySelector<HTMLInputElement>("#page-from")!;
+const pageToInput = document.querySelector<HTMLInputElement>("#page-to")!;
+const pageRotateSelect = document.querySelector<HTMLSelectElement>("#page-rotate")!;
+const workflowDownloads = document.querySelector<HTMLElement>("#workflow-downloads")!;
 const mappingRoute = document.querySelector<HTMLElement>("#mapping-route")!;
 const mappingRouteCopy = document.querySelector<HTMLElement>("#mapping-route-copy")!;
 const mappingRouteState = document.querySelector<HTMLElement>("#mapping-route-state")!;
@@ -155,6 +163,8 @@ let transformDownloadUrl = "";
 let workflowDownloadUrl = "";
 let lastInspectionEncrypted = false;
 let lastInspectionHasForm = false;
+let lastInspectionPages = 1;
+let workflowExtraUrls: string[] = [];
 let workflowGeneration = 0;
 let activeWorkflowWorker: Worker | undefined;
 let activeWorkflowCancel: (() => void) | undefined;
@@ -517,6 +527,16 @@ function clearWorkflowDownload(): void {
   workflowDownloadUrl = "";
   workflowDownload.hidden = true;
   workflowDownload.removeAttribute("href");
+  for (const url of workflowExtraUrls) URL.revokeObjectURL(url);
+  workflowExtraUrls = [];
+  workflowDownloads.replaceChildren();
+  workflowDownloads.hidden = true;
+}
+
+function pageRange(): { fromPage: number; toPage: number } {
+  const fromPage = Math.max(1, Number.parseInt(pageFromInput.value, 10) || 1);
+  const toPage = Math.max(fromPage, Number.parseInt(pageToInput.value, 10) || fromPage);
+  return { fromPage, toPage };
 }
 
 function stopActiveWorkflow(): boolean {
@@ -534,6 +554,10 @@ function syncWorkflowControls(): void {
   runLinearizeButton.disabled = !ready;
   runAppendButton.disabled = !ready;
   runFlattenButton.disabled = !ready || !lastInspectionHasForm;
+  runExtractButton.disabled = !ready;
+  runRotateButton.disabled = !ready;
+  runSplitButton.disabled = !ready || lastInspectionPages < 2;
+  runThumbnailButton.disabled = !ready;
   runMergeButton.disabled = !ready || mergeFileInput.files?.[0] === undefined;
   workflowBadge.textContent = lastInspectionEncrypted ? "Encrypted" : ready ? "Ready" : "Run inspection";
   workflowCopy.textContent = lastInspectionEncrypted
@@ -542,7 +566,7 @@ function syncWorkflowControls(): void {
 }
 
 function workflowInWorker(
-  kind: "linearize" | "append" | "flatten" | "merge",
+  kind: "linearize" | "append" | "flatten" | "merge" | "extract" | "rotate" | "split",
   file: File,
   id: number,
   secondary?: File
@@ -588,12 +612,14 @@ function workflowInWorker(
     };
 
     if (kind === "merge" && secondary) worker.postMessage({ kind, id, file, secondary });
+    else if (kind === "extract") worker.postMessage({ kind, id, file, ...pageRange() });
+    else if (kind === "rotate") worker.postMessage({ kind, id, file, degrees: Number.parseInt(pageRotateSelect.value, 10) || 90, ...pageRange() });
     else if (kind !== "merge") worker.postMessage({ kind, id, file });
     else reject(new Error("Choose a second PDF to merge."));
   });
 }
 
-async function executeWorkflow(kind: "linearize" | "append" | "flatten" | "merge"): Promise<void> {
+async function executeWorkflow(kind: "linearize" | "append" | "flatten" | "merge" | "extract" | "rotate" | "split"): Promise<void> {
   if (!selectedFile) return;
   if (activeWorkflowWorker) {
     stopActiveWorkflow();
@@ -623,7 +649,23 @@ async function executeWorkflow(kind: "linearize" | "append" | "flatten" | "merge
     const prefix = execution.firstPagePrefixBytes === undefined
       ? ""
       : ` First-page prefix ${execution.firstPagePrefixBytes.toLocaleString()} bytes.`;
-    workflowStatus.textContent = `${kind} wrote ${execution.outputBytes.toLocaleString()} bytes.${prefix}`;
+    if (execution.documents && execution.documents.length > 1) {
+      workflowDownloads.hidden = false;
+      for (const part of execution.documents) {
+        const extra = new Blob(part.chunks.map((chunk) => chunk.buffer as ArrayBuffer), { type: "application/pdf" });
+        const url = URL.createObjectURL(extra);
+        workflowExtraUrls.push(url);
+        const link = window.document.createElement("a");
+        link.className = "transform-download";
+        link.href = url;
+        link.download = part.name;
+        link.textContent = part.name;
+        workflowDownloads.append(link);
+      }
+    }
+    workflowStatus.textContent = execution.pageCount
+      ? `${kind} wrote ${execution.pageCount} PDFs.`
+      : `${kind} wrote ${execution.outputBytes.toLocaleString()} bytes.${prefix}`;
   } catch (error) {
     if (generation !== workflowGeneration) return;
     if (error instanceof DOMException && error.name === "AbortError") return;
@@ -632,6 +674,51 @@ async function executeWorkflow(kind: "linearize" | "append" | "flatten" | "merge
     workflowStatus.textContent = error instanceof Error ? error.message : "The workflow could not run.";
   } finally {
     if (generation === workflowGeneration) syncWorkflowControls();
+  }
+}
+
+async function executeThumbnail(): Promise<void> {
+  if (!selectedFile) return;
+  clearWorkflowDownload();
+  workflowPlan.dataset.state = "running";
+  workflowBadge.textContent = "Running";
+  workflowStatus.textContent = "Attaching a first-page /Thumb…";
+  try {
+    const { ZioPdfDemo } = await import("zio-pdf-demo");
+    const bytes = new Uint8Array(await selectedFile.arrayBuffer());
+    const canvas = currentPreviewCanvas();
+    let gray: Uint8Array | undefined;
+    let width = 64;
+    let height = 64;
+    if (canvas) {
+      width = Math.max(1, canvas.width);
+      height = Math.max(1, canvas.height);
+      const image = canvas.getContext("2d")?.getImageData(0, 0, width, height);
+      if (image) {
+        gray = new Uint8Array(width * height);
+        for (let index = 0; index < gray.length; index += 1) {
+          const offset = index * 4;
+          gray[index] = Math.round(0.299 * image.data[offset] + 0.587 * image.data[offset + 1] + 0.114 * image.data[offset + 2]);
+        }
+      }
+    }
+    const output = await ZioPdfDemo.attachFirstPageThumbnail(bytes, gray, width, height);
+    const blob = new Blob([output.buffer as ArrayBuffer], { type: "application/pdf" });
+    workflowDownloadUrl = URL.createObjectURL(blob);
+    workflowDownload.href = workflowDownloadUrl;
+    workflowDownload.download = `${selectedFile.name.replace(/\.pdf$/i, "") || "document"}.thumb.pdf`;
+    workflowDownload.hidden = false;
+    workflowPlan.dataset.state = "complete";
+    workflowBadge.textContent = "Complete";
+    workflowStatus.textContent = gray
+      ? `Attached a ${width}×${height} rendered /Thumb.`
+      : "Attached a placeholder /Thumb.";
+  } catch (error) {
+    workflowPlan.dataset.state = "error";
+    workflowBadge.textContent = "Error";
+    workflowStatus.textContent = error instanceof Error ? error.message : "The thumbnail could not be attached.";
+  } finally {
+    syncWorkflowControls();
   }
 }
 
@@ -748,6 +835,7 @@ function resetReport(): void {
   transformPlan.removeAttribute("open");
   lastInspectionEncrypted = false;
   lastInspectionHasForm = false;
+  lastInspectionPages = 1;
   stopActiveWorkflow();
   workflowPlan.hidden = true;
   workflowPlan.removeAttribute("open");
@@ -756,7 +844,7 @@ function resetReport(): void {
   workflowCopy.textContent = "Encrypted PDFs are rejected before rewrite. Form flatten is structural only.";
   clearWorkflowDownload();
   mergeFileInput.value = "";
-  [runLinearizeButton, runAppendButton, runFlattenButton, runMergeButton].forEach((button) => {
+  [runLinearizeButton, runAppendButton, runFlattenButton, runMergeButton, runExtractButton, runRotateButton, runSplitButton, runThumbnailButton].forEach((button) => {
     button.disabled = true;
   });
   planSourceFont.replaceChildren(new Option("Run inspection first", ""));
@@ -1275,6 +1363,11 @@ function renderAnalysis(analysis: Analysis): void {
   renderFontInventory(inspection.fonts);
   lastInspectionEncrypted = inspection.encrypted;
   lastInspectionHasForm = inspection.acroFormObject !== undefined || inspection.acroFormFields > 0;
+  lastInspectionPages = Math.max(1, content.pages);
+  pageFromInput.value = "1";
+  pageToInput.max = String(lastInspectionPages);
+  pageFromInput.max = String(lastInspectionPages);
+  pageToInput.value = String(lastInspectionPages);
   transformPlan.setAttribute("open", "");
   workflowPlan.setAttribute("open", "");
   workflowPlan.dataset.state = lastInspectionEncrypted ? "error" : "ready";
@@ -1535,6 +1628,10 @@ runLinearizeButton.addEventListener("click", () => void executeWorkflow("lineari
 runAppendButton.addEventListener("click", () => void executeWorkflow("append"));
 runFlattenButton.addEventListener("click", () => void executeWorkflow("flatten"));
 runMergeButton.addEventListener("click", () => void executeWorkflow("merge"));
+runExtractButton.addEventListener("click", () => void executeWorkflow("extract"));
+runRotateButton.addEventListener("click", () => void executeWorkflow("rotate"));
+runSplitButton.addEventListener("click", () => void executeWorkflow("split"));
+runThumbnailButton.addEventListener("click", () => void executeThumbnail());
 mergeFileInput.addEventListener("change", () => syncWorkflowControls());
 window.addEventListener("beforeunload", clearWorkflowDownload);
 [planRemap, planTokenize].forEach((control) => control.addEventListener("change", () => {

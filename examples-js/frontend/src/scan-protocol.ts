@@ -36,6 +36,26 @@ export type ScanWorkerRequest =
       readonly kind: "flatten";
       readonly id: number;
       readonly file: File;
+    }
+  | {
+      readonly kind: "extract";
+      readonly id: number;
+      readonly file: File;
+      readonly fromPage: number;
+      readonly toPage: number;
+    }
+  | {
+      readonly kind: "rotate";
+      readonly id: number;
+      readonly file: File;
+      readonly degrees: number;
+      readonly fromPage: number;
+      readonly toPage: number;
+    }
+  | {
+      readonly kind: "split";
+      readonly id: number;
+      readonly file: File;
     };
 
 export type ScanWorkerMessage =

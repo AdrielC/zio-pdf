@@ -244,6 +244,29 @@ dd {
   gap: 10px;
 }
 
+.workflow-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.workflow-range label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workflow-range input,
+.workflow-range select {
+  min-width: 72px;
+  padding: 6px 8px;
+  border: 1px solid var(--line, #2a2f28);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+}
+
 .workflow-merge {
   display: grid;
   gap: 6px;

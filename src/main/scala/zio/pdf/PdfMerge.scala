@@ -42,6 +42,20 @@ object PdfMerge {
         }
   }
 
+  /**
+   * Rebuild one document from selected page object numbers, in the given
+   * order, using the same closure-renumber path as [[parts]].
+   */
+  private[pdf] def fromPageNumbers(
+    decoded: Chunk[Decoded],
+    pageNumbers: List[Long]
+  ): Either[Error, Chunk[Part[Trailer]]] =
+    if pageNumbers.isEmpty then Left(NoPages(0))
+    else
+      assemble(decoded, pageNumbers, sourceIndex = 0).map { case (objects, trailer) =>
+        Chunk.fromIterable(objects.map(Part.Obj(_))) :+ Part.Meta(trailer)
+      }
+
   /** Merge decoded documents; pages appear in source order. */
   def parts(sources: NonEmptyChunk[Chunk[Decoded]]): Either[Error, Chunk[Part[Trailer]]] =
     mergeSources(sources).map { case (objects, trailer) =>
@@ -74,22 +88,7 @@ object PdfMerge {
         case (Left(error), _) =>
           Left(error)
         case (Right(state), (decoded, sourceIndex)) =>
-          val objects   = objectMap(decoded)
-          val pageOrder = TextExtract.orderedPageObjectNumbers(decoded)
-          if pageOrder.isEmpty then Left(NoPages(sourceIndex))
-          else
-            val skip = structureRoots(objects)
-            pageOrder.foldLeft[Either[Error, MergeState]](Right(state)) { (acc, pageNumber) =>
-              acc.map { current =>
-                val bundle = collectClosure(pageNumber, objects, skip)
-                val (renumbered, pageRef, after) = renumberBundle(bundle, pageNumber, current.nextNumber)
-                current.copy(
-                  nextNumber = after,
-                  mergedObjects = current.mergedObjects ++ renumbered,
-                  pageRefs = current.pageRefs :+ pageRef
-                )
-              }
-            }
+          appendPages(state, decoded, TextExtract.orderedPageObjectNumbers(decoded), sourceIndex)
       }
       .map { state =>
         val pages = IndirectObj.nostream(
@@ -112,6 +111,63 @@ object PdfMerge {
             Some(Prim.Ref(catalogNumber, 0))
           )
         (catalog :: pages :: withParents, trailer)
+      }
+  }
+
+  private def assemble(
+    decoded: Chunk[Decoded],
+    pageNumbers: List[Long],
+    sourceIndex: Int
+  ): Either[Error, (List[IndirectObj], Trailer)] =
+    appendPages(MergeState(3L, Nil, Nil), decoded, pageNumbers, sourceIndex).map { state =>
+      val catalogNumber = 1L
+      val pagesNumber   = 2L
+      val pages = IndirectObj.nostream(
+        pagesNumber,
+        Prim.dict(
+          "Type"  -> Prim.Name("Pages"),
+          "Kids"  -> Prim.Array(state.pageRefs*),
+          "Count" -> Prim.Number(BigDecimal(state.pageRefs.size))
+        )
+      )
+      val catalog = IndirectObj.nostream(
+        catalogNumber,
+        Prim.dict("Type" -> Prim.Name("Catalog"), "Pages" -> Prim.Ref(pagesNumber, 0))
+      )
+      val withParents = state.mergedObjects.map(withPagesParent(pagesNumber, _))
+      val trailer =
+        Trailer(
+          BigDecimal(state.nextNumber),
+          Prim.dict("Root" -> Prim.Ref(catalogNumber, 0)),
+          Some(Prim.Ref(catalogNumber, 0))
+        )
+      (catalog :: pages :: withParents, trailer)
+    }
+
+  private def appendPages(
+    state: MergeState,
+    decoded: Chunk[Decoded],
+    pageNumbers: List[Long],
+    sourceIndex: Int
+  ): Either[Error, MergeState] = {
+    val objects = objectMap(decoded)
+    if pageNumbers.isEmpty then Left(NoPages(sourceIndex))
+    else
+      val skip = structureRoots(objects)
+      pageNumbers.foldLeft[Either[Error, MergeState]](Right(state)) { (acc, pageNumber) =>
+        acc.flatMap { current =>
+          if !objects.contains(pageNumber) then Left(NoPages(sourceIndex))
+          else
+            val bundle = collectClosure(pageNumber, objects, skip)
+            val (renumbered, pageRef, after) = renumberBundle(bundle, pageNumber, current.nextNumber)
+            Right(
+              current.copy(
+                nextNumber = after,
+                mergedObjects = current.mergedObjects ++ renumbered,
+                pageRefs = current.pageRefs :+ pageRef
+              )
+            )
+        }
       }
   }
 

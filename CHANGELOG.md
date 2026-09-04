@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Added
+
+- Page-range extract, per-page split, and `/Rotate` rewrite (`PdfSplit`, `PdfEngine.extractPages` / `splitPages` / `rotatePages`) on JVM and Scala.js.
+- Workbench controls for extract, rotate, split, and first-page `/Thumb` attach.
+
 ## [0.2.0] — 2026-09-03
 
 ### Added

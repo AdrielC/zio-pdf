@@ -88,12 +88,20 @@ declare module "zio-pdf-demo" {
     maxMaterializedBytes: number;
   }
 
+  export interface WorkflowDocument {
+    name: string;
+    chunks: Uint8Array[];
+    outputBytes: number;
+  }
+
   export interface WorkflowExecution {
-    kind: "linearize" | "merge" | "append" | "flatten";
+    kind: "linearize" | "merge" | "append" | "flatten" | "extract" | "rotate" | "split";
     chunks: Uint8Array[];
     outputBytes: number;
     maxMaterializedBytes: number;
     firstPagePrefixBytes?: number;
+    pageCount?: number;
+    documents?: WorkflowDocument[];
   }
 
   export const ZioPdfDemo: {
@@ -122,6 +130,9 @@ declare module "zio-pdf-demo" {
   mergeBlobs(primary: Blob, secondary: Blob): Promise<WorkflowExecution>;
   appendRevisionBlob(input: Blob): Promise<WorkflowExecution>;
   flattenFormsBlob(input: Blob): Promise<WorkflowExecution>;
+  extractPagesBlob(input: Blob, fromPage: number, toPage: number): Promise<WorkflowExecution>;
+  rotatePagesBlob(input: Blob, degrees: number, fromPage: number, toPage: number): Promise<WorkflowExecution>;
+  splitPagesBlob(input: Blob): Promise<WorkflowExecution>;
   attachFirstPageThumbnail(
     input: Uint8Array,
     grayPixels: Uint8Array | undefined,
