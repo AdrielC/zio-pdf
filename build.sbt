@@ -10,7 +10,6 @@ val zioBlocksChunkVersion      = "0.0.51"
 val zioBlocksStreamsVersion    = "0.0.51"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.5"
-val kyoVersion                 = "1.0.0-RC4"
 val scalaJsDomVersion          = "2.8.1"
 val scalaJavaTimeVersion       = "2.7.0"
 
@@ -183,32 +182,9 @@ lazy val scalaJsFrontend = (project in file("examples-js"))
  * (-i = measurement iterations, -wi = warmup iterations,
  *  -f = forks, -t = threads).
  */
-/**
- * Kyo-based scan algebra (experimental). Not part of the ZIO-only core;
- * kept for benchmarks and migration reference. Run tests with `scanKyo/test`.
- */
-lazy val scanKyo = (project in file("scan-kyo"))
-  .dependsOn(root)
-  .settings(
-    name           := "zio-pdf-scan-kyo",
-    publish / skip := true,
-    libraryDependencies ++= List(
-      "io.getkyo" %% "kyo-data"    % kyoVersion,
-      "io.getkyo" %% "kyo-kernel"  % kyoVersion,
-      "io.getkyo" %% "kyo-prelude" % kyoVersion,
-      "io.getkyo" %% "kyo-core"    % kyoVersion,
-      "io.getkyo" %% "kyo-zio"     % kyoVersion,
-      "io.getkyo" %% "kyo-parse"   % kyoVersion % Test,
-      "dev.zio"   %% "zio-test"    % zioVersion % Test,
-      "dev.zio"   %% "zio-test-sbt" % zioVersion % Test
-    ),
-    Test / mainClass := Some("zio.pdf.scan.ScanSpec"),
-    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
-  )
-
 lazy val bench = (project in file("bench"))
   .enablePlugins(JmhPlugin)
-  .dependsOn(root, scanKyo)
+  .dependsOn(root)
   .settings(
     name              := "zio-pdf-bench",
     publish / skip    := true,

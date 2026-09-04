@@ -11,7 +11,7 @@ This GitHub repository is the public source and release project. Every change in
 
    ```bash
    npm ci
-   sbt -batch ";root/test;scanKyo/test;scalaJs/test;bench/test"
+   sbt -batch ";root/test;scalaJs/test;bench/test"
    sbt -batch examples/run
    sbt -batch "bench/Jmh/compile" "benchFs2/Jmh/compile"
    npm --prefix examples-js/frontend ci

@@ -21,6 +21,7 @@ All notable changes to this project are documented here.
 ### Changed
 
 - `PdfAppend.append` / `PdfEngine.appendRevision` honor `maxMaterializedDocumentBytes` and fail before rewriting the base.
+- Removed the experimental `scan-kyo` subproject and all Kyo dependencies; byte-pipeline JMH benches in `bench/` remain on ZIO Blocks.
 
 ## [0.2.1-RC1] — 2026-09-04
 

@@ -21,7 +21,7 @@ libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.1-RC1" // JVM
 libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.1-RC1" // Scala.js
 ```
 
-Only the JVM and Scala.js `zio-pdf` artifacts are publishable. Examples, benchmarks, the browser application, and the Kyo comparison module are build-only projects.
+Only the JVM and Scala.js `zio-pdf` artifacts are publishable. Examples, benchmarks, the browser application, and comparison benches are build-only projects.
 
 ## Quick start
 
@@ -361,7 +361,7 @@ The test corpus contains six immutable PDFs from the U.S. Supreme Court, federal
 CI proves more than compilation:
 
 ```bash
-sbt -batch ';root/test;scanKyo/test;scalaJs/test;bench/test'
+sbt -batch ';root/test;scalaJs/test;bench/test'
 sbt -batch ';root/package;root/packageDoc;scalaJs/package'
 npm --prefix examples-js/frontend run build
 bash scripts/audit-published-artifact.sh
@@ -380,7 +380,6 @@ Production invariants are recorded in [`docs/PRODUCTION_INVARIANTS.md`](docs/PRO
 | `js/` | Scala.js platform implementations and tests | yes |
 | `examples-js/` | interactive Vite and Scala.js application | no |
 | `examples/` | runnable JVM examples (PDFBox optional for rendered thumbnails) | no |
-| `scan-kyo/` | experimental scan-algebra comparison | no |
 | `bench/`, `bench-fs2/` | JMH projects | no |
 | `legacy/` | archived fs2-pdf source for provenance | no |
 

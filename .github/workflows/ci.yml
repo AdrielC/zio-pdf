@@ -52,7 +52,7 @@ jobs:
       - name: Run verified test suites
         run: |
           npm ci
-          sbt -batch ';root/test;scanKyo/test;scalaJs/test;bench/test'
+          sbt -batch ';root/test;scalaJs/test;bench/test'
 
       - name: Package API and documentation
         run: sbt -batch ';root/package;root/packageDoc;scalaJs/package'
