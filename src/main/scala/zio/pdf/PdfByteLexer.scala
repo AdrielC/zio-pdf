@@ -11,8 +11,6 @@ package zio.pdf
 import _root_.scodec.{Attempt, DecodeResult, Decoder, Err}
 import _root_.scodec.bits.ByteVector
 
-import java.nio.charset.StandardCharsets
-
 private[pdf] object PdfByteLexer {
 
   sealed trait HeaderEvent
@@ -23,6 +21,8 @@ private[pdf] object PdfByteLexer {
     final case class X(x: Xref)                       extends HeaderEvent
     final case class W(b: Byte)                       extends HeaderEvent
     final case class H(o: IndirectObj.IndirectObjHeader) extends HeaderEvent
+    /** Index + optional `/Length` — no `Obj` / `Prim` tree. */
+    final case class ObjHead(index: Obj.Index, streamLength: Option[Long]) extends HeaderEvent
   }
 
   sealed trait LexResult
@@ -94,11 +94,13 @@ private[pdf] object PdfByteLexer {
     else
       None
 
-  private val pdfMagic: ByteVector = ByteVector.view("%PDF-".getBytes)
-  private val streamKeyword: ByteVector = ByteVector.view("stream".getBytes(StandardCharsets.US_ASCII))
-  private val objKeyword: ByteVector = ByteVector.view("obj".getBytes(StandardCharsets.US_ASCII))
-  private val xrefKeyword: ByteVector = ByteVector.view("xref".getBytes(StandardCharsets.US_ASCII))
-  private val eofKeyword: ByteVector = ByteVector.view("%%EOF".getBytes(StandardCharsets.US_ASCII))
+  private val pdfMagic: ByteVector      = ascii"%PDF-"
+  private val streamKeyword: ByteVector = ascii"stream"
+  private val objKeyword: ByteVector    = ascii"obj"
+  private val endobjKeyword: ByteVector = ascii"endobj"
+  private val xrefKeyword: ByteVector   = ascii"xref"
+  private val eofKeyword: ByteVector    = ascii"%%EOF"
+  private val lengthName: Array[Byte]   = asciiBytes"Length"
 
   private enum RawLength:
     case Direct(value: Long)
@@ -107,9 +109,42 @@ private[pdf] object PdfByteLexer {
   private def keywordAt(bytes: ByteVector, at: Int, keyword: ByteVector): Boolean =
     at >= 0 && at.toLong + keyword.size <= bytes.size && bytes.slice(at, at + keyword.size.toInt) == keyword
 
+  private def isDelim(b: Byte): Boolean =
+    isWs(b) ||
+      b == '('.toByte || b == ')'.toByte ||
+      b == '<'.toByte || b == '>'.toByte ||
+      b == '['.toByte || b == ']'.toByte ||
+      b == '{'.toByte || b == '}'.toByte ||
+      b == '/'.toByte || b == '%'.toByte
+
   private def parseLong(bytes: ByteVector, from: Int, until: Int): Either[Throwable, Long] =
-    try Right(new String(bytes.slice(from, until).toArray, StandardCharsets.US_ASCII).toLong)
-    catch case error: NumberFormatException => Left(error)
+    if until <= from then Left(IllegalArgumentException("empty number"))
+    else
+      var n        = 0L
+      var i        = from
+      var overflow = false
+      while i < until && !overflow do
+        if n > (Long.MaxValue - 9L) / 10L then overflow = true
+        else
+          n = n * 10L + (bytes(i) - '0'.toByte).toLong
+          i += 1
+      if overflow then Left(IllegalArgumentException("number overflows Long"))
+      else Right(n)
+
+  private def nameIs(bytes: ByteVector, from: Int, until: Int, name: Array[Byte]): Boolean =
+    until - from == name.length && {
+      var i     = 0
+      var same  = true
+      while i < name.length && same do
+        if bytes(from + i) != name(i) then same = false
+        i += 1
+      same
+    }
+
+  private def tokenAt(bytes: ByteVector, at: Int, keyword: ByteVector): Boolean =
+    keywordAt(bytes, at, keyword) &&
+      (at == 0 || isDelim(bytes(at - 1))) &&
+      (at.toLong + keyword.size >= bytes.size || isDelim(bytes(at + keyword.size.toInt)))
 
   /** Find a top-level direct or indirect `/Length` inside one complete dictionary. */
   private def rawLength(bytes: ByteVector, from: Int, until: Int): Either[Throwable, RawLength] =
@@ -154,8 +189,7 @@ private[pdf] object PdfByteLexer {
         var nameEnd   = nameStart
         while nameEnd < until && !isWs(bytes(nameEnd)) && !"/[]<>()".contains(bytes(nameEnd).toChar) do
           nameEnd += 1
-        val name = new String(bytes.slice(nameStart, nameEnd).toArray, StandardCharsets.US_ASCII)
-        if name == "Length" then
+        if nameIs(bytes, nameStart, nameEnd, lengthName) then
           val firstStart = skipWs(bytes, nameEnd)
           val (_, firstEnd) = readDigits(bytes, firstStart)
           if firstEnd == firstStart then
@@ -179,101 +213,208 @@ private[pdf] object PdfByteLexer {
 
     Left(IllegalArgumentException("stream dictionary has no /Length"))
 
+  /** Index just after a complete `<< ... >>`, or -1 if the dict is unfinished. */
+  private def scanDictionary(bytes: ByteVector, start: Int): Int =
+    if start + 2 > bytes.size || bytes(start) != '<'.toByte || bytes(start + 1) != '<'.toByte then -1
+    else
+      var index        = start + 2
+      var depth        = 1
+      var literalDepth = 0
+      var escaped      = false
+      var hexString    = false
+      var comment      = false
+      var dictionaryEnd = -1
+      while index < bytes.size && dictionaryEnd < 0 do
+        val byte = bytes(index)
+        if comment then
+          if byte == '\n'.toByte || byte == '\r'.toByte then comment = false
+          index += 1
+        else if literalDepth > 0 then
+          if escaped then escaped = false
+          else if byte == '\\'.toByte then escaped = true
+          else if byte == '('.toByte then literalDepth += 1
+          else if byte == ')'.toByte then literalDepth -= 1
+          index += 1
+        else if hexString then
+          if byte == '>'.toByte then hexString = false
+          index += 1
+        else if byte == '%'.toByte then
+          comment = true
+          index += 1
+        else if byte == '('.toByte then
+          literalDepth = 1
+          index += 1
+        else if byte == '<'.toByte && index + 1 < bytes.size && bytes(index + 1) == '<'.toByte then
+          depth += 1
+          index += 2
+        else if byte == '>'.toByte && index + 1 < bytes.size && bytes(index + 1) == '>'.toByte then
+          depth -= 1
+          index += 2
+          if depth == 0 then dictionaryEnd = index
+        else if byte == '<'.toByte then
+          hexString = true
+          index += 1
+        else index += 1
+      dictionaryEnd
+
   /**
-   * Boundary-mode fallback for compact dictionaries rejected by the semantic
-   * scodec parser. It recognizes only a complete dictionary followed by a
-   * stream marker and extracts no metadata beyond object index and /Length.
+   * Byte index of a top-level `endobj` token, or -1 if the value is unfinished.
+   * Skips strings, comments, names, dictionaries, and arrays so a payload
+   * `endobj` inside `(...)` is not a boundary.
    */
-  private def tryRawDictionaryStream(bytes: ByteVector): Option[LexResult] =
+  private def findEndobj(bytes: ByteVector, from: Int): Int =
+    var index        = from
+    var dictDepth    = 0
+    var arrayDepth   = 0
+    var literalDepth = 0
+    var escaped      = false
+    var hexString    = false
+    var comment      = false
+    var found        = -1
+    while index < bytes.size && found < 0 do
+      val byte = bytes(index)
+      if comment then
+        if byte == '\n'.toByte || byte == '\r'.toByte then comment = false
+        index += 1
+      else if literalDepth > 0 then
+        if escaped then escaped = false
+        else if byte == '\\'.toByte then escaped = true
+        else if byte == '('.toByte then literalDepth += 1
+        else if byte == ')'.toByte then literalDepth -= 1
+        index += 1
+      else if hexString then
+        if byte == '>'.toByte then hexString = false
+        index += 1
+      else if byte == '%'.toByte then
+        comment = true
+        index += 1
+      else if byte == '('.toByte then
+        literalDepth = 1
+        index += 1
+      else if byte == '/'.toByte then
+        index += 1
+        while index < bytes.size && !isDelim(bytes(index)) do index += 1
+      else if byte == '<'.toByte && index + 1 < bytes.size && bytes(index + 1) == '<'.toByte then
+        dictDepth += 1
+        index += 2
+      else if byte == '>'.toByte && index + 1 < bytes.size && bytes(index + 1) == '>'.toByte then
+        if dictDepth > 0 then dictDepth -= 1
+        index += 2
+      else if byte == '<'.toByte then
+        hexString = true
+        index += 1
+      else if byte == '['.toByte then
+        arrayDepth += 1
+        index += 1
+      else if byte == ']'.toByte then
+        if arrayDepth > 0 then arrayDepth -= 1
+        index += 1
+      else if dictDepth == 0 && arrayDepth == 0 && tokenAt(bytes, index, endobjKeyword) then
+        found = index
+      else index += 1
+    found
+
+  private def streamNewline(tail: ByteVector): Int =
+    val afterKeyword = streamKeyword.size.toInt
+    if tail.size <= afterKeyword then 0
+    else if tail(afterKeyword) == '\n'.toByte then 1
+    else if tail(afterKeyword) == '\r'.toByte && tail.size == afterKeyword + 1 then 0
+    else if tail(afterKeyword) == '\r'.toByte && tail(afterKeyword + 1) == '\n'.toByte then 2
+    else 0
+
+  private def objHeadResult(
+    bytes: ByteVector,
+    numberStart: Int,
+    numberEnd: Int,
+    generationStart: Int,
+    generationEnd: Int,
+    streamLength: Option[Long],
+    rest: ByteVector
+  ): LexResult =
+    (parseLong(bytes, numberStart, numberEnd), parseLong(bytes, generationStart, generationEnd)) match
+      case (Right(number), Right(generation)) if generation <= Int.MaxValue.toLong =>
+        LexResult.Ok(HeaderEvent.ObjHead(Obj.Index(number, generation.toInt), streamLength), rest)
+      case (_, Right(generation)) if generation > Int.MaxValue.toLong =>
+        LexResult.Failed(IllegalArgumentException("object generation overflows Int"))
+      case (Right(_), Right(_)) =>
+        LexResult.Failed(IllegalArgumentException("object generation is invalid"))
+      case (Left(error), _) => LexResult.Failed(error)
+      case (_, Left(error)) => LexResult.Failed(error)
+
+  /**
+   * Boundary-mode object walk: `N G obj`, optional dict, `/Length` + `stream`
+   * or a depth-aware skip to `endobj`. Does not build an `Obj` / `Prim` tree.
+   */
+  private def tryBoundaryObject(bytes: ByteVector): Option[LexResult] =
     if bytes.isEmpty || !isDigit(bytes(0)) then None
     else
       val (numberStart, numberEnd) = readDigits(bytes, 0)
-      val generationStart         = skipWs(bytes, numberEnd)
-      val (_, generationEnd)      = readDigits(bytes, generationStart)
-      val objectMarker            = skipWs(bytes, generationEnd)
+      val generationStart          = skipWs(bytes, numberEnd)
+      val (_, generationEnd)       = readDigits(bytes, generationStart)
+      val objectMarker             = skipWs(bytes, generationEnd)
       if numberEnd == numberStart || generationEnd == generationStart then Some(LexResult.NeedMore)
       else if !keywordAt(bytes, objectMarker, objKeyword) then Some(LexResult.NeedMore)
       else
-        val dictionaryStart = skipWs(bytes, objectMarker + objKeyword.size.toInt)
-        if dictionaryStart + 2 > bytes.size then Some(LexResult.NeedMore)
-        else if bytes(dictionaryStart) != '<'.toByte || bytes(dictionaryStart + 1) != '<'.toByte then None
-        else
-          var index        = dictionaryStart + 2
-          var depth        = 1
-          var literalDepth = 0
-          var escaped      = false
-          var hexString    = false
-          var comment      = false
-          var dictionaryEnd = -1
-          while index < bytes.size && dictionaryEnd < 0 do
-            val byte = bytes(index)
-            if comment then
-              if byte == '\n'.toByte || byte == '\r'.toByte then comment = false
-              index += 1
-            else if literalDepth > 0 then
-              if escaped then escaped = false
-              else if byte == '\\'.toByte then escaped = true
-              else if byte == '('.toByte then literalDepth += 1
-              else if byte == ')'.toByte then literalDepth -= 1
-              index += 1
-            else if hexString then
-              if byte == '>'.toByte then hexString = false
-              index += 1
-            else if byte == '%'.toByte then
-              comment = true
-              index += 1
-            else if byte == '('.toByte then
-              literalDepth = 1
-              index += 1
-            else if byte == '<'.toByte && index + 1 < bytes.size && bytes(index + 1) == '<'.toByte then
-              depth += 1
-              index += 2
-            else if byte == '>'.toByte && index + 1 < bytes.size && bytes(index + 1) == '>'.toByte then
-              depth -= 1
-              index += 2
-              if depth == 0 then dictionaryEnd = index
-            else if byte == '<'.toByte then
-              hexString = true
-              index += 1
-            else index += 1
-
+        val body = skipWs(bytes, objectMarker + objKeyword.size.toInt)
+        if body >= bytes.size then Some(LexResult.NeedMore)
+        else if bytes(body) == '<'.toByte && body + 1 < bytes.size && bytes(body + 1) == '<'.toByte then
+          val dictionaryEnd = scanDictionary(bytes, body)
           if dictionaryEnd < 0 then Some(LexResult.NeedMore)
           else
             val marker = skipWs(bytes, dictionaryEnd)
             val tail   = bytes.drop(marker)
             if streamKeyword.take(tail.size) == tail then Some(LexResult.NeedMore)
-            else if !tail.startsWith(streamKeyword) then None
-            else
-              val afterKeyword = streamKeyword.size.toInt
-              val newline =
-                if tail.size <= afterKeyword then 0
-                else if tail(afterKeyword) == '\n'.toByte then 1
-                else if tail(afterKeyword) == '\r'.toByte && tail.size == afterKeyword + 1 then 0
-                else if tail(afterKeyword) == '\r'.toByte && tail(afterKeyword + 1) == '\n'.toByte then 2
-                else 0
+            else if tail.startsWith(streamKeyword) then
+              val newline = streamNewline(tail)
               if newline == 0 then Some(LexResult.NeedMore)
               else
                 (parseLong(bytes, numberStart, numberEnd), parseLong(bytes, generationStart, generationEnd)) match
                   case (Right(number), Right(generation)) if generation <= Int.MaxValue.toLong =>
                     val objectIndex = Obj.Index(number, generation.toInt)
-                    rawLength(bytes, dictionaryStart + 2, dictionaryEnd - 2) match
+                    rawLength(bytes, body + 2, dictionaryEnd - 2) match
                       case Right(RawLength.Direct(length)) =>
                         Some(
                           LexResult.Ok(
-                            HeaderEvent.H(IndirectObj.IndirectObjHeader(Obj(objectIndex, Prim.Dict.empty), Some(length))),
-                            tail.drop(afterKeyword + newline)
+                            HeaderEvent.ObjHead(objectIndex, Some(length)),
+                            tail.drop(streamKeyword.size.toInt + newline)
                           )
                         )
                       case Right(RawLength.Indirect(reference)) =>
                         Some(LexResult.Failed(StreamingDecode.UnresolvedIndirectStreamLength(objectIndex, reference)))
                       case Left(error) =>
                         Some(LexResult.Failed(StreamingDecode.InvalidDeclaredStreamLength(objectIndex, error.getMessage)))
-                  case (_, Right(generation)) if generation > Int.MaxValue.toLong =>
-                    Some(LexResult.Failed(IllegalArgumentException("object generation overflows Int")))
-                  case (Right(_), Right(_)) =>
-                    Some(LexResult.Failed(IllegalArgumentException("object generation is invalid")))
-                  case (Left(error), _) => Some(LexResult.Failed(error))
-                  case (_, Left(error)) => Some(LexResult.Failed(error))
+                  case other =>
+                    Some(objHeadResult(bytes, numberStart, numberEnd, generationStart, generationEnd, None, tail))
+            else
+              val endobjAt = findEndobj(bytes, marker)
+              if endobjAt < 0 then Some(LexResult.NeedMore)
+              else
+                Some(
+                  objHeadResult(
+                    bytes,
+                    numberStart,
+                    numberEnd,
+                    generationStart,
+                    generationEnd,
+                    None,
+                    bytes.drop(endobjAt)
+                  )
+                )
+        else
+          val endobjAt = findEndobj(bytes, body)
+          if endobjAt < 0 then Some(LexResult.NeedMore)
+          else
+            Some(
+              objHeadResult(
+                bytes,
+                numberStart,
+                numberEnd,
+                generationStart,
+                generationEnd,
+                None,
+                bytes.drop(endobjAt)
+              )
+            )
 
   /** Boundary mode does not need xref rows, only to advance to the next revision. */
   private def tryRawXrefSection(bytes: ByteVector): Option[LexResult] =
@@ -399,8 +540,8 @@ private[pdf] object PdfByteLexer {
     tryWhitespace(bytes)
       .orElse(tryVersion(bytes))
       .orElse(tryComment(bytes))
+      .orElse(Option.when(allowRawDictionaryStream)(tryBoundaryObject(bytes)).flatten)
       .orElse(tryIndirectObject(bytes))
-      .orElse(Option.when(allowRawDictionaryStream)(tryRawDictionaryStream(bytes)).flatten)
       .orElse(Option.when(allowRawDictionaryStream)(tryRawXrefSection(bytes)).flatten)
       .getOrElse(scodecDecode(bytes))
 }
