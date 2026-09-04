@@ -21,7 +21,34 @@ workerScope.addEventListener("message", (event) => {
       : request.kind === "rotate" ? ZioPdfDemo.rotatePagesBlob(request.file, request.degrees, request.fromPage, request.toPage)
       : request.kind === "split" ? ZioPdfDemo.splitPagesBlob(request.file)
       : request.kind === "watermark"
-        ? ZioPdfDemo.watermarkBlob(request.file, request.text, request.diagonal, request.fromPage, request.toPage)
+        ? request.mode === "image" && request.imageBytes && request.imageFormat && request.imageWidth && request.imageHeight
+          ? ZioPdfDemo.watermarkImageBlob(
+              request.file,
+              request.imageFormat,
+              request.imageWidth,
+              request.imageHeight,
+              request.imageBytes,
+              request.opacity ?? 0.35,
+              request.placement ?? "center",
+              request.imageScale ?? 0.25,
+              request.fromPage,
+              request.toPage
+            )
+          : ZioPdfDemo.watermarkTextBlob(
+              request.file,
+              request.text ?? "FILED",
+              request.diagonal ?? true,
+              request.font ?? "helvetica",
+              request.useRgb ?? false,
+              request.gray ?? 0.72,
+              request.red ?? 0.8,
+              request.green ?? 0.1,
+              request.blue ?? 0.1,
+              request.opacity ?? 1,
+              request.placement ?? "center",
+              request.fromPage,
+              request.toPage
+            )
       : ZioPdfDemo.mergeBlobs(request.file, request.secondary);
     void pending.then(
       (execution) => workerScope.postMessage(

@@ -295,6 +295,45 @@ object PdfWorkflowSpec extends ZIOSpecDefault {
         !second.contains("(CONFIDENTIAL)")
       )
     },
+    test("watermark rich text uses font, RGB color, opacity, and placement") {
+      for {
+        source  <- singlePagePdf("draft")
+        stamped <- PdfEngine.watermark(
+                     source,
+                     PdfWatermark.Text(
+                       text = "DRAFT",
+                       font = PdfWatermark.StandardFont.TimesBold,
+                       color = PdfWatermark.Color.Rgb(0.8, 0.1, 0.1),
+                       opacity = 0.5,
+                       placement = PdfWatermark.Placement.BottomRight,
+                       diagonal = false
+                     )
+                   )
+        text = new String(stamped.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        text.contains("(DRAFT)"),
+        text.contains("/TiBo"),
+        text.contains("0.8 0.1 0.1 rg"),
+        text.contains("/GsWm gs"),
+        text.contains("/ExtGState")
+      )
+    },
+    test("watermark gray image stamps an Image XObject onto selected pages") {
+      val pixels = Chunk.fromArray(Array.fill[Byte](64)(0x90.toByte))
+      for {
+        source  <- singlePagePdf("logo")
+        stamped <- PdfEngine.watermark(
+                     source,
+                     PdfWatermark.GrayImage(width = 8, height = 8, pixels = pixels, opacity = 0.4, scale = 0.2)
+                   )
+        text = new String(stamped.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        text.contains("/Subtype /Image"),
+        text.contains("/DeviceGray"),
+        text.contains("/WmImg Do"),
+        text.contains("/ExtGState")
+      )
+    },
     test("linearize fromBytes fails before decode when the document exceeds ByteLimit") {
       for {
         source <- singlePagePdf("bound")

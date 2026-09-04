@@ -61,10 +61,24 @@ export type ScanWorkerRequest =
       readonly kind: "watermark";
       readonly id: number;
       readonly file: File;
-      readonly text: string;
-      readonly diagonal: boolean;
+      readonly mode: "text" | "image";
       readonly fromPage: number;
       readonly toPage: number;
+      readonly text?: string;
+      readonly diagonal?: boolean;
+      readonly font?: string;
+      readonly useRgb?: boolean;
+      readonly gray?: number;
+      readonly red?: number;
+      readonly green?: number;
+      readonly blue?: number;
+      readonly opacity?: number;
+      readonly placement?: string;
+      readonly imageFormat?: string;
+      readonly imageWidth?: number;
+      readonly imageHeight?: number;
+      readonly imageBytes?: Uint8Array;
+      readonly imageScale?: number;
     };
 
 export type ScanWorkerMessage =

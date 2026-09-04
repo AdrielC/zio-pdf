@@ -115,6 +115,11 @@ declare module "zio-pdf-demo" {
     formRemaining?: boolean;
     watermarkText?: string;
     watermarkDiagonal?: boolean;
+    watermarkKind?: string;
+    watermarkFont?: string;
+    watermarkOpacity?: number;
+    watermarkPlacement?: string;
+    watermarkScale?: number;
   }
 
   export const ZioPdfDemo: {
@@ -147,6 +152,33 @@ declare module "zio-pdf-demo" {
     input: Blob,
     text: string,
     diagonal: boolean,
+    fromPage: number,
+    toPage: number
+  ): Promise<WorkflowExecution>;
+  watermarkTextBlob(
+    input: Blob,
+    text: string,
+    diagonal: boolean,
+    font: string,
+    useRgb: boolean,
+    gray: number,
+    red: number,
+    green: number,
+    blue: number,
+    opacity: number,
+    placement: string,
+    fromPage: number,
+    toPage: number
+  ): Promise<WorkflowExecution>;
+  watermarkImageBlob(
+    input: Blob,
+    format: string,
+    width: number,
+    height: number,
+    imageBytes: Uint8Array,
+    opacity: number,
+    placement: string,
+    scale: number,
     fromPage: number,
     toPage: number
   ): Promise<WorkflowExecution>;

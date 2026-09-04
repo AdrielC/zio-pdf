@@ -385,6 +385,18 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
           }
       }
     },
+    test("Scala.js image watermark embeds an Image XObject") {
+      val pixels = Chunk.fromArray(Array.fill[Byte](64)(0x70.toByte))
+      minimalPdfBytes.flatMap { bytes =>
+        PdfEngine
+          .watermark(bytes, PdfWatermark.GrayImage(width = 8, height = 8, pixels = pixels))
+          .provide(PdfEngine.live)
+          .map { stamped =>
+            val text = new String(stamped.toArray, java.nio.charset.StandardCharsets.ISO_8859_1)
+            assertTrue(stamped.nonEmpty, text.contains("/WmImg Do"), text.contains("/DeviceGray"))
+          }
+      }
+    },
     test("Scala.js extract, split, and rotate page helpers") {
       minimalPdfBytes.flatMap { bytes =>
         for

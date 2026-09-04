@@ -322,12 +322,55 @@
                 <button class="run-transform" id="run-watermark" type="button" disabled>Watermark</button>
                 <button class="run-transform" id="run-thumbnail" type="button" disabled>Attach thumbnail</button>
               </div>
+              <label class="workflow-merge">Watermark mode
+                <select id="watermark-mode" name="watermark-mode">
+                  <option value="text" selected>Text</option>
+                  <option value="image">Image</option>
+                </select>
+              </label>
               <label class="workflow-merge">Watermark text
                 <input id="watermark-text" name="watermark-text" type="text" value="FILED" maxlength="80" />
+              </label>
+              <label class="workflow-merge">Font
+                <select id="watermark-font" name="watermark-font">
+                  <option value="helvetica" selected>Helvetica</option>
+                  <option value="helvetica-bold">Helvetica Bold</option>
+                  <option value="times">Times Roman</option>
+                  <option value="times-bold">Times Bold</option>
+                  <option value="courier">Courier</option>
+                </select>
+              </label>
+              <label class="workflow-merge">Color
+                <select id="watermark-color" name="watermark-color">
+                  <option value="gray" selected>Gray</option>
+                  <option value="red">Red</option>
+                  <option value="blue">Blue</option>
+                  <option value="black">Black</option>
+                </select>
+              </label>
+              <label class="workflow-merge">Opacity
+                <input id="watermark-opacity" name="watermark-opacity" type="range" min="10" max="100" value="72" />
+                <span id="watermark-opacity-label">72%</span>
+              </label>
+              <label class="workflow-merge">Placement
+                <select id="watermark-placement" name="watermark-placement">
+                  <option value="center" selected>Center</option>
+                  <option value="top-left">Top left</option>
+                  <option value="top-right">Top right</option>
+                  <option value="bottom-left">Bottom left</option>
+                  <option value="bottom-right">Bottom right</option>
+                </select>
               </label>
               <label class="workflow-merge">
                 <input id="watermark-diagonal" name="watermark-diagonal" type="checkbox" checked />
                 Diagonal stamp
+              </label>
+              <label class="workflow-merge" id="watermark-image-wrap" hidden>Image stamp
+                <input id="watermark-image" name="watermark-image" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" />
+              </label>
+              <label class="workflow-merge" id="watermark-scale-wrap" hidden>Image scale
+                <input id="watermark-scale" name="watermark-scale" type="range" min="10" max="60" value="25" />
+                <span id="watermark-scale-label">25%</span>
               </label>
               <label class="workflow-merge">Merge with a second filing
                 <input id="merge-file" name="merge-file" type="file" accept="application/pdf,.pdf" />

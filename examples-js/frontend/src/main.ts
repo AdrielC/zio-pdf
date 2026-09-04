@@ -25,7 +25,7 @@ import {
   createIcons
 } from "lucide";
 import type { Analysis, Citation, FontResource, TextRecoveryRequest, TransformExecution, TransformPlan, WorkflowExecution } from "zio-pdf-demo";
-import type { ScanWorkerMessage } from "./scan-protocol";
+import type { ScanWorkerMessage, ScanWorkerRequest } from "./scan-protocol";
 import "./styles.css";
 
 const fileInput = document.querySelector<HTMLInputElement>("#file-input")!;
@@ -108,8 +108,19 @@ const runLinearizeButton = document.querySelector<HTMLButtonElement>("#run-linea
 const runAppendButton = document.querySelector<HTMLButtonElement>("#run-append")!;
 const runFlattenButton = document.querySelector<HTMLButtonElement>("#run-flatten")!;
 const runWatermarkButton = document.querySelector<HTMLButtonElement>("#run-watermark")!;
+const watermarkModeSelect = document.querySelector<HTMLSelectElement>("#watermark-mode")!;
 const watermarkTextInput = document.querySelector<HTMLInputElement>("#watermark-text")!;
+const watermarkFontSelect = document.querySelector<HTMLSelectElement>("#watermark-font")!;
+const watermarkColorSelect = document.querySelector<HTMLSelectElement>("#watermark-color")!;
+const watermarkOpacityInput = document.querySelector<HTMLInputElement>("#watermark-opacity")!;
+const watermarkOpacityLabel = document.querySelector<HTMLElement>("#watermark-opacity-label")!;
+const watermarkPlacementSelect = document.querySelector<HTMLSelectElement>("#watermark-placement")!;
 const watermarkDiagonalInput = document.querySelector<HTMLInputElement>("#watermark-diagonal")!;
+const watermarkImageWrap = document.querySelector<HTMLElement>("#watermark-image-wrap")!;
+const watermarkImageInput = document.querySelector<HTMLInputElement>("#watermark-image")!;
+const watermarkScaleWrap = document.querySelector<HTMLElement>("#watermark-scale-wrap")!;
+const watermarkScaleInput = document.querySelector<HTMLInputElement>("#watermark-scale")!;
+const watermarkScaleLabel = document.querySelector<HTMLElement>("#watermark-scale-label")!;
 const runMergeButton = document.querySelector<HTMLButtonElement>("#run-merge")!;
 const runExtractButton = document.querySelector<HTMLButtonElement>("#run-extract")!;
 const runRotateButton = document.querySelector<HTMLButtonElement>("#run-rotate")!;
@@ -542,6 +553,104 @@ function pageRange(): { fromPage: number; toPage: number } {
   return { fromPage, toPage };
 }
 
+function watermarkOpacity(): number {
+  return Math.max(0.1, Math.min(1, (Number.parseInt(watermarkOpacityInput.value, 10) || 72) / 100));
+}
+
+function watermarkScale(): number {
+  return Math.max(0.1, Math.min(0.6, (Number.parseInt(watermarkScaleInput.value, 10) || 25) / 100));
+}
+
+function watermarkColorValues(): { useRgb: boolean; gray: number; red: number; green: number; blue: number } {
+  switch (watermarkColorSelect.value) {
+    case "red":
+      return { useRgb: true, gray: 0.72, red: 0.8, green: 0.1, blue: 0.1 };
+    case "blue":
+      return { useRgb: true, gray: 0.72, red: 0.1, green: 0.3, blue: 0.8 };
+    case "black":
+      return { useRgb: true, gray: 0.72, red: 0, green: 0, blue: 0 };
+    default:
+      return { useRgb: false, gray: 0.72, red: 0.72, green: 0.72, blue: 0.72 };
+  }
+}
+
+function syncWatermarkMode(): void {
+  const imageMode = watermarkModeSelect.value === "image";
+  watermarkTextInput.closest("label")!.hidden = imageMode;
+  watermarkFontSelect.closest("label")!.hidden = imageMode;
+  watermarkColorSelect.closest("label")!.hidden = imageMode;
+  watermarkDiagonalInput.closest("label")!.hidden = imageMode;
+  watermarkImageWrap.hidden = !imageMode;
+  watermarkScaleWrap.hidden = !imageMode;
+  watermarkOpacityLabel.textContent = `${watermarkOpacityInput.value}%`;
+  watermarkScaleLabel.textContent = `${watermarkScaleInput.value}%`;
+}
+
+async function readWatermarkImage(file: File): Promise<{
+  format: "jpeg" | "rgb";
+  width: number;
+  height: number;
+  bytes: Uint8Array;
+}> {
+  if (file.type === "image/jpeg") {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const bitmap = await createImageBitmap(file);
+    return { format: "jpeg", width: bitmap.width, height: bitmap.height, bytes };
+  }
+  const bitmap = await createImageBitmap(file);
+  const canvas = window.document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("The browser could not prepare the watermark image.");
+  context.drawImage(bitmap, 0, 0);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const rgb = new Uint8Array(canvas.width * canvas.height * 3);
+  for (let index = 0, offset = 0; index < imageData.data.length; index += 4, offset += 3) {
+    rgb[offset] = imageData.data[index]!;
+    rgb[offset + 1] = imageData.data[index + 1]!;
+    rgb[offset + 2] = imageData.data[index + 2]!;
+  }
+  return { format: "rgb", width: canvas.width, height: canvas.height, bytes: rgb };
+}
+
+async function buildWatermarkRequest(id: number, file: File): Promise<ScanWorkerRequest> {
+  const range = pageRange();
+  if (watermarkModeSelect.value === "image") {
+    const imageFile = watermarkImageInput.files?.[0];
+    if (!imageFile) throw new Error("Choose an image to stamp.");
+    const image = await readWatermarkImage(imageFile);
+    return {
+      kind: "watermark",
+      id,
+      file,
+      mode: "image",
+      ...range,
+      imageFormat: image.format,
+      imageWidth: image.width,
+      imageHeight: image.height,
+      imageBytes: image.bytes,
+      opacity: watermarkOpacity(),
+      placement: watermarkPlacementSelect.value,
+      imageScale: watermarkScale()
+    };
+  }
+  const color = watermarkColorValues();
+  return {
+    kind: "watermark",
+    id,
+    file,
+    mode: "text",
+    ...range,
+    text: watermarkTextInput.value.trim() || "FILED",
+    diagonal: watermarkDiagonalInput.checked,
+    font: watermarkFontSelect.value,
+    ...color,
+    opacity: watermarkOpacity(),
+    placement: watermarkPlacementSelect.value
+  };
+}
+
 function stopActiveWorkflow(): boolean {
   const wasRunning = activeWorkflowWorker !== undefined;
   workflowGeneration += 1;
@@ -554,10 +663,14 @@ function stopActiveWorkflow(): boolean {
 
 function syncWorkflowControls(): void {
   const ready = selectedFile !== undefined && !lastInspectionEncrypted;
+  const imageMode = watermarkModeSelect.value === "image";
+  const watermarkReady = imageMode
+    ? watermarkImageInput.files?.[0] !== undefined
+    : watermarkTextInput.value.trim() !== "";
   runLinearizeButton.disabled = !ready;
   runAppendButton.disabled = !ready;
   runFlattenButton.disabled = !ready || !lastInspectionHasForm;
-  runWatermarkButton.disabled = !ready || watermarkTextInput.value.trim() === "";
+  runWatermarkButton.disabled = !ready || !watermarkReady;
   runExtractButton.disabled = !ready;
   runRotateButton.disabled = !ready;
   runSplitButton.disabled = !ready || lastInspectionPages < 2;
@@ -566,7 +679,8 @@ function syncWorkflowControls(): void {
   workflowBadge.textContent = lastInspectionEncrypted ? "Encrypted" : ready ? "Ready" : "Run inspection";
   workflowCopy.textContent = lastInspectionEncrypted
     ? "This filing is encrypted. zio-pdf will not rewrite it."
-    : "Encrypted PDFs cannot be processed. Flatten bakes forms; watermark stamps Helvetica text.";
+    : "Encrypted PDFs cannot be processed. Flatten bakes forms; watermark stamps text or images.";
+  syncWatermarkMode();
 }
 
 type WorkflowKind = "linearize" | "append" | "flatten" | "merge" | "extract" | "rotate" | "split" | "watermark";
@@ -575,7 +689,8 @@ function workflowInWorker(
   kind: WorkflowKind,
   file: File,
   id: number,
-  secondary?: File
+  secondary?: File,
+  watermarkRequest?: ScanWorkerRequest
 ): Promise<WorkflowExecution> {
   const worker = new Worker(new URL("./scan.worker.ts", import.meta.url), {
     type: "module",
@@ -620,15 +735,9 @@ function workflowInWorker(
     if (kind === "merge" && secondary) worker.postMessage({ kind, id, file, secondary });
     else if (kind === "extract") worker.postMessage({ kind, id, file, ...pageRange() });
     else if (kind === "rotate") worker.postMessage({ kind, id, file, degrees: Number.parseInt(pageRotateSelect.value, 10) || 90, ...pageRange() });
-    else if (kind === "watermark") {
-      worker.postMessage({
-        kind,
-        id,
-        file,
-        text: watermarkTextInput.value.trim() || "FILED",
-        diagonal: watermarkDiagonalInput.checked,
-        ...pageRange()
-      });
+    else if (kind === "watermark" && watermarkRequest?.kind === "watermark") {
+      const transfers = watermarkRequest.imageBytes ? [watermarkRequest.imageBytes.buffer] : [];
+      worker.postMessage(watermarkRequest, { transfer: transfers });
     }
     else if (kind !== "merge") worker.postMessage({ kind, id, file });
     else reject(new Error("Choose a second PDF to merge."));
@@ -653,7 +762,8 @@ async function executeWorkflow(kind: WorkflowKind): Promise<void> {
   workflowStatus.textContent = `Running ${kind} in a worker…`;
 
   try {
-    const execution = await workflowInWorker(kind, file, generation, secondary);
+    const watermarkRequest = kind === "watermark" ? await buildWatermarkRequest(generation, file) : undefined;
+    const execution = await workflowInWorker(kind, file, generation, secondary, watermarkRequest);
     if (generation !== workflowGeneration) return;
     const blob = new Blob(execution.chunks.map((chunk) => chunk.buffer as ArrayBuffer), { type: "application/pdf" });
     workflowDownloadUrl = URL.createObjectURL(blob);
@@ -690,10 +800,16 @@ async function executeWorkflow(kind: WorkflowKind): Promise<void> {
             (fallbacks > 0 ? ` and ${fallbacks} text fallback${fallbacks === 1 ? "" : "s"}` : "") +
             `. Form stripped. Preview updated.`;
       } else {
-        const label = execution.watermarkText || watermarkTextInput.value.trim() || "FILED";
-        workflowStatus.textContent = `Watermarked “${label}”` +
-          (execution.watermarkDiagonal === false ? "" : " on the diagonal") +
-          `. Preview updated.`;
+        if (execution.watermarkKind === "image") {
+          workflowStatus.textContent = `Image watermark at ${Math.round((execution.watermarkScale ?? watermarkScale()) * 100)}% scale` +
+            (execution.watermarkPlacement ? ` (${execution.watermarkPlacement.replace("-", " ")})` : "") +
+            `. Preview updated.`;
+        } else {
+          const label = execution.watermarkText || watermarkTextInput.value.trim() || "FILED";
+          workflowStatus.textContent = `Watermarked “${label}”` +
+            (execution.watermarkDiagonal === false ? "" : " on the diagonal") +
+            `. Preview updated.`;
+        }
       }
       const previewFile = new File([blob], `${file.name.replace(/\.pdf$/i, "") || "document"}.${kind}.pdf`, {
         type: "application/pdf"
@@ -1675,6 +1791,19 @@ runSplitButton.addEventListener("click", () => void executeWorkflow("split"));
 runThumbnailButton.addEventListener("click", () => void executeThumbnail());
 mergeFileInput.addEventListener("change", () => syncWorkflowControls());
 watermarkTextInput.addEventListener("input", () => syncWorkflowControls());
+watermarkModeSelect.addEventListener("change", () => syncWorkflowControls());
+watermarkImageInput.addEventListener("change", () => syncWorkflowControls());
+watermarkOpacityInput.addEventListener("input", () => {
+  syncWatermarkMode();
+  syncWorkflowControls();
+});
+watermarkScaleInput.addEventListener("input", () => {
+  syncWatermarkMode();
+  syncWorkflowControls();
+});
+[watermarkFontSelect, watermarkColorSelect, watermarkPlacementSelect, watermarkDiagonalInput].forEach((control) => {
+  control.addEventListener("change", () => syncWorkflowControls());
+});
 window.addEventListener("beforeunload", clearWorkflowDownload);
 [planRemap, planTokenize].forEach((control) => control.addEventListener("change", () => {
   clearTransformDownload();

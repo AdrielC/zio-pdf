@@ -356,14 +356,127 @@ object ZioPdfDemo:
 
   @JSExport
   def watermarkBlob(input: dom.Blob, text: String, diagonal: Boolean, fromPage: Int, toPage: Int): js.Promise[js.Dictionary[js.Any]] =
+    watermarkTextBlob(input, text, diagonal, "helvetica", false, 0.72, 0.8, 0.1, 0.1, 1.0, "center", fromPage, toPage)
+
+  @JSExport
+  def watermarkTextBlob(
+    input: dom.Blob,
+    text: String,
+    diagonal: Boolean,
+    font: String,
+    useRgb: Boolean,
+    gray: Double,
+    red: Double,
+    green: Double,
+    blue: Double,
+    opacity: Double,
+    placement: String,
+    fromPage: Int,
+    toPage: Int
+  ): js.Promise[js.Dictionary[js.Any]] =
     runWorkflow(input) { bytes =>
-      val stamp = PdfWatermark.Text(text, diagonal = diagonal, fromPage = fromPage, toPage = Some(toPage))
+      val stamp = PdfWatermark.Text(
+        text = text,
+        font = parseWatermarkFont(font),
+        color = if useRgb then PdfWatermark.Color.Rgb(red, green, blue) else PdfWatermark.Color.Gray(gray),
+        opacity = opacity,
+        placement = parseWatermarkPlacement(placement),
+        diagonal = diagonal,
+        fromPage = fromPage,
+        toPage = Some(toPage)
+      )
       PdfEngine.watermark(bytes, stamp, browserTransformOptions).map { output =>
         val summary = workflowSummary("watermark", output, None)
+        summary("watermarkKind") = "text"
         summary("watermarkText") = text
         summary("watermarkDiagonal") = diagonal
+        summary("watermarkFont") = font
+        summary("watermarkOpacity") = opacity
+        summary("watermarkPlacement") = placement
         summary
       }
+    }
+
+  @JSExport
+  def watermarkImageBlob(
+    input: dom.Blob,
+    format: String,
+    width: Int,
+    height: Int,
+    imageBytes: Uint8Array,
+    opacity: Double,
+    placement: String,
+    scale: Double,
+    fromPage: Int,
+    toPage: Int
+  ): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      val pixels = Chunk.fromArray(JsBinary.bytes(imageBytes))
+      val stamp: PdfWatermark.Stamp =
+        format.toLowerCase match {
+          case "jpeg" | "jpg" =>
+            PdfWatermark.JpegImage(
+              width = width,
+              height = height,
+              jpeg = pixels,
+              opacity = opacity,
+              placement = parseWatermarkPlacement(placement),
+              scale = scale,
+              fromPage = fromPage,
+              toPage = Some(toPage)
+            )
+          case "rgb" =>
+            PdfWatermark.RgbImage(
+              width = width,
+              height = height,
+              pixels = pixels,
+              opacity = opacity,
+              placement = parseWatermarkPlacement(placement),
+              scale = scale,
+              fromPage = fromPage,
+              toPage = Some(toPage)
+            )
+          case _ =>
+            PdfWatermark.GrayImage(
+              width = width,
+              height = height,
+              pixels = pixels,
+              opacity = opacity,
+              placement = parseWatermarkPlacement(placement),
+              scale = scale,
+              fromPage = fromPage,
+              toPage = Some(toPage)
+            )
+        }
+      PdfEngine.watermark(bytes, stamp, browserTransformOptions).map { output =>
+        val summary = workflowSummary("watermark", output, None)
+        summary("watermarkKind") = "image"
+        summary("watermarkOpacity") = opacity
+        summary("watermarkPlacement") = placement
+        summary("watermarkScale") = scale
+        summary
+      }
+    }
+
+  private def parseWatermarkFont(name: String): PdfWatermark.StandardFont =
+    name.toLowerCase match {
+      case "helvetica-bold"        => PdfWatermark.StandardFont.HelveticaBold
+      case "helvetica-oblique"     => PdfWatermark.StandardFont.HelveticaOblique
+      case "times" | "times-roman" => PdfWatermark.StandardFont.TimesRoman
+      case "times-bold"            => PdfWatermark.StandardFont.TimesBold
+      case "times-italic"          => PdfWatermark.StandardFont.TimesItalic
+      case "courier"               => PdfWatermark.StandardFont.Courier
+      case "courier-bold"          => PdfWatermark.StandardFont.CourierBold
+      case _                       => PdfWatermark.StandardFont.Helvetica
+    }
+
+  private def parseWatermarkPlacement(name: String): PdfWatermark.Placement =
+    name.toLowerCase match {
+      case "top-left"     => PdfWatermark.Placement.TopLeft
+      case "top-right"    => PdfWatermark.Placement.TopRight
+      case "bottom-left"  => PdfWatermark.Placement.BottomLeft
+      case "bottom-right" => PdfWatermark.Placement.BottomRight
+      case _              => PdfWatermark.Placement.Center
     }
 
   @JSExport
