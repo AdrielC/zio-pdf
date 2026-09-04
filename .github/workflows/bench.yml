@@ -43,17 +43,14 @@ jobs:
           fi
           echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
 
-      - name: ScanBench
-        run: >
-          sbt -batch
-          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms ^zio\.pdf\.scan\.bench\.ScanBench\..*$"
-          2>&1 | tee bench-scan.txt
+      - name: Purge stale JMH classes
+        run: rm -rf target/out/jvm/scala-3.8.4/zio-pdf-bench/classes/zio/pdf/scan/bench/jmh_generated
 
-      - name: ComplexScanBench
+      - name: ScannerLiftBench
         run: >
           sbt -batch
-          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu ms ^zio\.pdf\.scan\.bench\.ComplexScanBench\..*$"
-          2>&1 | tee bench-scan-complex.txt
+          "bench/Jmh/run -i 5 -wi 3 -f 1 -t 1 -bm avgt -tu us .*ScannerLiftBench.*"
+          2>&1 | tee bench-scanner-lift.txt
 
       - name: StreamDecoderBench
         run: >

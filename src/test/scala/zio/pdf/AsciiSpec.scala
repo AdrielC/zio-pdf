@@ -16,6 +16,13 @@ object AsciiSpec extends ZIOSpecDefault {
         ascii"".isEmpty
       )
     },
+    test("ascii escape sequences become control bytes") {
+      assertTrue(
+        ascii"stream\n".toArray.sameElements(Array[Byte]('s', 't', 'r', 'e', 'a', 'm', '\n')),
+        ascii"\nendstream\n".head == '\n'.toByte,
+        ascii"\nendstream\nendobj\n".last == '\n'.toByte
+      )
+    },
     test("asciiBytes matches the ByteVector payload") {
       assertTrue(asciiBytes"Length" sameElements ascii"Length".toArray)
     }

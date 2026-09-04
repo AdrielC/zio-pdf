@@ -38,7 +38,7 @@ jobs:
       - name: Test the complete build
         run: |
           npm ci
-          sbt -batch ';clean;root/test;scalaJs/test;bench/test;examples/run'
+          sbt -batch ';clean;root/testFull;scalaJs/testFull;bench/testFull;examples/run'
           npm --prefix examples-js/frontend ci
           npm --prefix examples-js/frontend run build
       - name: Audit the public package

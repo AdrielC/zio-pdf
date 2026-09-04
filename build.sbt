@@ -182,6 +182,8 @@ lazy val scalaJsFrontend = (project in file("examples-js"))
  * (-i = measurement iterations, -wi = warmup iterations,
  *  -f = forks, -t = threads).
  */
+lazy val purgeStaleJmhGenerated = taskKey[Unit]("Remove cached JMH classes from deleted benchmarks")
+
 lazy val bench = (project in file("bench"))
   .enablePlugins(JmhPlugin)
   .dependsOn(root)
@@ -198,7 +200,17 @@ lazy val bench = (project in file("bench"))
     Test / mainClass := Some("zio.pdf.bench.scan.BytePipelineSpec"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     // Inline expansion of `zio.pdf.pipe` in forked JMH runs can fail class loading; keep fuse in PdfHyperdrive.
-    Jmh / fork        := false,
+    Jmh / fork := false,
+    // Action cache can restore jmh_generated classes from deleted ScanBench sources.
+    purgeStaleJmhGenerated := {
+      val stale = (Compile / classDirectory).value / "zio" / "pdf" / "scan" / "bench" / "jmh_generated"
+      if stale.exists then IO.delete(stale)
+    },
+    Jmh / run := (Jmh / run).dependsOn(purgeStaleJmhGenerated).evaluated,
+    cleanFiles ++= {
+      val stale = (Compile / classDirectory).value / "zio" / "pdf" / "scan" / "bench" / "jmh_generated"
+      if stale.exists then Seq(stale) else Nil
+    },
     // Scala 3.8.4 JVM optimizer, scoped to sources and project packages.
     scalacOptions := (root / scalacOptions).value.filterNot(_.startsWith("-Wunused")) ++ List(
       "-opt",

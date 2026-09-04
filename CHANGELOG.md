@@ -2,14 +2,14 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## [0.2.1] — 2026-09-04
 
 ### Added
 
 - `BlocksLift` pulls ZIO Blocks `Reader` / `Stream` into `ZStream` / `ZChannel` on JVM and Scala.js, using Blocks `Scope` for stream lifetime, `Context` + `Config` for mailbox options, and an MPSC ring-buffer mailbox (sequential on JS; mailbox hops are for a JVM thread boundary only).
 - `PdfObjectScanner.scan` / `sink` stay on a Blocks `Reader` and pull with `readBytes` + `stepChunkBytes`. `streamWindows` emits boundary windows, not one object per ZStream step.
-- In-memory `scan(Chunk)` / `scan(Array)` decode in one carry-bounded window and skip discarded boundary-mode events (`DataObj`, xref, comments).
-- `ascii"..."` / `asciiBytes"..."` bake US-ASCII keyword constants into `ByteVector` / `Array[Byte]` at compile time.
+- In-memory `scan(Chunk)` / `scan(Array)` use `PdfBoundaryScan`, a flat byte-cursor scanner (~7× faster than the prior boundary path on the court corpus).
+- `ascii"..."` / `asciiBytes"..."` bake US-ASCII keyword constants into `ByteVector` / `Array[Byte]` at compile time (including `\n`, `\r`, `\t` escapes).
 - `BlocksLift.fromBytes` / `toByteWriter` move byte windows with `readBytes` / `writeBytes`.
 - Serializable filing-prep programs (`PdfPrep.Program`, `PdfEngine.applyPrep`) derive `zio.blocks.schema.Schema` and round-trip through JSON / `DynamicValue` so a saved program can be applied later.
 - Prep operations include date stamps, Bates labels, catalog `/PageLabels`, redaction boxes (overlay + show-text blanking), and TrueType font embedding.
@@ -17,6 +17,11 @@ All notable changes to this project are documented here.
 - AcroForm inventory walks nested `/Kids` and reports qualified field names (`Address.Street`).
 - Visual flatten honors Form XObject `/Matrix` when mapping `/BBox` onto the widget `/Rect`.
 - Workbench flatten updates the preview and reports how many appearances were baked.
+
+### Fixed
+
+- `ascii"..."` now expands `\n`/`\r`/`\t`/`\\` in stream delimiters — `WritePdf` streaming objects previously emitted literal `\n` text instead of PDF newlines, breaking decode of `Part.StreamObj` PDFs.
+- `PdfBoundaryScan` duplicate filter no longer suppresses first objects when carry replays re-parse the same header.
 
 ### Changed
 
