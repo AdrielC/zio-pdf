@@ -110,6 +110,9 @@ declare module "zio-pdf-demo" {
     firstPagePrefixBytes?: number;
     pageCount?: number;
     documents?: WorkflowDocument[];
+    appearancesPlaced?: number;
+    textFallbacks?: number;
+    formRemaining?: boolean;
   }
 
   export const ZioPdfDemo: {

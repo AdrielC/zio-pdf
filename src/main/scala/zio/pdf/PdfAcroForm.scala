@@ -31,7 +31,13 @@ object PdfAcroForm {
     fields: Chunk[Field],
     catalogObjectNumber: Option[Long],
     formObjectNumber: Option[Long],
-    needAppearances: Boolean
+    needAppearances: Boolean,
+    fieldObjectNumbers: Set[Long] = Set.empty
+  )
+
+  final case class FlattenReport(
+    appearancesPlaced: Int,
+    textFallbacks: Int
   )
 
   def extract(decoded: Chunk[Decoded]): Inventory = {
@@ -47,47 +53,44 @@ object PdfAcroForm {
         (None, None)
     }
     val needAppearances = formDict.exists(_.data.get("NeedAppearances").contains(Prim.Bool(true)))
-    val fields = formDict.flatMap(_.data.get("Fields")) match {
-      case Some(Prim.Array(entries)) =>
-        Chunk.fromIterable(entries.flatMap {
-          case Prim.Ref(number, _) =>
-            objects.get(number).flatMap(obj => dictAt(obj.data).map(fieldOf(number, _)))
-          case dict: Prim.Dict =>
-            Some(fieldOf(0L, dict))
-          case _ =>
-            None
-        })
-      case _ =>
-        Chunk.empty
+    val roots = formDict.flatMap(_.data.get("Fields")) match {
+      case Some(Prim.Array(entries)) => entries.toList
+      case _                         => Nil
     }
+    val walked = walkFields(roots, objects, None, None, None, Set.empty)
     Inventory(
-      fields = fields,
+      fields = Chunk.fromIterable(walked.fields),
       catalogObjectNumber = catalog.map(_.index.number),
       formObjectNumber = formObjectNumber,
-      needAppearances = needAppearances
+      needAppearances = needAppearances,
+      fieldObjectNumbers = walked.nodes
     )
   }
 
   /** Bake appearances into page content, then drop /AcroForm and widgets. */
   def flatten(decoded: Chunk[Decoded]): ZIO[Any, Throwable, Chunk[Byte]] =
-    ZIO.fromEither(flattenParts(decoded)).flatMap { parts =>
+    flattenReported(decoded).map(_._1)
+
+  def flattenReported(decoded: Chunk[Decoded]): ZIO[Any, Throwable, (Chunk[Byte], FlattenReport)] =
+    ZIO.fromEither(flattenParts(decoded)).flatMap { (parts, report) =>
       ZStream
         .fromChunk(parts)
         .via(WritePdf.parts)
         .runFold(Chunk.empty[Byte])((acc, chunk) => acc ++ Chunk.fromArray(chunk.toArray))
+        .map(_ -> report)
     }
 
-  def flattenParts(decoded: Chunk[Decoded]): Either[Error, Chunk[Part[Trailer]]] = {
+  def flattenParts(decoded: Chunk[Decoded]): Either[Error, (Chunk[Part[Trailer]], FlattenReport)] = {
     val inventory = extract(decoded)
     if inventory.catalogObjectNumber.isEmpty && inventory.formObjectNumber.isEmpty && inventory.fields.isEmpty then
       Left(NoAcroForm)
     else
       val objects = objectMap(decoded)
       val streams = streamMap(decoded)
-      val widgets = objects.collect {
+      val drop = objects.collect {
         case (number, obj) if isWidget(obj.data) => number
-      }.toSet ++ inventory.formObjectNumber.toSet
-      val baked     = bakeAppearances(objects, streams, widgets)
+      }.toSet ++ inventory.formObjectNumber.toSet ++ inventory.fieldObjectNumbers
+      val baked     = bakeAppearances(objects, streams, drop)
       val rewritten = decoded.flatMap {
         case Decoded.Meta(_, trailer, _) =>
           val sized = trailer.map { meta =>
@@ -95,25 +98,32 @@ object PdfAcroForm {
             else meta
           }
           sized.toList.map(Part.Meta(_))
-        case Decoded.DataObj(obj) if widgets.contains(obj.index.number) && !baked.keptAppearances.contains(obj.index.number) =>
+        case Decoded.DataObj(obj) if drop.contains(obj.index.number) && !baked.keptAppearances.contains(obj.index.number) =>
           Chunk.empty
         case Decoded.ContentObj(obj, _, _)
-            if widgets.contains(obj.index.number) && !baked.keptAppearances.contains(obj.index.number) =>
+            if drop.contains(obj.index.number) && !baked.keptAppearances.contains(obj.index.number) =>
           Chunk.empty
         case Decoded.DataObj(obj) =>
-          Chunk(Part.Obj(IndirectObj(rewriteObj(applyPageUpdate(obj, baked.pages), widgets), None)))
+          Chunk(Part.Obj(IndirectObj(rewriteObj(applyPageUpdate(obj, baked.pages), drop), None)))
         case Decoded.ContentObj(obj, rawStream, _) =>
-          Chunk(Part.Obj(IndirectObj(rewriteObj(applyPageUpdate(obj, baked.pages), widgets), Some(rawStream))))
+          Chunk(Part.Obj(IndirectObj(rewriteObj(applyPageUpdate(obj, baked.pages), drop), Some(rawStream))))
       }
-      Right(rewritten ++ baked.extra)
+      Right(
+        rewritten ++ baked.extra,
+        FlattenReport(appearancesPlaced = baked.appearancesPlaced, textFallbacks = baked.textFallbacks)
+      )
   }
 
   private final case class Bake(
     pages: Map[Long, Prim.Dict],
     extra: Chunk[Part[Trailer]],
     keptAppearances: Set[Long],
-    nextNumber: Long
+    nextNumber: Long,
+    appearancesPlaced: Int,
+    textFallbacks: Int
   )
+
+  private final case class FieldWalk(fields: List[Field], nodes: Set[Long])
 
   private final class Fresh(start: Long) {
     private var current = start
@@ -145,6 +155,8 @@ object PdfAcroForm {
     val extras        = Chunk.newBuilder[Part[Trailer]]
     val pageUpdates   = scala.collection.mutable.Map.empty[Long, Prim.Dict]
     val kept          = scala.collection.mutable.Set.empty[Long]
+    var appearancesPlaced = 0
+    var textFallbacks     = 0
 
     widgetsByPage.foreach { (pageNumber, widgetNumbers) =>
       val pageObj  = pages(pageNumber)
@@ -162,6 +174,8 @@ object PdfAcroForm {
         }
       }
       if placements.nonEmpty then
+        appearancesPlaced += placements.count(_.xobject.nonEmpty)
+        textFallbacks += placements.count(_.needsFont)
         val bytes  = placements.map(_.content).mkString("\n").getBytes(StandardCharsets.ISO_8859_1)
         val stream = fresh.next()
         extras += Part.Obj(IndirectObj.stream(stream, Prim.dict(), BitVector(bytes)))
@@ -175,7 +189,7 @@ object PdfAcroForm {
         pageUpdates.update(pageNumber, updated)
     }
 
-    Bake(pageUpdates.toMap, extras.result(), kept.toSet, fresh.peek)
+    Bake(pageUpdates.toMap, extras.result(), kept.toSet, fresh.peek, appearancesPlaced, textFallbacks)
   }
 
   private def placementOf(
@@ -196,11 +210,12 @@ object PdfAcroForm {
             .flatMap(obj => dictAt(obj.data).flatMap(bboxAt))
             .orElse(rect.map(rectAsBBox))
             .getOrElse((0.0, 0.0, 1.0, 1.0))
-          val box  = rect.getOrElse(bbox)
-          val name = unusedName(usedNames, s"Ff${index + 1}")
+          val box    = rect.getOrElse(bbox)
+          val matrix = objects.get(appearanceNumber).flatMap(obj => dictAt(obj.data)).map(matrixAt).getOrElse(identityMatrix)
+          val name   = unusedName(usedNames, s"Ff${index + 1}")
           (
             Placement(
-              content = appearanceContent(name, box, bbox),
+              content = appearanceContent(name, box, bbox, matrix),
               xobject = Some((name, Prim.Ref(refNumber, 0))),
               needsFont = false
             ),
@@ -232,21 +247,30 @@ object PdfAcroForm {
           .flatMap(obj => dictAt(obj.data).flatMap(bboxAt))
           .orElse(rectAt(widget).map(rectAsBBox))
           .getOrElse((0.0, 0.0, 1.0, 1.0))
-        val dict = Prim.dict(
-          "Type"    -> Prim.Name("XObject"),
-          "Subtype" -> Prim.Name("Form"),
-          "BBox"    -> Prim.Array.nums(bbox._1, bbox._2, bbox._3, bbox._4)
-        )
+        val source = objects.get(appearanceNumber).flatMap(obj => dictAt(obj.data))
+        val dict = List("Matrix", "Resources").foldLeft(
+          Prim.dict(
+            "Type"    -> Prim.Name("XObject"),
+            "Subtype" -> Prim.Name("Form"),
+            "BBox"    -> Prim.Array.nums(bbox._1, bbox._2, bbox._3, bbox._4)
+          )
+        ) { (acc, key) =>
+          source.flatMap(_.data.get(key)) match {
+            case Some(value) => Prim.Dict(acc.data.updated(key, value))
+            case None        => acc
+          }
+        }
         (number, Some(Part.Obj(IndirectObj.stream(number, dict, raw))))
       }
 
   private def appearanceContent(
     name: String,
     rect: (Double, Double, Double, Double),
-    bbox: (Double, Double, Double, Double)
+    bbox: (Double, Double, Double, Double),
+    matrix: (Double, Double, Double, Double, Double, Double)
   ): String = {
     val (x1, y1, x2, y2) = normalize(rect)
-    val (bx1, by1, bx2, by2) = normalize(bbox)
+    val (bx1, by1, bx2, by2) = transformBox(bbox, matrix)
     val bboxW = math.max(bx2 - bx1, 0.0001)
     val bboxH = math.max(by2 - by1, 0.0001)
     val sx    = (x2 - x1) / bboxW
@@ -419,13 +443,101 @@ object PdfAcroForm {
         dict
     }
 
-  private def fieldOf(number: Long, dict: Prim.Dict): Field =
-    Field(
-      name = nameAt(dict, "T"),
-      fieldType = nameAt(dict, "FT"),
-      objectNumber = number,
-      value = stringAt(dict, "V")
-    )
+  private def walkFields(
+    entries: List[Prim],
+    objects: Map[Long, Obj],
+    inheritedName: Option[String],
+    inheritedType: Option[String],
+    inheritedValue: Option[String],
+    seen: Set[Long]
+  ): FieldWalk =
+    entries.foldLeft(FieldWalk(Nil, Set.empty)) { (acc, entry) =>
+      val next = entry match {
+        case Prim.Ref(number, _) if !seen.contains(number) =>
+          objects.get(number).flatMap(obj => dictAt(obj.data)) match {
+            case Some(dict) =>
+              walkFieldDict(number, dict, objects, inheritedName, inheritedType, inheritedValue, seen + number)
+            case None =>
+              FieldWalk(Nil, Set.empty)
+          }
+        case dict: Prim.Dict =>
+          walkFieldDict(0L, dict, objects, inheritedName, inheritedType, inheritedValue, seen)
+        case _ =>
+          FieldWalk(Nil, Set.empty)
+      }
+      FieldWalk(acc.fields ++ next.fields, acc.nodes ++ next.nodes)
+    }
+
+  private def walkFieldDict(
+    number: Long,
+    dict: Prim.Dict,
+    objects: Map[Long, Obj],
+    inheritedName: Option[String],
+    inheritedType: Option[String],
+    inheritedValue: Option[String],
+    seen: Set[Long]
+  ): FieldWalk = {
+    val name  = qualifyName(inheritedName, nameAt(dict, "T"))
+    val ft    = nameAt(dict, "FT").orElse(inheritedType)
+    val value = stringAt(dict, "V").orElse(inheritedValue)
+    val kids  = kidsOf(dict)
+    val child = walkFields(kids, objects, name, ft, value, seen)
+    val leaf  = kids.isEmpty || isWidget(dict) || child.fields.isEmpty
+    val self  =
+      if leaf && (name.nonEmpty || ft.nonEmpty || value.nonEmpty || isWidget(dict)) then
+        List(Field(name, ft, number, value))
+      else Nil
+    FieldWalk(self ++ child.fields, child.nodes + number)
+  }
+
+  private def kidsOf(dict: Prim.Dict): List[Prim] =
+    dict.data.get("Kids") match {
+      case Some(Prim.Array(entries)) => entries.toList
+      case _                         => Nil
+    }
+
+  private def qualifyName(parent: Option[String], local: Option[String]): Option[String] =
+    (parent, local) match {
+      case (Some(prefix), Some(name)) => Some(s"$prefix.$name")
+      case (Some(prefix), None)       => Some(prefix)
+      case (None, Some(name))         => Some(name)
+      case (None, None)               => None
+    }
+
+  private val identityMatrix: (Double, Double, Double, Double, Double, Double) =
+    (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+  private def matrixAt(dict: Prim.Dict): (Double, Double, Double, Double, Double, Double) =
+    dict.data.get("Matrix") match {
+      case Some(Prim.Array(entries)) if entries.length >= 6 =>
+        (
+          asDouble(entries(0)),
+          asDouble(entries(1)),
+          asDouble(entries(2)),
+          asDouble(entries(3)),
+          asDouble(entries(4)),
+          asDouble(entries(5))
+        ) match {
+          case (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)) => (a, b, c, d, e, f)
+          case _                                                    => identityMatrix
+        }
+      case _ =>
+        identityMatrix
+    }
+
+  private def transformBox(
+    box: (Double, Double, Double, Double),
+    matrix: (Double, Double, Double, Double, Double, Double)
+  ): (Double, Double, Double, Double) = {
+    val (x1, y1, x2, y2) = normalize(box)
+    val (a, b, c, d, e, f) = matrix
+    def apply(x: Double, y: Double): (Double, Double) =
+      (a * x + c * y + e, b * x + d * y + f)
+    val corners = List(apply(x1, y1), apply(x2, y1), apply(x1, y2), apply(x2, y2))
+    val xs      = corners.map(_._1)
+    val ys      = corners.map(_._2)
+    (xs.min, ys.min, xs.max, ys.max)
+  }
 
   private def nameAt(dict: Prim.Dict, key: String): Option[String] =
     dict.data.get(key).collect { case Prim.Name(value) => value }.orElse(stringAt(dict, key))

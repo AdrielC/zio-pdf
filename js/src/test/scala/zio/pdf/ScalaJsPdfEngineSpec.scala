@@ -342,6 +342,24 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("Scala.js append fails before rewrite when the base exceeds ByteLimit") {
+      minimalPdfBytes.flatMap { bytes =>
+        val limit = ByteLimit.fromBytes(8L).toOption.get
+        PdfEngine
+          .appendRevision(
+            bytes,
+            Chunk(Part.Meta(Trailer(BigDecimal(6), Prim.dict(), None))),
+            PdfEngine.Options(maxMaterializedDocumentBytes = limit)
+          )
+          .either
+          .map {
+            case Left(PdfEngine.MaterializedDocumentLimitExceeded(`limit`, observed)) =>
+              assertTrue(observed == bytes.size.toLong)
+            case _ =>
+              assertTrue(false)
+          }
+      }
+    },
     test("Scala.js linearize fails before decode when the document exceeds ByteLimit") {
       minimalPdfBytes.flatMap { bytes =>
         val limit = ByteLimit.fromBytes(8L).toOption.get

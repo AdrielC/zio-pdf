@@ -447,6 +447,158 @@ object PdfWorkflowSpec extends ZIOSpecDefault {
         !text.contains("/Widget")
       )
     },
+    test("extract walks nested AcroForm /Kids with qualified names") {
+      val formParts = Chunk(
+        Part.Obj(IndirectObj.nostream(1L, Prim.dict("Type" -> Prim.Name("Catalog"), "Pages" -> Prim.Ref(2L, 0), "AcroForm" -> Prim.Ref(5L, 0)))),
+        Part.Obj(
+          IndirectObj.nostream(
+            2L,
+            Prim.dict("Type" -> Prim.Name("Pages"), "Kids" -> Prim.Array(Prim.Ref(3L, 0)), "Count" -> Prim.Number(1))
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            3L,
+            Prim.dict(
+              "Type"     -> Prim.Name("Page"),
+              "Parent"   -> Prim.Ref(2L, 0),
+              "MediaBox" -> Prim.Array.nums(0, 0, 612, 792),
+              "Annots"   -> Prim.Array(Prim.Ref(6L, 0), Prim.Ref(9L, 0))
+            )
+          )
+        ),
+        Part.Obj(IndirectObj.nostream(4L, Prim.dict())),
+        Part.Obj(IndirectObj.nostream(5L, Prim.dict("Fields" -> Prim.Array(Prim.Ref(8L, 0))))),
+        Part.Obj(
+          IndirectObj.nostream(
+            6L,
+            Prim.dict(
+              "Subtype" -> Prim.Name("Widget"),
+              "T"       -> Prim.str("Street"),
+              "FT"      -> Prim.Name("Tx"),
+              "V"       -> Prim.str("Main"),
+              "Rect"    -> Prim.Array.nums(72, 700, 272, 720),
+              "Parent"  -> Prim.Ref(8L, 0)
+            )
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            8L,
+            Prim.dict("T" -> Prim.str("Address"), "Kids" -> Prim.Array(Prim.Ref(6L, 0), Prim.Ref(9L, 0)))
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            9L,
+            Prim.dict(
+              "Subtype" -> Prim.Name("Widget"),
+              "T"       -> Prim.str("City"),
+              "FT"      -> Prim.Name("Tx"),
+              "V"       -> Prim.str("Rome"),
+              "Rect"    -> Prim.Array.nums(72, 670, 272, 690),
+              "Parent"  -> Prim.Ref(8L, 0)
+            )
+          )
+        ),
+        Part.Meta(Trailer(BigDecimal(10), Prim.dict("Root" -> Prim.Ref(1L, 0)), Some(Prim.Ref(1L, 0))))
+      )
+      for {
+        source    <- PdfEngine.writeBytes(formParts)
+        decoded   <- PdfEngine.decode(source)
+        inventory  = PdfAcroForm.extract(decoded)
+        flattened <- PdfEngine.flattenForms(source)
+        after     <- PdfEngine.decode(flattened)
+        text       = new String(flattened.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        inventory.fields.exists(_.name.contains("Address.Street")),
+        inventory.fields.exists(_.name.contains("Address.City")),
+        inventory.fieldObjectNumbers.contains(8L),
+        PdfAcroForm.extract(after).fields.isEmpty,
+        text.contains("(Main)") || text.contains("/Helv"),
+        !text.contains("/AcroForm")
+      )
+    },
+    test("flatten honors Form XObject /Matrix when mapping /BBox to /Rect") {
+      val formParts = Chunk(
+        Part.Obj(IndirectObj.nostream(1L, Prim.dict("Type" -> Prim.Name("Catalog"), "Pages" -> Prim.Ref(2L, 0), "AcroForm" -> Prim.Ref(5L, 0)))),
+        Part.Obj(
+          IndirectObj.nostream(
+            2L,
+            Prim.dict("Type" -> Prim.Name("Pages"), "Kids" -> Prim.Array(Prim.Ref(3L, 0)), "Count" -> Prim.Number(1))
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            3L,
+            Prim.dict(
+              "Type"     -> Prim.Name("Page"),
+              "Parent"   -> Prim.Ref(2L, 0),
+              "MediaBox" -> Prim.Array.nums(0, 0, 612, 792),
+              "Annots"   -> Prim.Array(Prim.Ref(6L, 0))
+            )
+          )
+        ),
+        Part.Obj(IndirectObj.nostream(4L, Prim.dict())),
+        Part.Obj(IndirectObj.nostream(5L, Prim.dict("Fields" -> Prim.Array(Prim.Ref(6L, 0))))),
+        Part.Obj(
+          IndirectObj.nostream(
+            6L,
+            Prim.dict(
+              "Subtype" -> Prim.Name("Widget"),
+              "T"       -> Prim.str("Name"),
+              "FT"      -> Prim.Name("Tx"),
+              "Rect"    -> Prim.Array.nums(72, 700, 272, 720),
+              "AP"      -> Prim.dict("N" -> Prim.Ref(7L, 0))
+            )
+          )
+        ),
+        Part.Obj(
+          IndirectObj.stream(
+            7L,
+            Prim.dict(
+              "Type"    -> Prim.Name("XObject"),
+              "Subtype" -> Prim.Name("Form"),
+              "BBox"    -> Prim.Array.nums(0, 0, 100, 10),
+              "Matrix"  -> Prim.Array.nums(2, 0, 0, 2, 0, 0)
+            ),
+            BitVector("BT /F1 12 Tf 0 0 Td (Ada) Tj ET\n".getBytes(StandardCharsets.ISO_8859_1))
+          )
+        ),
+        Part.Meta(Trailer(BigDecimal(8), Prim.dict("Root" -> Prim.Ref(1L, 0)), Some(Prim.Ref(1L, 0))))
+      )
+      for {
+        source    <- PdfEngine.writeBytes(formParts)
+        decoded   <- PdfEngine.decode(source)
+        reported  <- PdfAcroForm.flattenReported(decoded)
+        (flattened, report) = reported
+        text       = new String(flattened.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        report.appearancesPlaced == 1,
+        text.contains("/Matrix"),
+        text.contains("1 0 0 1 72 700 cm"),
+        text.contains("/Ff1"),
+        text.contains(" Do")
+      )
+    },
+    test("append fails before rewrite when the base exceeds ByteLimit") {
+      for {
+        source <- singlePagePdf("append-bound")
+        limit  <- ZIO.fromEither(ByteLimit.fromBytes(32L))
+        result <- PdfAppend
+                    .append(
+                      source,
+                      Chunk(Part.Meta(Trailer(BigDecimal(6), Prim.dict(), None))),
+                      opts = PdfEngine.Options(maxMaterializedDocumentBytes = limit)
+                    )
+                    .either
+      } yield result match {
+        case Left(PdfEngine.MaterializedDocumentLimitExceeded(`limit`, observed)) =>
+          assertTrue(observed == source.size.toLong)
+        case _ =>
+          assertTrue(false)
+      }
+    },
     test("evidence records encrypted filings as cannot-process blockers") {
       val parts = singlePageParts("secret").map {
         case Part.Meta(trailer) =>

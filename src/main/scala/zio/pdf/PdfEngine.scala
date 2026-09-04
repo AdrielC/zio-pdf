@@ -762,8 +762,12 @@ object PdfEngine:
     PdfMerge.fromBytes(sources, opts)
 
   /** Append a sign/append revision after an existing PDF prefix. */
-  def appendRevision(base: Chunk[Byte], revision: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
-    PdfAppend.append(base, revision)
+  def appendRevision(
+    base: Chunk[Byte],
+    revision: Chunk[Part[Trailer]],
+    opts: Options = Options.default
+  ): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfAppend.append(base, revision, opts = opts)
 
   /** Produce a linearized PDF tuned for fast first-page web display. */
   def linearize(trailerData: Prim.Dict, parts: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =

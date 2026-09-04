@@ -332,13 +332,26 @@ object ZioPdfDemo:
         Part.Obj(IndirectObj.nostream(99L, Prim.dict("Producer" -> Prim.Name("zio-pdf")))),
         Part.Meta(Trailer(BigDecimal(100), Prim.dict("Info" -> Prim.Ref(99L, 0)), None))
       )
-      PdfEngine.appendRevision(bytes, revision).map(output => workflowSummary("append", output, None))
+      PdfEngine.appendRevision(bytes, revision, browserTransformOptions).map(output => workflowSummary("append", output, None))
     }
 
   @JSExport
   def flattenFormsBlob(input: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
     runWorkflow(input) { bytes =>
-      PdfEngine.flattenForms(bytes, browserTransformOptions).map(output => workflowSummary("flatten", output, None))
+      PdfEngine.decode(bytes, browserTransformOptions).flatMap { decoded =>
+        ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *>
+          PdfAcroForm.flattenReported(decoded).flatMap { (output, report) =>
+            PdfEngine.decode(output, browserTransformOptions).map { after =>
+              val leftover = PdfAcroForm.extract(after)
+              val summary  = workflowSummary("flatten", output, None)
+              summary("appearancesPlaced") = report.appearancesPlaced.toDouble
+              summary("textFallbacks") = report.textFallbacks.toDouble
+              summary("formRemaining") =
+                leftover.catalogObjectNumber.nonEmpty || leftover.formObjectNumber.nonEmpty || leftover.fields.nonEmpty
+              summary
+            }
+          }
+      }
     }
 
   @JSExport

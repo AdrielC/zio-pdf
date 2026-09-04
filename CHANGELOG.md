@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+
+- AcroForm inventory walks nested `/Kids` and reports qualified field names (`Address.Street`).
+- Visual flatten honors Form XObject `/Matrix` when mapping `/BBox` onto the widget `/Rect`.
+- Workbench flatten updates the preview and reports how many appearances were baked.
+
+### Changed
+
+- `PdfAppend.append` / `PdfEngine.appendRevision` honor `maxMaterializedDocumentBytes` and fail before rewriting the base.
+
 ## [0.2.1-RC1] — 2026-09-04
 
 ### Added

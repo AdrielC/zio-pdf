@@ -663,9 +663,24 @@ async function executeWorkflow(kind: "linearize" | "append" | "flatten" | "merge
         workflowDownloads.append(link);
       }
     }
-    workflowStatus.textContent = execution.pageCount
-      ? `${kind} wrote ${execution.pageCount} PDFs.`
-      : `${kind} wrote ${execution.outputBytes.toLocaleString()} bytes.${prefix}`;
+    if (kind === "flatten") {
+      const baked = execution.appearancesPlaced ?? 0;
+      const fallbacks = execution.textFallbacks ?? 0;
+      const leftover = execution.formRemaining === true;
+      workflowStatus.textContent = leftover
+        ? `Flatten wrote ${execution.outputBytes.toLocaleString()} bytes, but a form dictionary is still present.`
+        : `Flatten baked ${baked} appearance${baked === 1 ? "" : "s"}` +
+          (fallbacks > 0 ? ` and ${fallbacks} text fallback${fallbacks === 1 ? "" : "s"}` : "") +
+          `. Form stripped. Preview updated.`;
+      const previewFile = new File([blob], `${file.name.replace(/\.pdf$/i, "") || "document"}.flatten.pdf`, {
+        type: "application/pdf"
+      });
+      void openPreview(previewFile);
+    } else {
+      workflowStatus.textContent = execution.pageCount
+        ? `${kind} wrote ${execution.pageCount} PDFs.`
+        : `${kind} wrote ${execution.outputBytes.toLocaleString()} bytes.${prefix}`;
+    }
   } catch (error) {
     if (generation !== workflowGeneration) return;
     if (error instanceof DOMException && error.name === "AbortError") return;

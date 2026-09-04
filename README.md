@@ -179,7 +179,7 @@ val pages     = PdfEngine.splitPages(filing)
 val landscape = PdfEngine.rotatePages(filing, 90, 1, 2)
 ```
 
-Inventory or flatten AcroForm widgets. Flatten bakes `/AP` appearances into page content (or a `/V` text fallback), then strips the form:
+Inventory or flatten AcroForm widgets. Flatten walks nested `/Kids`, bakes `/AP` appearances (honoring Form `/Matrix`) into page content, or falls back to `/V` text, then strips the form:
 
 ```scala
 val inventory = PdfAcroForm.extract(decoded)

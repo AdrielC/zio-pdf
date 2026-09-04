@@ -95,8 +95,10 @@ object PdfAppend {
   def append(
     base: Chunk[Byte],
     revision: Chunk[Part[Trailer]],
-    preserveNumbers: Set[Long] = Set.empty
+    preserveNumbers: Set[Long] = Set.empty,
+    opts: PdfEngine.Options = PdfEngine.Options.default
   ): ZIO[Any, Throwable, Chunk[Byte]] =
+    requireMaterialized(base, opts) *> {
     for {
       prevXref <- ZIO.fromEither(previousStartXref(base))
       trailer  <- resolveTrailer(base)
@@ -108,6 +110,12 @@ object PdfAppend {
                     .via(WritePdf.appendParts(base.size.toLong, WritePdf.AppendContext(prevXref, trailer)))
                     .runFold(Chunk.empty[Byte])((acc, chunk) => acc ++ Chunk.fromArray(chunk.toArray))
     } yield base ++ appended
+    }
+
+  private def requireMaterialized(bytes: Chunk[Byte], opts: PdfEngine.Options): IO[Throwable, Unit] =
+    if bytes.size.toLong > opts.maxMaterializedDocumentBytes.toLong then
+      ZIO.fail(PdfEngine.MaterializedDocumentLimitExceeded(opts.maxMaterializedDocumentBytes, bytes.size.toLong))
+    else ZIO.unit
 
   private def resolveTrailer(base: Chunk[Byte]): ZIO[Any, Throwable, Trailer] =
     ZIO.fromEither(trailerFromTail(base)).catchAll { _ =>

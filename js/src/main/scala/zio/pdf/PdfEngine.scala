@@ -441,8 +441,12 @@ object PdfEngine:
   ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
     PdfMerge.fromBytes(sources, opts)
 
-  def appendRevision(base: Chunk[Byte], revision: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
-    PdfAppend.append(base, revision)
+  def appendRevision(
+    base: Chunk[Byte],
+    revision: Chunk[Part[Trailer]],
+    opts: Options = Options.default
+  ): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfAppend.append(base, revision, opts = opts)
 
   def linearize(trailerData: Prim.Dict, parts: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
     PdfLinearize.bytes(trailerData, parts)
