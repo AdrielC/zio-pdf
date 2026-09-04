@@ -223,6 +223,23 @@ object PdfPrep {
     given Schema[EmbedFont] = Schema.derived[EmbedFont]
   }
 
+  final case class FieldValue(
+    qualifiedName: String,
+    value: String
+  )
+
+  object FieldValue {
+    given Schema[FieldValue] = Schema.derived[FieldValue]
+  }
+
+  enum ThumbnailScope {
+    case FirstPageOnly, AllPages, Off
+  }
+
+  object ThumbnailScope {
+    given Schema[ThumbnailScope] = Schema.derived[ThumbnailScope]
+  }
+
   enum Op {
     case Watermark(text: WatermarkText)
     case WatermarkImageStamp(image: WatermarkImage)
@@ -231,7 +248,9 @@ object PdfPrep {
     case SetPageLabels(labels: PageLabels)
     case RedactBoxes(redact: Redact)
     case EmbedTrueType(font: EmbedFont)
+    case SetFieldValues(values: List[FieldValue])
     case FlattenForms
+    case AttachThumbnail(scope: ThumbnailScope = ThumbnailScope.FirstPageOnly)
     case Extract(fromPage: Int, toPage: Int)
     case Rotate(degrees: Int, fromPage: Int, toPage: Int)
     case Linearize
@@ -265,14 +284,16 @@ object PdfPrep {
       case Op.SetPageLabels(_)        => "page-labels"
       case Op.RedactBoxes(_)          => "redact"
       case Op.EmbedTrueType(_)        => "embed-font"
+      case Op.SetFieldValues(_)       => "set-field-values"
       case Op.FlattenForms            => "flatten"
+      case Op.AttachThumbnail(_)      => "attach-thumbnail"
       case Op.Extract(_, _)           => "extract"
       case Op.Rotate(_, _, _)         => "rotate"
       case Op.Linearize               => "linearize"
     }
     val writesContent = program.operations.exists {
       case Op.Watermark(_) | Op.WatermarkImageStamp(_) | Op.DateStamp(_) | Op.Bates(_) |
-          Op.RedactBoxes(_) | Op.EmbedTrueType(_) | Op.FlattenForms =>
+          Op.RedactBoxes(_) | Op.EmbedTrueType(_) | Op.FlattenForms | Op.AttachThumbnail(_) =>
         true
       case _ => false
     }
@@ -344,8 +365,12 @@ object PdfPrep {
         applyRedact(bytes, redact, opts)
       case Op.EmbedTrueType(font) =>
         applyEmbedFont(bytes, font, opts)
+      case Op.SetFieldValues(values) =>
+        applyFieldValues(bytes, values, opts)
       case Op.FlattenForms =>
         PdfEngine.flattenForms(bytes, opts)
+      case Op.AttachThumbnail(scope) =>
+        PdfEngine.withThumbnailsBytes(bytes, toThumbnailOptions(scope))
       case Op.Extract(fromPage, toPage) =>
         PdfEngine.extractPages(bytes, fromPage, toPage, opts)
       case Op.Rotate(degrees, fromPage, toPage) =>
@@ -511,6 +536,20 @@ object PdfPrep {
   ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
     decodeUnencrypted(bytes, opts).flatMap { decoded =>
       ZIO.fromEither(embedFontParts(decoded, font)).flatMap(writeParts)
+    }
+
+  private def applyFieldValues(
+    bytes: Chunk[Byte],
+    values: List[FieldValue],
+    opts: PdfEngine.Options
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfEngine.setFieldValues(bytes, values.map(v => v.qualifiedName -> v.value).toMap, opts)
+
+  private def toThumbnailOptions(scope: ThumbnailScope): PdfThumbnail.Options =
+    scope match {
+      case ThumbnailScope.FirstPageOnly => PdfThumbnail.Options(scope = PdfThumbnail.Scope.FirstPageOnly)
+      case ThumbnailScope.AllPages      => PdfThumbnail.Options(scope = PdfThumbnail.Scope.AllPages)
+      case ThumbnailScope.Off           => PdfThumbnail.Options(scope = PdfThumbnail.Scope.Off)
     }
 
   private def applyStyledText(

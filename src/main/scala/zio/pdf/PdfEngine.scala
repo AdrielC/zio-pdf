@@ -799,6 +799,17 @@ object PdfEngine:
       ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *> PdfAcroForm.flatten(decoded)
     }
 
+  /** Set AcroForm `/V` values by qualified field name before flatten or filing. */
+  def setFieldValues(
+    bytes: Chunk[Byte],
+    values: Map[String, String],
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    decode(bytes, opts).flatMap { decoded =>
+      ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *>
+        PdfAcroForm.applyFieldValues(decoded, values).map(_._1)
+    }
+
   /** Extract a 1-based inclusive page range into a new PDF. */
   def extractPages(
     bytes: Chunk[Byte],

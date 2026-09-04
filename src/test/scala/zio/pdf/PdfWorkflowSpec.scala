@@ -715,6 +715,176 @@ object PdfWorkflowSpec extends ZIOSpecDefault {
         }
       )
     },
+    test("applyFieldValues sets /V and flatten bakes the new text") {
+      val formParts = Chunk(
+        Part.Obj(IndirectObj.nostream(1L, Prim.dict("Type" -> Prim.Name("Catalog"), "Pages" -> Prim.Ref(2L, 0), "AcroForm" -> Prim.Ref(5L, 0)))),
+        Part.Obj(
+          IndirectObj.nostream(
+            2L,
+            Prim.dict("Type" -> Prim.Name("Pages"), "Kids" -> Prim.Array(Prim.Ref(3L, 0)), "Count" -> Prim.Number(1))
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            3L,
+            Prim.dict(
+              "Type"     -> Prim.Name("Page"),
+              "Parent"   -> Prim.Ref(2L, 0),
+              "MediaBox" -> Prim.Array.nums(0, 0, 612, 792),
+              "Annots"   -> Prim.Array(Prim.Ref(6L, 0))
+            )
+          )
+        ),
+        Part.Obj(IndirectObj.nostream(4L, Prim.dict())),
+        Part.Obj(IndirectObj.nostream(5L, Prim.dict("Fields" -> Prim.Array(Prim.Ref(6L, 0))))),
+        Part.Obj(
+          IndirectObj.nostream(
+            6L,
+            Prim.dict(
+              "Subtype" -> Prim.Name("Widget"),
+              "T"       -> Prim.str("Name"),
+              "FT"      -> Prim.Name("Tx"),
+              "V"       -> Prim.str("Old"),
+              "Rect"    -> Prim.Array.nums(72, 700, 172, 720)
+            )
+          )
+        ),
+        Part.Meta(Trailer(BigDecimal(7), Prim.dict("Root" -> Prim.Ref(1L, 0)), Some(Prim.Ref(1L, 0))))
+      )
+      for {
+        source  <- PdfEngine.writeBytes(formParts)
+        filled  <- PdfEngine.setFieldValues(source, Map("Name" -> "New Value"))
+        flattened <- PdfEngine.flattenForms(filled)
+        text     = new String(flattened.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        text.contains("(New Value)"),
+        !text.contains("(Old)"),
+        !text.contains("/AcroForm")
+      )
+    },
+    test("applyFieldValues strips /AP so flatten uses the filled /V") {
+      val formParts = Chunk(
+        Part.Obj(IndirectObj.nostream(1L, Prim.dict("Type" -> Prim.Name("Catalog"), "Pages" -> Prim.Ref(2L, 0), "AcroForm" -> Prim.Ref(5L, 0)))),
+        Part.Obj(
+          IndirectObj.nostream(
+            2L,
+            Prim.dict("Type" -> Prim.Name("Pages"), "Kids" -> Prim.Array(Prim.Ref(3L, 0)), "Count" -> Prim.Number(1))
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            3L,
+            Prim.dict(
+              "Type"     -> Prim.Name("Page"),
+              "Parent"   -> Prim.Ref(2L, 0),
+              "MediaBox" -> Prim.Array.nums(0, 0, 612, 792),
+              "Annots"   -> Prim.Array(Prim.Ref(6L, 0))
+            )
+          )
+        ),
+        Part.Obj(IndirectObj.nostream(4L, Prim.dict())),
+        Part.Obj(IndirectObj.nostream(5L, Prim.dict("Fields" -> Prim.Array(Prim.Ref(6L, 0))))),
+        Part.Obj(
+          IndirectObj.nostream(
+            6L,
+            Prim.dict(
+              "Subtype" -> Prim.Name("Widget"),
+              "T"       -> Prim.str("Name"),
+              "FT"      -> Prim.Name("Tx"),
+              "V"       -> Prim.str("Filled"),
+              "Rect"    -> Prim.Array.nums(72, 700, 272, 720),
+              "AP"      -> Prim.dict("N" -> Prim.Ref(7L, 0))
+            )
+          )
+        ),
+        Part.Obj(
+          IndirectObj.stream(
+            7L,
+            Prim.dict(
+              "Type"    -> Prim.Name("XObject"),
+              "Subtype" -> Prim.Name("Form"),
+              "BBox"    -> Prim.Array.nums(0, 0, 200, 20)
+            ),
+            BitVector("BT /F1 12 Tf 2 2 Td (Stale) Tj ET\n".getBytes(StandardCharsets.ISO_8859_1))
+          )
+        ),
+        Part.Meta(Trailer(BigDecimal(8), Prim.dict("Root" -> Prim.Ref(1L, 0)), Some(Prim.Ref(1L, 0))))
+      )
+      for {
+        source    <- PdfEngine.writeBytes(formParts)
+        filled    <- PdfEngine.setFieldValues(source, Map("Name" -> "Filled"))
+        flattened <- PdfEngine.flattenForms(filled)
+        text       = new String(flattened.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        text.contains("(Filled)"),
+        text.contains("/Helv"),
+        !text.contains("/Ff1 Do")
+      )
+    },
+    test("append then linearize validates and keeps /Linearized") {
+      for {
+        base <- singlePagePdf("append-linearize")
+        revision = Chunk(
+          Part.Obj(
+            IndirectObj.nostream(
+              99L,
+              Prim.dict("Producer" -> Prim.Name("zio-pdf-append"))
+            )
+          ),
+          Part.Meta(Trailer(BigDecimal(100), Prim.dict("Info" -> Prim.Ref(99L, 0)), None))
+        )
+        appended   <- PdfAppend.append(base, revision)
+        linearized <- PdfLinearize.fromBytes(appended)
+        validation <- PdfEngine.validate(ZStream.fromChunk(linearized)).provide(PdfEngine.live)
+        text        = new String(linearized.toArray.take(4096), StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        appended.startsWith(base),
+        text.contains("/Linearized"),
+        validation.isSuccess
+      )
+    },
+    test("double append preserves prefix and chains /Prev") {
+      for {
+        base <- singlePagePdf("double-append")
+        firstRevision = Chunk(
+          Part.Obj(IndirectObj.nostream(99L, Prim.dict("Producer" -> Prim.Name("first")))),
+          Part.Meta(Trailer(BigDecimal(100), Prim.dict("Info" -> Prim.Ref(99L, 0)), None))
+        )
+        secondRevision = Chunk(
+          Part.Obj(IndirectObj.nostream(199L, Prim.dict("Producer" -> Prim.Name("second")))),
+          Part.Meta(Trailer(BigDecimal(200), Prim.dict("Info" -> Prim.Ref(199L, 0)), None))
+        )
+        once  <- PdfAppend.append(base, firstRevision)
+        twice <- PdfAppend.append(once, secondRevision)
+        text   = new String(twice.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        twice.startsWith(base),
+        twice.size > once.size,
+        text.indexOf("/Prev") != text.lastIndexOf("/Prev"),
+        text.indexOf("startxref") != text.lastIndexOf("startxref")
+      )
+    },
+    test("linearize after double append stays valid") {
+      for {
+        base <- singlePagePdf("linearize-double")
+        firstRevision = Chunk(
+          Part.Obj(IndirectObj.nostream(99L, Prim.dict("Producer" -> Prim.Name("first")))),
+          Part.Meta(Trailer(BigDecimal(100), Prim.dict("Info" -> Prim.Ref(99L, 0)), None))
+        )
+        secondRevision = Chunk(
+          Part.Obj(IndirectObj.nostream(199L, Prim.dict("Producer" -> Prim.Name("second")))),
+          Part.Meta(Trailer(BigDecimal(200), Prim.dict("Info" -> Prim.Ref(199L, 0)), None))
+        )
+        once       <- PdfAppend.append(base, firstRevision)
+        twice      <- PdfAppend.append(once, secondRevision)
+        linearized <- PdfLinearize.fromBytes(twice)
+        validation <- PdfEngine.validate(ZStream.fromChunk(linearized)).provide(PdfEngine.live)
+      } yield assertTrue(
+        linearized.size >= twice.size,
+        validation.isSuccess,
+        new String(linearized.toArray.take(4096), StandardCharsets.ISO_8859_1).contains("/Linearized")
+      )
+    },
     test("Preencoded graft preserves donor object bytes") {
       for {
         donor <- singlePagePdf("graft")

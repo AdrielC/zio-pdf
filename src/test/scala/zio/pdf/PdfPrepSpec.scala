@@ -167,6 +167,75 @@ object PdfPrepSpec extends ZIOSpecDefault {
     },
     test("fromJson rejects unknown JSON") {
       assertTrue(PdfPrep.fromJson("{not-json").isLeft)
+    },
+    test("apply set-field-values then flatten prep program") {
+      val formParts = Chunk(
+        Part.Obj(IndirectObj.nostream(1L, Prim.dict("Type" -> Prim.Name("Catalog"), "Pages" -> Prim.Ref(2L, 0), "AcroForm" -> Prim.Ref(5L, 0)))),
+        Part.Obj(
+          IndirectObj.nostream(
+            2L,
+            Prim.dict("Type" -> Prim.Name("Pages"), "Kids" -> Prim.Array(Prim.Ref(3L, 0)), "Count" -> Prim.Number(1))
+          )
+        ),
+        Part.Obj(
+          IndirectObj.nostream(
+            3L,
+            Prim.dict(
+              "Type"     -> Prim.Name("Page"),
+              "Parent"   -> Prim.Ref(2L, 0),
+              "MediaBox" -> Prim.Array.nums(0, 0, 612, 792),
+              "Annots"   -> Prim.Array(Prim.Ref(6L, 0))
+            )
+          )
+        ),
+        Part.Obj(IndirectObj.nostream(4L, Prim.dict())),
+        Part.Obj(IndirectObj.nostream(5L, Prim.dict("Fields" -> Prim.Array(Prim.Ref(6L, 0))))),
+        Part.Obj(
+          IndirectObj.nostream(
+            6L,
+            Prim.dict(
+              "Subtype" -> Prim.Name("Widget"),
+              "T"       -> Prim.str("Attorney"),
+              "FT"      -> Prim.Name("Tx"),
+              "Rect"    -> Prim.Array.nums(72, 700, 272, 720)
+            )
+          )
+        ),
+        Part.Meta(Trailer(BigDecimal(7), Prim.dict("Root" -> Prim.Ref(1L, 0)), Some(Prim.Ref(1L, 0))))
+      )
+      val program = PdfPrep.Program.of(
+        PdfPrep.Op.SetFieldValues(List(PdfPrep.FieldValue("Attorney", "Jane Doe"))),
+        PdfPrep.Op.FlattenForms,
+        PdfPrep.Op.DateStamp(
+          PdfPrep.StampDate(
+            source = PdfPrep.DateSource.Fixed("2026-09-04"),
+            style = PdfPrep.TextStyle(placement = PdfPrep.Placement.TopRight, fontSize = 9)
+          )
+        )
+      )
+      for {
+        source <- PdfEngine.writeBytes(formParts)
+        out    <- PdfPrep.apply(source, program, today = LocalDate.parse("2026-09-04"))
+        text    = new String(out.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        text.contains("(Jane Doe)"),
+        text.contains("(2026-09-04)"),
+        !text.contains("/AcroForm")
+      )
+    },
+    test("apply attach-thumbnail prep program adds /Thumb") {
+      val program = PdfPrep.Program.of(PdfPrep.Op.AttachThumbnail(PdfPrep.ThumbnailScope.FirstPageOnly))
+      for {
+        source  <- singlePagePdf("thumb-prep")
+        out     <- PdfPrep.apply(source, program)
+        outcome <- PdfEngine.inspect(out, PdfInspection.thumbnail)
+      } yield assertTrue(
+        out.size > source.size,
+        outcome match {
+          case PdfInspection.Outcome.Accepted(report) => report.thumbnail.nonEmpty
+          case PdfInspection.Outcome.Rejected(report, _) => report.thumbnail.nonEmpty
+        }
+      )
     }
   ).provide(PdfEngine.live)
 }

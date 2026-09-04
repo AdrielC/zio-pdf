@@ -40,6 +40,17 @@ object PdfAcroForm {
     textFallbacks: Int
   )
 
+  final case class FieldValuesReport(
+    applied: Int,
+    qualifiedNames: Chunk[String]
+  )
+
+  case object EmptyFieldValues extends Error("field value map is empty")
+
+  final case class NoMatchingFields(requested: Set[String]) extends Error(
+    s"no AcroForm fields matched requested names: ${requested.mkString(", ")}"
+  )
+
   def extract(decoded: Chunk[Decoded]): Inventory = {
     val objects = objectMap(decoded)
     val catalog = objects.values.find(isCatalogWithForm)
@@ -66,6 +77,59 @@ object PdfAcroForm {
       fieldObjectNumbers = walked.nodes
     )
   }
+
+  /**
+   * Set `/V` on AcroForm fields matched by qualified name. Widget `/AP` entries
+   * are removed so a subsequent [[flatten]] uses the new value when no
+   * appearance stream remains.
+   */
+  def applyFieldValues(decoded: Chunk[Decoded], values: Map[String, String]): ZIO[Any, Throwable, (Chunk[Byte], FieldValuesReport)] =
+    ZIO.fromEither(applyFieldValuesParts(decoded, values)).flatMap { (parts, report) =>
+      ZStream
+        .fromChunk(parts)
+        .via(WritePdf.parts)
+        .runFold(Chunk.empty[Byte])((acc, chunk) => acc ++ Chunk.fromArray(chunk.toArray))
+        .map(_ -> report)
+    }
+
+  def applyFieldValuesParts(decoded: Chunk[Decoded], values: Map[String, String]): Either[Error, (Chunk[Part[Trailer]], FieldValuesReport)] =
+    if values.isEmpty then Left(EmptyFieldValues)
+    else {
+      val inventory = extract(decoded)
+      val updates = inventory.fields.flatMap { field =>
+        field.name.flatMap(name => values.get(name).filter(_ => field.objectNumber > 0L).map(name -> (field.objectNumber, _)))
+      }
+      if updates.isEmpty then Left(NoMatchingFields(values.keySet))
+      else {
+        val byObject = updates.groupMap(_._2._1)(_._2._2).view.mapValues(_.last).toMap
+        val names    = Chunk.fromIterable(updates.map(_._1).distinct)
+        val parts = decoded.flatMap {
+          case Decoded.Meta(_, trailer, _) =>
+            trailer.toList.map(Part.Meta(_))
+          case Decoded.DataObj(obj) =>
+            byObject.get(obj.index.number) match {
+              case Some(value) =>
+                dictAt(obj.data).map(setFieldValue(_, value)) match {
+                  case Some(dict) => Chunk(Part.Obj(IndirectObj(Obj(obj.index, dict), None)))
+                  case None       => Chunk(Part.Obj(IndirectObj(obj, None)))
+                }
+              case None =>
+                Chunk(Part.Obj(IndirectObj(obj, None)))
+            }
+          case Decoded.ContentObj(obj, rawStream, _) =>
+            byObject.get(obj.index.number) match {
+              case Some(value) =>
+                dictAt(obj.data).map(setFieldValue(_, value)) match {
+                  case Some(dict) => Chunk(Part.Obj(IndirectObj(Obj(obj.index, dict), Some(rawStream))))
+                  case None       => Chunk(Part.Obj(IndirectObj(obj, Some(rawStream))))
+                }
+              case None =>
+                Chunk(Part.Obj(IndirectObj(obj, Some(rawStream))))
+            }
+        }
+        Right((parts, FieldValuesReport(applied = byObject.size, qualifiedNames = names)))
+      }
+    }
 
   /** Bake appearances into page content, then drop /AcroForm and widgets. */
   def flatten(decoded: Chunk[Decoded]): ZIO[Any, Throwable, Chunk[Byte]] =
@@ -620,6 +684,14 @@ object PdfAcroForm {
       dict.data.iterator.filterNot(_._1 == key).foldLeft(ChunkMap.empty[String, Prim]) { (acc, pair) =>
         acc.updated(pair._1, pair._2)
       }
+    )
+
+  private def setFieldValue(dict: Prim.Dict, value: String): Prim.Dict =
+    Prim.Dict(
+      withoutKey(dict, "AP").data.updated(
+        "V",
+        Prim.Str(_root_.scodec.bits.ByteVector(value.getBytes(StandardCharsets.ISO_8859_1)))
+      )
     )
 
   private def objectMap(decoded: Chunk[Decoded]): Map[Long, Obj] =

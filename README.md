@@ -207,11 +207,32 @@ val json    = PdfPrep.toJson(program)
 val applied = PdfEngine.applyPrep(filing, PdfPrep.fromJson(json).toOption.get)
 ```
 
-Inventory or flatten AcroForm widgets. Flatten walks nested `/Kids`, bakes `/AP` appearances (honoring Form `/Matrix`) into page content, or falls back to `/V` text, then strips the form:
+Inventory or flatten AcroForm widgets. Fill text fields by qualified name, then flatten so `/V` is baked into page content:
+
+```scala
+val filled =
+  PdfEngine.setFieldValues(existingBytes, Map("Attorney" -> "Jane Doe", "Address.Street" -> "Main"))
+val flattened = PdfEngine.flattenForms(filled)
+
+// or as a persisted prep program:
+val program = PdfPrep.Program.of(
+  PdfPrep.Op.SetFieldValues(List(PdfPrep.FieldValue("Attorney", "Jane Doe"))),
+  PdfPrep.Op.FlattenForms
+)
+```
+
+Inventory or flatten without filling:
 
 ```scala
 val inventory = PdfAcroForm.extract(decoded)
 val flattened = PdfEngine.flattenForms(existingBytes)
+```
+
+Court filing recipes (ECF file-and-serve, exhibit binders, append certificate, redacted public version, portal gate, web viewing) are documented in [`docs/court-workflows.md`](docs/court-workflows.md). Runnable example:
+
+```bash
+export INPUT_PDF=filing.pdf OUTPUT_PDF=filed.pdf
+sbt 'examples/runMain zio.pdf.examples.CourtFilingPrep'
 ```
 
 Encrypted filings produce a first-class `PdfEvidence.ProcessingBlocker.Encrypted` record. The library does not decrypt; write workflows fail closed.

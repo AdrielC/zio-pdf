@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+
+- AcroForm field fill: `PdfAcroForm.applyFieldValues`, `PdfEngine.setFieldValues`, and prep op `SetFieldValues` set `/V` by qualified name (stripping widget `/AP` so flatten uses the new text).
+- Prep op `AttachThumbnail` wraps `PdfEngine.withThumbnailsBytes` with a serializable scope (`FirstPageOnly`, `AllPages`, `Off`).
+- Court workflow recipes in [`docs/court-workflows.md`](docs/court-workflows.md) and runnable example `CourtFilingPrep`.
+- Workflow tests for append→linearize, double-append `/Prev` chains, and linearize-after-append.
+
 ## [0.2.1] — 2026-09-04
 
 ### Added
