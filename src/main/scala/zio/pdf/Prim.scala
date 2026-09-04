@@ -15,7 +15,7 @@ import scala.util.Try
 import zio.pdf.codec.{Codecs, Many, Text, Whitespace}
 import zio.pdf.schema.given
 import _root_.scodec.{Attempt, Codec, DecodeResult, Decoder, Encoder, Err}
-import _root_.scodec.bits.{BitVector, ByteVector}
+import _root_.scodec.bits.ByteVector
 import _root_.scodec.codecs.*
 import zio.blocks.chunk.{Chunk as BlocksChunk, ChunkMap}
 import zio.blocks.schema.Schema
