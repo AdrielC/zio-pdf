@@ -155,6 +155,20 @@ object PdfEvidence:
         recover(request).map(TextRecovery.Recovered(request, _))
       }
 
+  /**
+   * A first-class reason the library will not rewrite or otherwise process the
+   * document. Inspection can still complete; write workflows fail closed.
+   */
+  enum ProcessingBlocker:
+    case Encrypted(reference: Option[Prim.Ref])
+
+    def reason: String =
+      this match
+        case Encrypted(None) =>
+          "encrypted PDFs cannot be processed; the library does not decrypt"
+        case Encrypted(Some(reference)) =>
+          s"encrypted PDFs cannot be processed (Encrypt ${reference.number} ${reference.generation} R); the library does not decrypt"
+
   /** The deterministic, serializable result of an evidence run. */
   final case class Bundle(
     sha256: Chunk[Byte],
@@ -162,11 +176,13 @@ object PdfEvidence:
     validation: Validation[PdfError, Unit],
     policy: Validation[PolicyViolation, Unit],
     nativeText: NativeText,
-    decodedEvents: Long
+    decodedEvents: Long,
+    processingBlockers: Chunk[ProcessingBlocker] = Chunk.empty
   ):
     def sha256Hex: String = hex(sha256)
     def citations: Chunk[Citation] = nativeText.citations(sha256)
     def textRecoveryRequests: Chunk[TextRecovery.Request] = nativeText.textRecoveryRequests
+    def cannotProcess: Boolean = processingBlockers.nonEmpty
 
     def recoverMissingText[R, E, A](
       recover: TextRecovery.Request => ZIO[R, E, A]
@@ -203,17 +219,27 @@ object PdfEvidence:
 
     def result(digest: Chunk[Byte]): Bundle =
       val assembledResult = assembled.result
+      val outcome = inspection.result
       Bundle(
         sha256 = digest,
-        inspection = inspection.result,
+        inspection = outcome,
         validation = ValidatePdf.fromAssembly(assembledResult),
         policy = PdfPolicy.fromAssembly(plan.policy)(assembledResult),
         nativeText = collectNativeText(text, plan.text),
-        decodedEvents = decoded
+        decodedEvents = decoded,
+        processingBlockers = blockersFrom(outcome)
       )
 
   private[pdf] def accumulator(plan: Plan): Accumulator =
     new Accumulator(plan)
+
+  private def blockersFrom(outcome: PdfInspection.Outcome): Chunk[ProcessingBlocker] =
+    val encryption = outcome match
+      case PdfInspection.Outcome.Accepted(report)        => report.encryption
+      case PdfInspection.Outcome.Rejected(report, _)     => report.encryption
+    encryption match
+      case Some(found) => Chunk(ProcessingBlocker.Encrypted(found.reference))
+      case None        => Chunk.empty
 
   /** Fold a decoded stream once when a platform has already fused raw-byte digesting. */
   private[pdf] def fromDecoded[R, E](
@@ -290,6 +316,8 @@ object PdfEvidence:
       s"{" +
         field("sha256", quote(value.sha256Hex)) + "," +
         field("decodedEvents", value.decodedEvents.toString) + "," +
+        field("cannotProcess", value.cannotProcess.toString) + "," +
+        field("processingBlockers", array(value.processingBlockers.iterator.map(blockerJson))) + "," +
         field("inspection", inspection) + "," +
         field("validation", status(value.validation.isSuccess)) + "," +
         field("policy", status(value.policy.isSuccess)) + "," +
@@ -352,6 +380,15 @@ object PdfEvidence:
           s"{" +
             field("kind", quote("Encrypted")) + "," +
             field("objectNumber", found.reference.fold("null")(ref => number(ref.number))) +
+            "}"
+
+    private def blockerJson(value: ProcessingBlocker): String =
+      value match
+        case ProcessingBlocker.Encrypted(reference) =>
+          s"{" +
+            field("kind", quote("Encrypted")) + "," +
+            field("objectNumber", reference.fold("null")(ref => number(ref.number))) + "," +
+            field("reason", quote(value.reason)) +
             "}"
 
     private def textJson(value: NativeText, digest: Chunk[Byte]): String =

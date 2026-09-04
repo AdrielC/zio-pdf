@@ -447,8 +447,8 @@ object PdfEngine:
   def linearize(trailerData: Prim.Dict, parts: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =
     PdfLinearize.bytes(trailerData, parts)
 
-  def linearize(bytes: Chunk[Byte]): ZIO[Any, Throwable, Chunk[Byte]] =
-    PdfLinearize.fromBytes(bytes)
+  def linearize(bytes: Chunk[Byte], opts: Options = Options.default): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfLinearize.fromBytes(bytes, opts)
 
   def withThumbnailsBytes(
     bytes: Chunk[Byte],
@@ -459,6 +459,7 @@ object PdfEngine:
   def graftObjects(donor: Chunk[Byte], objectNumbers: Set[Long]): ZIO[Any, Throwable, Chunk[Part.Preencoded]] =
     PdfGraft.graft(donor, objectNumbers)
 
+  /** Flatten AcroForm widgets, baking `/AP` appearances into page content. */
   def flattenForms(bytes: Chunk[Byte], opts: Options = Options.default): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
     decode(bytes, opts).flatMap { decoded =>
       ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *> PdfAcroForm.flatten(decoded)

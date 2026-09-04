@@ -51,8 +51,15 @@ object PdfLinearize {
   /**
    * Linearize from existing PDF bytes using verbatim [[Part.Preencoded]] objects
    * (no object-stream expansion or stream re-encoding).
+   *
+   * Fails before `toArray` / decode when the input exceeds
+   * [[PdfEngine.Options.maxMaterializedDocumentBytes]].
    */
-  def fromBytes(bytes: Chunk[Byte]): ZIO[Any, Throwable, Chunk[Byte]] =
+  def fromBytes(
+    bytes: Chunk[Byte],
+    opts: PdfEngine.Options = PdfEngine.Options.default
+  ): ZIO[Any, Throwable, Chunk[Byte]] =
+    requireMaterialized(bytes, opts) *> {
     for {
       raw         <- ZIO.fromEither(PdfGraft.rawObjectParts(bytes.toArray).left.map(new RuntimeException(_)))
       decoded     <- ZStream.fromChunk(bytes).via(PdfStream.decode()).runCollect
@@ -79,6 +86,7 @@ object PdfLinearize {
                        enableHints = false
                      )
     } yield output
+    }
 
   private def hybridMissing(
     decoded: Chunk[Decoded],
@@ -224,12 +232,22 @@ object PdfLinearize {
     trailerData.data.get("Root").collect { case Prim.Ref(number, _) => number }
 
   /** Build a linearizable part stream that preserves donor object bytes. */
-  def partsFromPdf(bytes: Chunk[Byte]): ZIO[Any, Throwable, Chunk[Part[Trailer]]] =
-    for {
-      raw     <- ZIO.fromEither(PdfGraft.rawObjectParts(bytes.toArray).left.map(new RuntimeException(_)))
-      decoded <- ZStream.fromChunk(bytes).via(PdfStream.decode()).runCollect
-      parts   <- partsFromRaw(raw, raw.objects, decoded)
-    } yield parts
+  def partsFromPdf(
+    bytes: Chunk[Byte],
+    opts: PdfEngine.Options = PdfEngine.Options.default
+  ): ZIO[Any, Throwable, Chunk[Part[Trailer]]] =
+    requireMaterialized(bytes, opts) *> {
+      for {
+        raw     <- ZIO.fromEither(PdfGraft.rawObjectParts(bytes.toArray).left.map(new RuntimeException(_)))
+        decoded <- ZStream.fromChunk(bytes).via(PdfStream.decode()).runCollect
+        parts   <- partsFromRaw(raw, raw.objects, decoded)
+      } yield parts
+    }
+
+  private def requireMaterialized(bytes: Chunk[Byte], opts: PdfEngine.Options): IO[Throwable, Unit] =
+    if bytes.size.toLong > opts.maxMaterializedDocumentBytes.toLong then
+      ZIO.fail(PdfEngine.MaterializedDocumentLimitExceeded(opts.maxMaterializedDocumentBytes, bytes.size.toLong))
+    else ZIO.unit
 
   /** Encode with hint streams, measured `/L`, and Annex F tables. */
   def bytes(trailerData: Prim.Dict, parts: Chunk[Part[Trailer]]): ZIO[Any, Throwable, Chunk[Byte]] =

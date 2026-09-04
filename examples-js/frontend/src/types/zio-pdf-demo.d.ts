@@ -58,11 +58,19 @@ declare module "zio-pdf-demo" {
     reason: "NoUsableNativeText";
   }
 
+  export interface ProcessingBlocker {
+    kind: "Encrypted";
+    objectNumber?: number;
+    reason: string;
+  }
+
   export interface Analysis {
     inspection: Inspection;
     content: ContentFacts;
     valid: boolean;
     strictPolicyPassed: boolean;
+    cannotProcess: boolean;
+    processingBlockers: ProcessingBlocker[];
     sha256: string;
     decodedEvents: number;
     elapsedMs: number;

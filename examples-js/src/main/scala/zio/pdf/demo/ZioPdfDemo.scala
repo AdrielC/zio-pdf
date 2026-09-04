@@ -285,6 +285,16 @@ object ZioPdfDemo:
         "content" -> contentJson(bundle).asInstanceOf[js.Any],
         "valid" -> bundle.validation.isSuccess.asInstanceOf[js.Any],
         "strictPolicyPassed" -> bundle.policy.isSuccess.asInstanceOf[js.Any],
+        "cannotProcess" -> bundle.cannotProcess.asInstanceOf[js.Any],
+        "processingBlockers" -> bundle.processingBlockers.map { blocker =>
+          val reference = blocker match
+            case PdfEvidence.ProcessingBlocker.Encrypted(value) => value
+          js.Dictionary[js.Any](
+            "kind" -> "Encrypted",
+            "objectNumber" -> reference.fold[js.Any](js.undefined)(_.number.toDouble),
+            "reason" -> blocker.reason
+          )
+        }.toSeq.toJSArray.asInstanceOf[js.Any],
         "sha256" -> bundle.sha256Hex.asInstanceOf[js.Any],
         "decodedEvents" -> bundle.decodedEvents.toDouble.asInstanceOf[js.Any],
         "elapsedMs" -> (js.Date.now() - startedAt).asInstanceOf[js.Any]
@@ -299,7 +309,7 @@ object ZioPdfDemo:
   @JSExport
   def linearizeBlob(input: dom.Blob): js.Promise[js.Dictionary[js.Any]] =
     runWorkflow(input) { bytes =>
-      PdfEngine.linearize(bytes).map { output =>
+      PdfEngine.linearize(bytes, browserTransformOptions).map { output =>
         val prefix = PdfLinearize.firstPageByteLength(output).toOption
         workflowSummary("linearize", output, prefix)
       }

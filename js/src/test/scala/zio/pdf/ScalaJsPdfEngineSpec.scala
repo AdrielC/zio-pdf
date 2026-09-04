@@ -342,6 +342,20 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("Scala.js linearize fails before decode when the document exceeds ByteLimit") {
+      minimalPdfBytes.flatMap { bytes =>
+        val limit = ByteLimit.fromBytes(8L).toOption.get
+        PdfEngine
+          .linearize(bytes, PdfEngine.Options(maxMaterializedDocumentBytes = limit))
+          .either
+          .map {
+            case Left(PdfEngine.MaterializedDocumentLimitExceeded(`limit`, observed)) =>
+              assertTrue(observed == bytes.size.toLong)
+            case _ =>
+              assertTrue(false)
+          }
+      }
+    },
     test("Scala.js extract, split, and rotate page helpers") {
       minimalPdfBytes.flatMap { bytes =>
         for

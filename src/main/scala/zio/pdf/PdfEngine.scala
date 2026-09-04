@@ -770,8 +770,8 @@ object PdfEngine:
     PdfLinearize.bytes(trailerData, parts)
 
   /** Linearize an existing PDF while preserving top-level object bytes. */
-  def linearize(bytes: Chunk[Byte]): ZIO[Any, Throwable, Chunk[Byte]] =
-    PdfLinearize.fromBytes(bytes)
+  def linearize(bytes: Chunk[Byte], opts: Options = Options.default): ZIO[Any, Throwable, Chunk[Byte]] =
+    PdfLinearize.fromBytes(bytes, opts)
 
   /** Add placeholder `/Thumb` image XObjects to page parts (no renderer). */
   def withThumbnails(
@@ -789,7 +789,7 @@ object PdfEngine:
   def graftObjects(donor: Chunk[Byte], objectNumbers: Set[Long]): ZIO[Any, Throwable, Chunk[Part.Preencoded]] =
     PdfGraft.graft(donor, objectNumbers)
 
-  /** Structural AcroForm flatten of caller-owned PDF bytes. */
+  /** Flatten AcroForm widgets, baking `/AP` appearances into page content. */
   def flattenForms(bytes: Chunk[Byte], opts: Options = Options.default): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
     decode(bytes, opts).flatMap { decoded =>
       ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)) *> PdfAcroForm.flatten(decoded)

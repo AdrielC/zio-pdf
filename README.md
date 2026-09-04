@@ -14,11 +14,11 @@ That distinction makes the raw path suitable for very large uploads while keepin
 
 ## Project status
 
-Release `0.2.0` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
+Release `0.2.1-RC1` is available from Maven Central for both the JVM and Scala.js. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
 
 ```scala
-libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.0" // JVM
-libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.0" // Scala.js
+libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.1-RC1" // JVM
+libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.1-RC1" // Scala.js
 ```
 
 Only the JVM and Scala.js `zio-pdf` artifacts are publishable. Examples, benchmarks, the browser application, and the Kyo comparison module are build-only projects.
@@ -179,12 +179,14 @@ val pages     = PdfEngine.splitPages(filing)
 val landscape = PdfEngine.rotatePages(filing, 90, 1, 2)
 ```
 
-Inventory or structurally flatten AcroForm widgets (appearances are not baked into content streams):
+Inventory or flatten AcroForm widgets. Flatten bakes `/AP` appearances into page content (or a `/V` text fallback), then strips the form:
 
 ```scala
 val inventory = PdfAcroForm.extract(decoded)
 val flattened = PdfEngine.flattenForms(existingBytes)
 ```
+
+Encrypted filings produce a first-class `PdfEvidence.ProcessingBlocker.Encrypted` record. The library does not decrypt; write workflows fail closed.
 
 Linearize for fast first-page web display while preserving top-level object bytes:
 

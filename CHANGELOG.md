@@ -2,12 +2,19 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## [0.2.1-RC1] — 2026-09-04
 
 ### Added
 
 - Page-range extract, per-page split, and `/Rotate` rewrite (`PdfSplit`, `PdfEngine.extractPages` / `splitPages` / `rotatePages`) on JVM and Scala.js.
 - Workbench controls for extract, rotate, split, and first-page `/Thumb` attach.
+- Visual AcroForm flatten: widget `/AP /N` Form XObjects are placed on the page (`q` / `cm` / `Do` / `Q`), with a `/V` text fallback when no appearance stream exists.
+- First-class `PdfEvidence.ProcessingBlocker.Encrypted` on the evidence bundle (`cannotProcess` + canonical JSON) so encrypted filings are recorded as cannot-process without decrypting.
+
+### Changed
+
+- `PdfLinearize.fromBytes` / `PdfEngine.linearize` honor `maxMaterializedDocumentBytes` and fail before `toArray` / decode.
+- Workbench flatten copy and encryption observation now describe visual bake and cannot-process evidence.
 
 ## [0.2.0] — 2026-09-03
 

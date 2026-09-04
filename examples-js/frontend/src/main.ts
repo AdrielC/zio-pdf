@@ -562,7 +562,7 @@ function syncWorkflowControls(): void {
   workflowBadge.textContent = lastInspectionEncrypted ? "Encrypted" : ready ? "Ready" : "Run inspection";
   workflowCopy.textContent = lastInspectionEncrypted
     ? "This filing is encrypted. zio-pdf will not rewrite it."
-    : "Encrypted PDFs are rejected before rewrite. Form flatten is structural only.";
+    : "Encrypted PDFs cannot be processed. Form flatten bakes appearances into page content.";
 }
 
 function workflowInWorker(
@@ -841,7 +841,7 @@ function resetReport(): void {
   workflowPlan.removeAttribute("open");
   workflowBadge.textContent = "Run inspection";
   workflowStatus.textContent = "Run inspection to enable write workflows.";
-  workflowCopy.textContent = "Encrypted PDFs are rejected before rewrite. Form flatten is structural only.";
+  workflowCopy.textContent = "Encrypted PDFs cannot be processed. Form flatten bakes appearances into page content.";
   clearWorkflowDownload();
   mergeFileInput.value = "";
   [runLinearizeButton, runAppendButton, runFlattenButton, runMergeButton, runExtractButton, runRotateButton, runSplitButton, runThumbnailButton].forEach((button) => {
@@ -1361,7 +1361,7 @@ function renderAnalysis(analysis: Analysis): void {
   setText("#digest-result", `SHA-256 ${analysis.sha256.slice(0, 12)}…`);
 
   renderFontInventory(inspection.fonts);
-  lastInspectionEncrypted = inspection.encrypted;
+  lastInspectionEncrypted = inspection.encrypted || analysis.cannotProcess === true;
   lastInspectionHasForm = inspection.acroFormObject !== undefined || inspection.acroFormFields > 0;
   lastInspectionPages = Math.max(1, content.pages);
   pageFromInput.value = "1";
@@ -1416,15 +1416,17 @@ function renderAnalysis(analysis: Analysis): void {
       : `Form object #${inspection.acroFormObject}${inspection.acroFormNeedAppearances ? " · NeedAppearances" : ""}`,
     inspection.acroFormFields > 0 ? "review" : "neutral"
   );
+  const encryptedBlocker = (analysis.processingBlockers ?? []).find((blocker) => blocker.kind === "Encrypted");
   addObservation(
     "Encryption",
-    inspection.encrypted ? "Encrypted" : "Not encrypted",
-    inspection.encrypted
-      ? inspection.encryptionObject === undefined
-        ? "Trailer has a direct /Encrypt dictionary"
-        : `Trailer references encryption object #${inspection.encryptionObject}`
-      : "No /Encrypt entry in the trailer",
-    inspection.encrypted ? "review" : "positive"
+    analysis.cannotProcess || inspection.encrypted ? "Cannot process" : "Not encrypted",
+    encryptedBlocker?.reason ??
+      (inspection.encrypted
+        ? inspection.encryptionObject === undefined
+          ? "Trailer has a direct /Encrypt dictionary"
+          : `Trailer references encryption object #${inspection.encryptionObject}`
+        : "No /Encrypt entry in the trailer"),
+    analysis.cannotProcess || inspection.encrypted ? "review" : "positive"
   );
   const fontGroups = groupDocumentFonts(inspection.fonts);
   const remapCandidates = fontGroups.filter(({ resource }) => resource.existingResourceRemapCandidate);
