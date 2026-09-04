@@ -151,6 +151,13 @@ class PublicPdfCorpusBench {
     }
 
   @Benchmark
+  def boundaryScanChunk: Int =
+    zio.pdf.PdfObjectScanner.scan(chunk) match {
+      case Right(found) => found.length
+      case Left(err)    => throw err
+    }
+
+  @Benchmark
   def chunkDecodeFusedBaseline: Int =
     PdfHyperdrive.decodeSync(bytes).size
 

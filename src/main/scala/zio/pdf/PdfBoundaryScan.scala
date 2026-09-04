@@ -17,7 +17,6 @@ private[pdf] object PdfBoundaryScan {
   private val endstreamKw = asciiBytes"endstream"
   private val xrefKw      = asciiBytes"xref"
   private val eofKw       = asciiBytes"%%EOF"
-  private val lengthName  = asciiBytes"Length"
   private val startxrefKw = asciiBytes"startxref"
 
   private inline val PhaseHeader        = 0
@@ -68,7 +67,6 @@ private[pdf] object PdfBoundaryScan {
     private[pdf] def mergeCarry(buf: Array[Byte], offset: Int, length: Int): (Array[Byte], Int, Int) =
       val old = carryLen
       ensureCarryCapacity(old + length)
-      System.arraycopy(carryBuf, 0, carryBuf, 0, old)
       System.arraycopy(buf, offset, carryBuf, old, length)
       carryLen = 0
       (carryBuf, 0, old + length)
@@ -301,8 +299,8 @@ private[pdf] object PdfBoundaryScan {
     if body >= end then return Right(None)
 
     for
-      number     <- parseLong(arr, numberStart, numberEnd)
-      generation <- parseLong(arr, generationStart, generationEnd)
+      number     <- Right(readLongDigits(arr, numberStart, numberEnd))
+      generation <- Right(readLongDigits(arr, generationStart, generationEnd))
       _          <-
         if generation <= Int.MaxValue.toLong then Right(())
         else Left(IllegalArgumentException("object generation overflows Int"))
@@ -387,10 +385,25 @@ private[pdf] object PdfBoundaryScan {
         i += 1
       true
 
-  private def tokenAt(arr: Array[Byte], pos: Int, end: Int, kw: Array[Byte]): Boolean =
-    kwAt(arr, pos, end, kw) &&
+  /** Unrolled `endobj` token test — hot in [[findEndobj]]. */
+  private def endobjTokenAt(arr: Array[Byte], pos: Int, end: Int): Boolean =
+    pos + 6 <= end &&
+      arr(pos) == 'e'.toByte &&
+      arr(pos + 1) == 'n'.toByte &&
+      arr(pos + 2) == 'd'.toByte &&
+      arr(pos + 3) == 'o'.toByte &&
+      arr(pos + 4) == 'b'.toByte &&
+      arr(pos + 5) == 'j'.toByte &&
       (pos == 0 || isDelim(arr(pos - 1))) &&
-      (pos + kw.length >= end || isDelim(arr(pos + kw.length)))
+      (pos + 6 >= end || isDelim(arr(pos + 6)))
+
+  private def readLongDigits(arr: Array[Byte], from: Int, until: Int): Long =
+    var n = 0L
+    var i = from
+    while i < until do
+      n = n * 10L + (arr(i) - '0'.toByte).toLong
+      i += 1
+    n
 
   private def skipWs(arr: Array[Byte], end: Int, from: Int): Int =
     var i = from
@@ -410,20 +423,6 @@ private[pdf] object PdfBoundaryScan {
     var i = from
     while i < end && isDigit(arr(i)) do i += 1
     (from, i)
-
-  private def parseLong(arr: Array[Byte], from: Int, until: Int): Either[Throwable, Long] =
-    if until <= from then Left(IllegalArgumentException("empty number"))
-    else
-      var n        = 0L
-      var i        = from
-      var overflow = false
-      while i < until && !overflow do
-        if n > (Long.MaxValue - 9L) / 10L then overflow = true
-        else
-          n = n * 10L + (arr(i) - '0'.toByte).toLong
-          i += 1
-      if overflow then Left(IllegalArgumentException("number overflows Long"))
-      else Right(n)
 
   private def skipTrivia(arr: Array[Byte], end: Int, from: Int): Option[Int] =
     var i = from
@@ -458,32 +457,38 @@ private[pdf] object PdfBoundaryScan {
             skipComment(arr, end, p)
           else Some(p)
 
+  private def findKeyword(arr: Array[Byte], from: Int, end: Int, kw: Array[Byte]): Int =
+    val klen  = kw.length
+    val limit = end - klen
+    if limit < from then -1
+    else
+      val lead = kw(0)
+      var i    = from
+      while i <= limit do
+        if arr(i) == lead && kwAt(arr, i, end, kw) then return i
+        i += 1
+      -1
+
   private def skipXrefSection(arr: Array[Byte], end: Int, from: Int): Option[Int] =
-    var i = from + xrefKw.length
-    while i <= end - eofKw.length do
-      if kwAt(arr, i, end, eofKw) then return Some(i + eofKw.length)
-      i += 1
-    None
+    val at = findKeyword(arr, from + xrefKw.length, end, eofKw)
+    if at < 0 then None else Some(at + eofKw.length)
 
   private def skipStartXrefTail(arr: Array[Byte], end: Int, from: Int): Int =
-    var i = from
-    while i < end do
-      if kwAt(arr, i, end, eofKw) then return i + eofKw.length
-      i += 1
-    end
+    val at = findKeyword(arr, from, end, eofKw)
+    if at < 0 then end else at + eofKw.length
 
   private enum RawLength:
     case Direct(value: Long)
     case Indirect(reference: Prim.Ref)
 
-  private def nameIs(arr: Array[Byte], from: Int, until: Int, name: Array[Byte]): Boolean =
-    until - from == name.length && {
-      var i = 0
-      while i < name.length do
-        if arr(from + i) != name(i) then return false
-        i += 1
-      true
-    }
+  private def lengthNameAt(arr: Array[Byte], from: Int, until: Int): Boolean =
+    until - from == 6 &&
+      arr(from) == 'L'.toByte &&
+      arr(from + 1) == 'e'.toByte &&
+      arr(from + 2) == 'n'.toByte &&
+      arr(from + 3) == 'g'.toByte &&
+      arr(from + 4) == 't'.toByte &&
+      arr(from + 5) == 'h'.toByte
 
   private def rawLengthInDict(arr: Array[Byte], from: Int, until: Int): Either[Throwable, RawLength] =
     var index        = from
@@ -526,24 +531,21 @@ private[pdf] object PdfBoundaryScan {
         val nameStart = index + 1
         var nameEnd   = nameStart
         while nameEnd < until && !isDelim(arr(nameEnd)) do nameEnd += 1
-        if nameIs(arr, nameStart, nameEnd, lengthName) then
+        if lengthNameAt(arr, nameStart, nameEnd) then
           val firstStart = skipWs(arr, until, nameEnd)
           val (_, firstEnd) = readDigits(arr, until, firstStart)
           if firstEnd == firstStart then return Left(IllegalArgumentException("stream /Length is not numeric"))
-          parseLong(arr, firstStart, firstEnd) match
-            case Left(error) => return Left(error)
-            case Right(first) =>
-              val secondStart = skipWs(arr, until, firstEnd)
-              val (_, secondEnd) = readDigits(arr, until, secondStart)
-              if secondEnd > secondStart then
-                val marker = skipWs(arr, until, secondEnd)
-                if marker < until && arr(marker) == 'R'.toByte then
-                  parseLong(arr, secondStart, secondEnd) match
-                    case Left(error) => return Left(error)
-                    case Right(generation) if generation <= Int.MaxValue.toLong =>
-                      return Right(RawLength.Indirect(Prim.Ref(first, generation.toInt)))
-                    case Right(_) => return Left(IllegalArgumentException("stream /Length generation overflows Int"))
-              return Right(RawLength.Direct(first))
+          val first = readLongDigits(arr, firstStart, firstEnd)
+          val secondStart = skipWs(arr, until, firstEnd)
+          val (_, secondEnd) = readDigits(arr, until, secondStart)
+          if secondEnd > secondStart then
+            val marker = skipWs(arr, until, secondEnd)
+            if marker < until && arr(marker) == 'R'.toByte then
+              val generation = readLongDigits(arr, secondStart, secondEnd)
+              if generation > Int.MaxValue.toLong then
+                return Left(IllegalArgumentException("stream /Length generation overflows Int"))
+              return Right(RawLength.Indirect(Prim.Ref(first, generation.toInt)))
+          return Right(RawLength.Direct(first))
         index = nameEnd
       else index += 1
 
@@ -639,7 +641,7 @@ private[pdf] object PdfBoundaryScan {
       else if byte == ']'.toByte then
         if arrayDepth > 0 then arrayDepth -= 1
         index += 1
-      else if dictDepth == 0 && arrayDepth == 0 && tokenAt(arr, index, end, endobjKw) then
+      else if dictDepth == 0 && arrayDepth == 0 && endobjTokenAt(arr, index, end) then
         found = index
       else index += 1
     found

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Changed
+
+- `PdfBoundaryScan` micro-optimizations: unrolled `endobj` token test, fast `/Length` name match, `readLongDigits` for object headers, lead-byte `%%EOF` search, and removed redundant carry self-copy.
+
 ## [0.2.1] — 2026-09-04
 
 ### Added
