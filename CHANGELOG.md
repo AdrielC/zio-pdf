@@ -6,8 +6,9 @@ All notable changes to this project are documented here.
 
 ### Added
 
-- `BlocksLift` pulls ZIO Blocks `Reader` / `Stream` into `ZStream` / `ZChannel` on JVM and Scala.js, using Blocks `Scope` for stream lifetime, `Context` + `Config` for mailbox options, and an MPSC ring-buffer mailbox (sequential on JS).
-- `PdfObjectScanner.stream` accepts a Blocks `Reader` or `Stream` of byte windows and emits object boundaries without a second decode pass.
+- `BlocksLift` pulls ZIO Blocks `Reader` / `Stream` into `ZStream` / `ZChannel` on JVM and Scala.js, using Blocks `Scope` for stream lifetime, `Context` + `Config` for mailbox options, and an MPSC ring-buffer mailbox (sequential on JS; mailbox hops are for a JVM thread boundary only).
+- `PdfObjectScanner.scan` / `sink` stay on a Blocks `Reader` and pull with `readBytes` + `stepChunkBytes`. `streamWindows` emits boundary windows, not one object per ZStream step.
+- `BlocksLift.fromBytes` / `toByteWriter` move byte windows with `readBytes` / `writeBytes`.
 - Serializable filing-prep programs (`PdfPrep.Program`, `PdfEngine.applyPrep`) derive `zio.blocks.schema.Schema` and round-trip through JSON / `DynamicValue` so a saved program can be applied later.
 - Prep operations include date stamps, Bates labels, catalog `/PageLabels`, redaction boxes (overlay + show-text blanking), and TrueType font embedding.
 - Text watermarks (`PdfWatermark`, `PdfEngine.watermark`) stamp standard-14 text or DeviceGray/RGB/JPEG image XObjects onto a page range, with font/color/opacity/placement/rotation/size options and a workbench control that reloads the preview.

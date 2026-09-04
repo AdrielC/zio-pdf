@@ -437,6 +437,14 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
         got    <- mailbox.pollZIO
       yield assertTrue(pulled == Chunk(1, 2, 3), got.contains("ok"))
     },
+    test("Scala.js PdfObjectScanner.scan pulls a byte Reader") {
+      val pdf =
+        zio.blocks.chunk.Chunk.fromArray(
+          "%PDF-1.7\n1 0 obj\n<</Type /Catalog>>\nendobj\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII)
+        )
+      val scanned = PdfObjectScanner.scan(zio.blocks.streams.io.Reader.fromChunk(pdf))
+      assertTrue(scanned.exists(_.map(_.index.number) == Chunk(1L)))
+    },
     test("browser byte-stream decode is independent of collected-document limits") {
       val limit = ByteLimit.fromBytes(8L).toOption.get
       minimalPdfBytes.flatMap { bytes =>

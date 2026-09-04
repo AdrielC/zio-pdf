@@ -67,10 +67,57 @@ object BlocksLiftSpec extends ZIOSpecDefault {
         empty  <- mailbox.pollZIO
       } yield assertTrue(first.contains("one"), second.contains("two"), empty.isEmpty)
     },
-    test("PdfObjectScanner.stream matches step() through a Blocks Reader") {
-      val windows = BlocksChunk(BlocksLift.toBlocksChunk(pdfBytes))
+    test("PdfObjectScanner.scan pulls a byte Reader without per-object ZIO") {
+      val reader   = Reader.fromChunk(BlocksLift.toBlocksChunk(pdfBytes))
       val oneChunk = PdfObjectScanner.step(PdfObjectScanner.Config.default, PdfObjectScanner.initial, pdfBytes)
-      PdfObjectScanner.stream(Reader.fromChunk(windows)).runCollect.map { streamed =>
+      val scanned  = PdfObjectScanner.scan(reader)
+      assertTrue(
+        oneChunk.exists { case (_, boundaries) =>
+          scanned.exists { found =>
+            found.map(_.index.number) == boundaries.map(_.index.number) &&
+            found.map(_.index.number) == Chunk(1L, 2L)
+          }
+        }
+      )
+    },
+    test("PdfObjectScanner.streamWindows emits boundary windows, not one object per step") {
+      val reader   = Reader.fromChunk(BlocksLift.toBlocksChunk(pdfBytes))
+      val oneChunk = PdfObjectScanner.step(PdfObjectScanner.Config.default, PdfObjectScanner.initial, pdfBytes)
+      PdfObjectScanner.streamWindows(reader).runCollect.map { windows =>
+        val streamed = windows.flatten
+        assertTrue(
+          windows.length == 1,
+          windows.forall(_.nonEmpty),
+          oneChunk.exists { case (_, boundaries) =>
+            streamed.map(_.index.number) == boundaries.map(_.index.number)
+          }
+        )
+      }
+    },
+    test("fromBytes emits readBytes windows") {
+      val reader = Reader.fromChunk(BlocksLift.toBlocksChunk(pdfBytes))
+      BlocksLift.fromBytes(reader, windowBytes = 16).runCollect.map { windows =>
+        assertTrue(
+          windows.nonEmpty,
+          windows.forall(_.nonEmpty),
+          windows.flatten == pdfBytes
+        )
+      }
+    },
+    test("PdfObjectScanner.sink drains a Blocks Stream of bytes") {
+      val source = BlocksStream.fromChunk(BlocksLift.toBlocksChunk(pdfBytes))
+      val oneChunk = PdfObjectScanner.step(PdfObjectScanner.Config.default, PdfObjectScanner.initial, pdfBytes)
+      val scanned  = PdfObjectScanner.scan(source)
+      assertTrue(
+        oneChunk.exists { case (_, boundaries) =>
+          scanned.exists(_.map(_.index.number) == boundaries.map(_.index.number))
+        }
+      )
+    },
+    test("PdfObjectScanner.stream matches step() through a Blocks byte Reader") {
+      val reader   = Reader.fromChunk(BlocksLift.toBlocksChunk(pdfBytes))
+      val oneChunk = PdfObjectScanner.step(PdfObjectScanner.Config.default, PdfObjectScanner.initial, pdfBytes)
+      PdfObjectScanner.stream(reader).runCollect.map { streamed =>
         assertTrue(
           oneChunk.exists { case (_, boundaries) =>
             streamed.map(_.index.number) == boundaries.map(_.index.number) &&

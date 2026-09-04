@@ -28,6 +28,8 @@ import zio.{Chunk, UIO, ZIO}
 
 object BlocksLift {
 
+  private val PdfObjectScannerWindow = 64 * 1024
+
   final case class Options(mailboxCapacity: Int = 8)
 
   object Options {
@@ -56,11 +58,43 @@ object BlocksLift {
   /**
    * Pull a Blocks `Reader` on the current fiber. The reader is closed when
    * the stream exits. `sentinel` must not appear as a live element.
+   *
+   * One ZIO per `read(sentinel)`. For bytes use [[fromBytes]] so the hot
+   * loop stays on unboxed `readBytes`.
    */
   def fromReader[A](acquire: => Reader[A], sentinel: A): ZStream[Any, Throwable, A] =
     ZStream.unwrapScoped {
       ZIO.acquireRelease(ZIO.attempt(acquire))(reader => ZIO.succeed(reader.close())).map { reader =>
         pullReader(reader, sentinel)
+      }
+    }
+
+  /**
+   * Pull a `Reader[Byte]` with `readBytes` and emit one `Chunk[Byte]`
+   * window per ZStream step. The read buffer is reused; each emitted
+   * window is a copy of the filled prefix.
+   */
+  def fromBytes(
+    acquire: => Reader[Byte],
+    windowBytes: Int = PdfObjectScannerWindow
+  ): ZStream[Any, Throwable, Chunk[Byte]] =
+    ZStream.unwrapScoped {
+      ZIO.acquireRelease(ZIO.attempt(acquire))(reader => ZIO.succeed(reader.close())).map { reader =>
+        val buf = new Array[Byte](windowBytes)
+        ZStream.repeatZIOOption {
+          ZIO.attempt {
+            val n = reader.readBytes(buf, 0, windowBytes)
+            if n < 0 then None
+            else if n == 0 then Some(Chunk.empty[Byte])
+            else Some(Chunk.fromArray(java.util.Arrays.copyOf(buf, n)))
+          }.foldZIO(
+            error => ZIO.fail(Some(error)),
+            {
+              case None         => ZIO.fail(None)
+              case Some(window) => ZIO.succeed(window)
+            }
+          )
+        }
       }
     }
 
@@ -97,9 +131,35 @@ object BlocksLift {
       }
     }
 
+  /** Push byte windows with `writeBytes` — one ZIO per window, not per byte. */
+  def toByteWriter(writer: Writer[Byte]): ZSink[Any, Throwable, Byte, Nothing, Unit] =
+    ZSink.unwrapScoped {
+      ZIO.acquireRelease(ZIO.succeed(writer))(w => ZIO.succeed(w.close())).map { owned =>
+        ZSink.foreachChunk[Any, Throwable, Byte] { chunk =>
+          ZIO.attempt {
+            val (arr, off, len) = chunk match {
+              case Chunk.ByteArray(bytes, offset, length) => (bytes, offset, length)
+              case other =>
+                val copied = other.toArray
+                (copied, 0, copied.length)
+            }
+            if len > 0 then
+              val written = owned.writeBytes(arr, off, len)
+              if written != len then
+                throw new IllegalStateException(s"blocks Writer accepted $written of $len bytes")
+          }
+        }
+      }
+    }
+
   /**
    * Bounded MPSC mailbox. Same type on JVM and Scala.js; JS uses the
    * sequential ring-buffer implementation. Capacity must be a power of two.
+   *
+   * Use this only across a real JVM thread boundary (producer thread →
+   * consumer fiber). Same-fiber and Scala.js scans must stay on
+   * [[Reader.readBytes]] / [[zio.pdf.PdfObjectScanner.scan]] — a mailbox
+   * hop there is extra traffic with no parallelism.
    *
    * Failed offers yield the fiber instead of spinning, so a full buffer
    * cannot livelock the Scala.js event loop.

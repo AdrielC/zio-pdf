@@ -2,11 +2,11 @@ package zio.pdf
 
 import scala.util.control.NonFatal
 
+import zio.*
 import zio.blocks.chunk.{Chunk as BlocksChunk}
-import zio.blocks.streams.{Stream as BlocksStream}
+import zio.blocks.streams.{Sink as BlocksSink, Stream as BlocksStream}
 import zio.blocks.streams.io.Reader
 import zio.stream.{ZPipeline, ZStream}
-import zio.{Chunk, ZIO}
 
 /** Incremental PDF object-boundary scanner with bounded parser carry.
   *
@@ -79,25 +79,43 @@ object PdfObjectScanner {
     cursor: Cursor,
     bytes: Chunk[Byte]
   ): Either[Error, (Cursor, Chunk[Boundary])] =
+    bytes match {
+      case Chunk.ByteArray(arr, off, len) =>
+        stepBytes(config, cursor, arr, off, len)
+      case _ =>
+        val arr = bytes.toArray
+        stepBytes(config, cursor, arr, 0, arr.length)
+    }
+
+  /**
+   * Zero-copy window step: decode from an owned `Array[Byte]` via
+   * [[StreamingDecode.stepChunkBytes]].
+   */
+  def stepBytes(
+    config: Config,
+    cursor: Cursor,
+    buf: Array[Byte],
+    offset: Int,
+    length: Int
+  ): Either[Error, (Cursor, Chunk[Boundary])] =
     try {
       var parser     = cursor.parser
-      var offset     = 0
+      var pos        = offset
+      val end        = offset + length
       val boundaries = Chunk.newBuilder[Boundary]
 
-      while (offset < bytes.length) {
+      while pos < end do
         val retained = StreamingDecode.structuralCarryBytes(parser)
         val headroom = math.max(1L, config.maxCarryBytes.toLong - retained)
-        val stepSize = math.min(math.min(MaxStepBytes.toLong, headroom), bytes.length.toLong - offset.toLong).toInt
-        val nextEnd  = offset + stepSize
-        val (events, next) = StreamingDecode.stepChunk(config.decoder, parser, bytes.slice(offset, nextEnd))
+        val stepSize = math.min(math.min(MaxStepBytes.toLong, headroom), (end - pos).toLong).toInt
+        val (events, next) = StreamingDecode.stepChunkBytes(config.decoder, parser, buf, pos, stepSize)
         events.foreach {
           case StreamingDecoded.ObjectEnd(index, nextByteOffset) =>
             boundaries += Boundary(index, nextByteOffset)
-          case _                                                  => ()
+          case _ => ()
         }
         parser = next
-        offset = nextEnd
-      }
+        pos += stepSize
 
       Right((new Cursor(parser), boundaries.result()))
     } catch {
@@ -106,32 +124,97 @@ object PdfObjectScanner {
       case StreamingDecode.UnresolvedIndirectStreamLength(index, reference) =>
         Left(Error.IndirectLength(index, reference))
       case NonFatal(error) =>
-        val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
-        Left(Error.Malformed(s"Malformed or unsupported PDF structure: $detail", error))
+        Left(asError(error))
     }
 
-  /** Scan byte windows as they arrive. Does not call [[finish]]; use [[stream]] for a complete source. */
-  def pipeline(config: Config = Config.default): ZPipeline[Any, Error, Chunk[Byte], Boundary] =
-    ZPipeline.unwrap {
-      zio.Ref.make(initial).map { cursorRef =>
-        ZPipeline.mapChunksZIO[Any, Error, Chunk[Byte], Boundary] { windows =>
-          ZIO.foldLeft(windows)(Chunk.empty[Boundary]) { (acc, window) =>
-            cursorRef.get.flatMap { cursor =>
-              ZIO.fromEither(step(config, cursor, window)).flatMap { (next, bounds) =>
-                cursorRef.set(next).as(acc ++ bounds)
-              }
+  /**
+   * Tight pull on a Blocks [[Reader]]: `readBytes` into one reused buffer,
+   * decode with [[stepBytes]], no ZIO per object or per byte.
+   */
+  def scan(reader: Reader[Byte], config: Config = Config.default): Either[Error, Chunk[Boundary]] =
+    try {
+      val buf    = new Array[Byte](MaxStepBytes)
+      var cursor = initial
+      val out    = Chunk.newBuilder[Boundary]
+      var n      = reader.readBytes(buf, 0, buf.length)
+      var failed = Option.empty[Error]
+      while n >= 0 && failed.isEmpty do
+        if n > 0 then
+          stepBytes(config, cursor, buf, 0, n) match {
+            case Left(e) =>
+              failed = Some(e)
+            case Right((next, found)) =>
+              cursor = next
+              if found.nonEmpty then out ++= found
+          }
+        if failed.isEmpty then n = reader.readBytes(buf, 0, buf.length)
+      failed match {
+        case Some(e) => Left(e)
+        case None    => finish(cursor).map(_ => out.result())
+      }
+    } catch {
+      case NonFatal(error) => Left(asError(error))
+    }
+
+  /**
+   * Drain a Blocks byte [[zio.blocks.streams.Stream]] through [[sink]] —
+   * the scan stays inside the Blocks `Reader` / `Sink`, not a ZStream loop.
+   */
+  def scan(source: BlocksStream[Nothing, Byte], config: Config): Either[Error, Chunk[Boundary]] =
+    source.run(sink(config)) match {
+      case Right(result) => result
+      case Left(_) =>
+        Left(Error.Malformed("blocks stream failed", new RuntimeException("blocks stream failed")))
+    }
+
+  def scan(source: BlocksStream[Nothing, Byte]): Either[Error, Chunk[Boundary]] =
+    scan(source, Config.default)
+
+  def scanZIO(reader: Reader[Byte], config: Config = Config.default): IO[Error, Chunk[Boundary]] =
+    ZIO.succeed(scan(reader, config)).flatMap(ZIO.fromEither)
+
+  /**
+   * Blocks sink: `readBytes` + [[stepBytes]] on the calling thread.
+   * Use `stream.run(sink)` — do not lift each byte into ZIO first.
+   */
+  def sink(config: Config = Config.default): BlocksSink[Nothing, Byte, Either[Error, Chunk[Boundary]]] =
+    BlocksSink.create { (reader: Reader[Byte]) =>
+      scan(reader, config)
+    }
+
+  /**
+   * One ZStream element per pulled window (`Chunk[Boundary]`), not one
+   * object per step. Flatten with `.flattenChunks` only at the rim.
+   */
+  def streamWindows(
+    acquire: => Reader[Byte],
+    config: Config = Config.default
+  ): ZStream[Any, Error, Chunk[Boundary]] =
+    ZStream.unwrapScoped {
+      ZIO.acquireRelease(ZIO.attempt(acquire).mapError(asError))(reader => ZIO.succeed(reader.close())).map { reader =>
+        ZStream
+          .unfoldZIO(WindowPull(initial, new Array[Byte](MaxStepBytes))) { pull =>
+            ZIO.attempt(reader.readBytes(pull.buf, 0, pull.buf.length)).mapError(asError).flatMap { n =>
+              if n < 0 then
+                ZIO.fromEither(finish(pull.cursor)).as(None)
+              else if n == 0 then
+                ZIO.succeed(Some(Chunk.empty[Boundary] -> pull))
+              else
+                ZIO.fromEither(stepBytes(config, pull.cursor, pull.buf, 0, n)).map { (next, found) =>
+                  Some(found -> pull.copy(cursor = next))
+                }
             }
           }
-        }
+          .filter(_.nonEmpty)
       }
     }
 
-  def stream[R](
+  def streamWindows[R](
     windows: ZStream[R, Error, Chunk[Byte]],
-    config: Config = Config.default
-  ): ZStream[R, Error, Boundary] =
+    config: Config
+  ): ZStream[R, Error, Chunk[Boundary]] =
     ZStream.unwrapScoped {
-      zio.Ref.make(initial).map { cursorRef =>
+      Ref.make(initial).map { cursorRef =>
         windows
           .mapZIO { window =>
             cursorRef.get.flatMap { cursor =>
@@ -140,31 +223,56 @@ object PdfObjectScanner {
               }
             }
           }
-          .flattenChunks
+          .filter(_.nonEmpty)
           .concat(ZStream.fromZIO(cursorRef.get.flatMap(cursor => ZIO.fromEither(finish(cursor)))).drain)
       }
     }
 
-  def stream(
-    reader: => Reader[BlocksChunk[Byte]],
-    config: Config
-  ): ZStream[Any, Error, Boundary] =
-    stream(
-      BlocksLift.fromReader(reader, null).mapError(asError).map(BlocksLift.toZioChunk),
-      config
-    )
+  def stream(reader: => Reader[Byte], config: Config = Config.default): ZStream[Any, Error, Boundary] =
+    streamWindows(reader, config).flattenChunks
 
-  def stream(reader: => Reader[BlocksChunk[Byte]]): ZStream[Any, Error, Boundary] =
-    stream(reader, Config.default)
+  /** Scan byte windows as they arrive. Does not call [[finish]]; use [[stream]] for a complete source. */
+  def pipeline(config: Config = Config.default): ZPipeline[Any, Error, Chunk[Byte], Boundary] =
+    pipelineWindows(config).flattenChunks
+
+  def pipelineWindows(config: Config = Config.default): ZPipeline[Any, Error, Chunk[Byte], Chunk[Boundary]] =
+    ZPipeline.unwrap {
+      Ref.make(initial).map { cursorRef =>
+        ZPipeline.mapChunksZIO[Any, Error, Chunk[Byte], Chunk[Boundary]] { windows =>
+          cursorRef.get.flatMap { start =>
+            val folded =
+              windows.foldLeft[Either[Error, (Cursor, Chunk[Chunk[Boundary]])]](Right((start, Chunk.empty))) {
+                case (Left(e), _) => Left(e)
+                case (Right((cursor, acc)), window) =>
+                  step(config, cursor, window).map { (next, bounds) =>
+                    (next, if bounds.isEmpty then acc else acc :+ bounds)
+                  }
+              }
+            ZIO.fromEither(folded).flatMap { (next, emitted) =>
+              cursorRef.set(next).as(emitted)
+            }
+          }
+        }
+      }
+    }
+
+  def stream[R](
+    windows: ZStream[R, Error, Chunk[Byte]],
+    config: Config
+  ): ZStream[R, Error, Boundary] =
+    streamWindows(windows, config).flattenChunks
+
+  def stream[R](windows: ZStream[R, Error, Chunk[Byte]]): ZStream[R, Error, Boundary] =
+    stream(windows, Config.default)
 
   def stream(
     source: BlocksStream[Nothing, BlocksChunk[Byte]],
     config: Config
   ): ZStream[Any, Error, Boundary] =
-    stream(
+    streamWindows(
       BlocksLift.fromStream(source, null).mapError(asError).map(BlocksLift.toZioChunk),
       config
-    )
+    ).flattenChunks
 
   def stream(source: BlocksStream[Nothing, BlocksChunk[Byte]]): ZStream[Any, Error, Boundary] =
     stream(source, Config.default)
@@ -176,4 +284,6 @@ object PdfObjectScanner {
         val detail = Option(other.getMessage).filter(_.nonEmpty).getOrElse(other.getClass.getSimpleName)
         Error.Malformed(s"Malformed or unsupported PDF structure: $detail", other)
     }
+
+  private final case class WindowPull(cursor: Cursor, buf: Array[Byte])
 }

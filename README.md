@@ -109,6 +109,8 @@ Use the API that matches the ownership model:
 
 | Input and result | API | Memory behavior |
 | --- | --- | --- |
+| Blocks `Reader[Byte]` / `Sink`, object boundaries | `PdfObjectScanner.scan` / `sink` | tight `readBytes` pull, no per-item ZIO |
+| ZStream of boundary windows | `PdfObjectScanner.streamWindows` | one stream step per pulled window |
 | arbitrary upload, object boundaries | `PdfObjectScanner.step` | bounded carry, no payload collection |
 | arbitrary upload, raw events | `PdfEngine.streaming(options)` | bounded parser state |
 | path, decoded events | `PdfEngine.stream(path, options)` | bounded file windows and per-stream limit |
@@ -332,7 +334,7 @@ The build uses the current Maven Central releases of:
 - `zio-blocks-scope` / `zio-blocks-context` / `zio-blocks-config` 0.0.51 for resource handles, typed settings, and `Config.load`;
 - `zio-blocks-ringbuffer` 0.0.51 for the cross-platform MPSC mailbox (lock-free on the JVM, sequential on Scala.js).
 
-`BlocksLift.fromReader` / `fromStream` pull a Blocks source on the current fiber. `PdfObjectScanner.stream` accepts a Blocks `Reader` or `Stream` of byte windows and emits object boundaries through `ZStream`. JVM-only Blocks APIs (virtual threads, NIO sinks) are not used, so the same path ships in the Scala.js jar.
+The hot scan stays inside a Blocks `Reader` / `Sink`. `PdfObjectScanner.scan` / `sink` pull with unboxed `readBytes` and `StreamingDecode.stepChunkBytes` — no ZIO per object. `streamWindows` lifts only at the rim and emits a `Chunk[Boundary]` per window; flatten that only if a caller wants one object per ZStream step. `BlocksLift.fromBytes` is the matching windowed byte lift. The MPSC mailbox is for a real JVM thread boundary, not the same-fiber scan. JVM-only Blocks APIs (virtual threads, NIO sinks) are not used, so the same path ships in the Scala.js jar.
 
 `ScodecDeriver` implements all seven ZIO Blocks derivation shapes: primitive, record, variant, wrapper, sequence, map, and dynamic. Primitive coverage includes Java time values, currency, UUID, `BigInt`, and `BigDecimal`; the artifact gate rejects placeholder markers.
 
