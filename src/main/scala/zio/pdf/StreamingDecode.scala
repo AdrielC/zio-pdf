@@ -104,48 +104,69 @@ object StreamingDecode {
       else (Chunk.single(StreamingDecoded.XrefT(x)), WaitingHeader(remainingBits))
     case HeaderEvent.W(_) =>
       (Chunk.empty, WaitingHeader(remainingBits))
+    case HeaderEvent.ObjHead(index, streamLen) =>
+      enterObject(cfg, index, streamLen, None, remainingBits, dup)
     case HeaderEvent.H(IndirectObj.IndirectObjHeader(obj, streamLen)) =>
-      val suppress = DuplicateFilterState.shouldSuppress(dup, obj.index.number)
-      if (suppress)
-        streamLen match {
-          case None =>
-            (Chunk.empty, ConsumingTrailerNoStream(obj.index, remainingBits))
-          case Some(length) =>
-            (Chunk.empty, SkippingStreamPayload(obj.index, length, remainingBits))
-        }
-      else
-        streamLen match {
-          case None =>
-            val events =
-              if boundaryOnly(cfg) then Chunk.empty
-              else Chunk.single(StreamingDecoded.DataObj(obj))
-            (events, ConsumingTrailerNoStream(obj.index, remainingBits))
-          case Some(length) =>
-            if !cfg.emitContentEvents then
-              if length == 0L then (Chunk.empty, ConsumingTrailer(obj.index, remainingBits))
-              else (Chunk.empty, ForwardingBytes(obj.index, length, remainingBits))
-            else if (length <= cfg.inlineMaxBytes && length <= Int.MaxValue && length > 0L)
-              (
-                Chunk.empty,
-                BufferingBytes(
-                  obj,
-                  bytesTotal = length.toInt,
-                  filled     = 0,
-                  carry      = remainingBits,
-                  acc        = new Array[Byte](length.toInt)
+      enterObject(cfg, obj.index, streamLen, Some(obj), remainingBits, dup)
+  }
+
+  private def enterObject(
+    cfg: Config,
+    index: Obj.Index,
+    streamLen: Option[Long],
+    obj: Option[Obj],
+    remainingBits: BitVector,
+    dup: DuplicateFilterState.Mutable
+  ): (Chunk[StreamingDecoded], State) = {
+    val suppress = DuplicateFilterState.shouldSuppress(dup, index.number)
+    if (suppress)
+      streamLen match {
+        case None         => (Chunk.empty, ConsumingTrailerNoStream(index, remainingBits))
+        case Some(length) => (Chunk.empty, SkippingStreamPayload(index, length, remainingBits))
+      }
+    else
+      streamLen match {
+        case None =>
+          val events =
+            if boundaryOnly(cfg) then Chunk.empty
+            else obj match {
+              case Some(o) => Chunk.single(StreamingDecoded.DataObj(o))
+              case None    => Chunk.empty
+            }
+          (events, ConsumingTrailerNoStream(index, remainingBits))
+        case Some(length) =>
+          if !cfg.emitContentEvents then
+            if length == 0L then (Chunk.empty, ConsumingTrailer(index, remainingBits))
+            else (Chunk.empty, ForwardingBytes(index, length, remainingBits))
+          else
+            obj match {
+              case Some(o) if length <= cfg.inlineMaxBytes && length <= Int.MaxValue && length > 0L =>
+                (
+                  Chunk.empty,
+                  BufferingBytes(
+                    o,
+                    bytesTotal = length.toInt,
+                    filled     = 0,
+                    carry      = remainingBits,
+                    acc        = new Array[Byte](length.toInt)
+                  )
                 )
-              )
-            else if (length == 0L)
-              (
-                Chunk.single(StreamingDecoded.ContentObjStart(obj, 0L, Some(BitVector.empty))),
-                ConsumingTrailer(obj.index, remainingBits)
-              )
-            else
-              (
-                Chunk.single(StreamingDecoded.ContentObjStart(obj, length, None)),
-                ForwardingBytes(obj.index, length, remainingBits)
-              )
-        }
+              case Some(o) if length == 0L =>
+                (
+                  Chunk.single(StreamingDecoded.ContentObjStart(o, 0L, Some(BitVector.empty))),
+                  ConsumingTrailer(index, remainingBits)
+                )
+              case Some(o) =>
+                (
+                  Chunk.single(StreamingDecoded.ContentObjStart(o, length, None)),
+                  ForwardingBytes(index, length, remainingBits)
+                )
+              case None if length == 0L =>
+                (Chunk.empty, ConsumingTrailer(index, remainingBits))
+              case None =>
+                (Chunk.empty, ForwardingBytes(index, length, remainingBits))
+            }
+      }
   }
 
   private[pdf] final case class ConsumingTrailerNoStream(index: Obj.Index, carry: BitVector) extends State
