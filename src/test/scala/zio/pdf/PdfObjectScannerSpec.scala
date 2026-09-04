@@ -107,7 +107,7 @@ object PdfObjectScannerSpec extends ZIOSpecDefault {
     test("keeps object offsets as Long values beyond one tebibyte without allocating the prefix") {
       val base   = 1L << 40
       val suffix = bytes("1 0 obj\n<</Type /Catalog>>\nendobj\n")
-      val cursor = new PdfObjectScanner.Cursor(StreamingDecode.initialFinalState.copy(bytesSeen = base))
+      val cursor = new PdfObjectScanner.Cursor(PdfBoundaryScan.withBytesSeen(base))
       val result = PdfObjectScanner.step(PdfObjectScanner.Config.default, cursor, suffix)
 
       assertTrue(

@@ -23,14 +23,6 @@ object PdfObjectScanner {
 
   final case class Config(maxCarryBytes: Int = 1024 * 1024) {
     require(maxCarryBytes > 0, "maxCarryBytes must be positive")
-
-    private[pdf] val decoder: StreamingDecode.Config =
-      StreamingDecode.Config(
-        inlineMaxBytes = 0L,
-        emitObjectEnds = true,
-        maxCarryBytes = Some(maxCarryBytes),
-        emitContentEvents = false
-      )
   }
 
   object Config {
@@ -66,15 +58,15 @@ object PdfObjectScanner {
     require(nextByteOffset >= 0L, "nextByteOffset must be non-negative")
   }
 
-  final class Cursor private[pdf] (private[pdf] val parser: StreamingDecode.FinalState)
+  /** Cursor wraps one [[PdfBoundaryScan.Machine]] mutated in place across steps. */
+  final class Cursor private[pdf] (private[pdf] val state: PdfBoundaryScan.State)
 
-  def initial: Cursor = new Cursor(StreamingDecode.initialFinalState)
+  def initial: Cursor = new Cursor(PdfBoundaryScan.initial)
 
-  def bytesSeen(cursor: Cursor): Long = cursor.parser.bytesSeen
+  def bytesSeen(cursor: Cursor): Long = cursor.state.machine.bytesSeen
 
-  /** Validate that the source ended at a complete top-level boundary. */
   def finish(cursor: Cursor): Either[Error, Unit] =
-    StreamingDecode.validateFinalState(cursor.parser).left.map { error =>
+    PdfBoundaryScan.validate(cursor.state.machine).left.map { error =>
       Error.UnexpectedEnd(error.context, error.remainingBytes)
     }
 
@@ -91,10 +83,6 @@ object PdfObjectScanner {
         stepBytes(config, cursor, arr, 0, arr.length)
     }
 
-  /**
-   * Zero-copy window step: decode from an owned `Array[Byte]` via
-   * [[StreamingDecode.stepChunkBytes]].
-   */
   def stepBytes(
     config: Config,
     cursor: Cursor,
@@ -102,60 +90,26 @@ object PdfObjectScanner {
     offset: Int,
     length: Int
   ): Either[Error, (Cursor, Chunk[Boundary])] =
-    try {
-      var parser     = cursor.parser
-      var pos        = offset
-      val end        = offset + length
-      val boundaries = Chunk.newBuilder[Boundary]
-
-      while pos < end do
-        val retained = StreamingDecode.structuralCarryBytes(parser)
-        val headroom = math.max(1L, config.maxCarryBytes.toLong - retained)
-        val stepSize = math.min(headroom, (end - pos).toLong).toInt
-        val (events, next) = StreamingDecode.stepChunkBytes(config.decoder, parser, buf, pos, stepSize)
-        events.foreach {
-          case StreamingDecoded.ObjectEnd(index, nextByteOffset) =>
-            boundaries += Boundary(index, nextByteOffset)
-          case _ => ()
-        }
-        parser = next
-        pos += stepSize
-
-      Right((new Cursor(parser), boundaries.result()))
-    } catch {
-      case StreamingDecode.CarryLimitExceeded(maxBytes, observedBytes) =>
-        Left(Error.CarryLimit(maxBytes, observedBytes))
-      case StreamingDecode.UnresolvedIndirectStreamLength(index, reference) =>
-        Left(Error.IndirectLength(index, reference))
-      case NonFatal(error) =>
-        Left(asError(error))
+    PdfBoundaryScan.step(cursor.state, buf, offset, length, config.maxCarryBytes).map { found =>
+      (cursor, found)
     }
 
-  /** In-memory scan — no Reader copy. Same decode as [[step]] plus [[finish]]. */
   def scan(bytes: Chunk[Byte], config: Config): Either[Error, Chunk[Boundary]] =
-    step(config, initial, bytes).flatMap { (cursor, found) =>
-      finish(cursor).map(_ => found)
-    }
+    PdfBoundaryScan.scanChunk(bytes, config.maxCarryBytes)
 
   def scan(bytes: Chunk[Byte]): Either[Error, Chunk[Boundary]] =
     scan(bytes, Config.default)
 
   def scan(bytes: Array[Byte], config: Config): Either[Error, Chunk[Boundary]] =
-    stepBytes(config, initial, bytes, 0, bytes.length).flatMap { (cursor, found) =>
-      finish(cursor).map(_ => found)
-    }
+    scan(Chunk.fromArray(bytes), config)
 
   def scan(bytes: Array[Byte]): Either[Error, Chunk[Boundary]] =
     scan(bytes, Config.default)
 
-  /**
-   * Tight pull on a Blocks [[Reader]]: `readBytes` into one reused buffer,
-   * decode with [[stepBytes]], no ZIO per object or per byte.
-   */
   def scan(reader: Reader[Byte], config: Config = Config.default): Either[Error, Chunk[Boundary]] =
     try {
       val buf    = pullBuffer(config)
-      var cursor = initial
+      val cursor = initial
       val out    = Chunk.newBuilder[Boundary]
       var n      = reader.readBytes(buf, 0, buf.length)
       var failed = Option.empty[Error]
@@ -164,8 +118,7 @@ object PdfObjectScanner {
           stepBytes(config, cursor, buf, 0, n) match {
             case Left(e) =>
               failed = Some(e)
-            case Right((next, found)) =>
-              cursor = next
+            case Right((_, found)) =>
               if found.nonEmpty then out ++= found
           }
         if failed.isEmpty then n = reader.readBytes(buf, 0, buf.length)
@@ -177,10 +130,6 @@ object PdfObjectScanner {
       case NonFatal(error) => Left(asError(error))
     }
 
-  /**
-   * Drain a Blocks byte [[zio.blocks.streams.Stream]] through [[sink]] —
-   * the scan stays inside the Blocks `Reader` / `Sink`, not a ZStream loop.
-   */
   def scan(source: BlocksStream[Nothing, Byte], config: Config): Either[Error, Chunk[Boundary]] =
     source.run(sink(config)) match {
       case Right(result) => result
@@ -194,19 +143,11 @@ object PdfObjectScanner {
   def scanZIO(reader: Reader[Byte], config: Config = Config.default): IO[Error, Chunk[Boundary]] =
     ZIO.succeed(scan(reader, config)).flatMap(ZIO.fromEither)
 
-  /**
-   * Blocks sink: `readBytes` + [[stepBytes]] on the calling thread.
-   * Use `stream.run(sink)` — do not lift each byte into ZIO first.
-   */
   def sink(config: Config = Config.default): BlocksSink[Nothing, Byte, Either[Error, Chunk[Boundary]]] =
     BlocksSink.create { (reader: Reader[Byte]) =>
       scan(reader, config)
     }
 
-  /**
-   * One ZStream element per pulled window (`Chunk[Boundary]`), not one
-   * object per step. Flatten with `.flattenChunks` only at the rim.
-   */
   def streamWindows(
     acquire: => Reader[Byte],
     config: Config = Config.default
@@ -221,8 +162,8 @@ object PdfObjectScanner {
               else if n == 0 then
                 ZIO.succeed(Some(Chunk.empty[Boundary] -> pull))
               else
-                ZIO.fromEither(stepBytes(config, pull.cursor, pull.buf, 0, n)).map { (next, found) =>
-                  Some(found -> pull.copy(cursor = next))
+                ZIO.fromEither(stepBytes(config, pull.cursor, pull.buf, 0, n)).map { case (_, found) =>
+                  Some(found -> pull)
                 }
             }
           }
@@ -239,8 +180,8 @@ object PdfObjectScanner {
         windows
           .mapZIO { window =>
             cursorRef.get.flatMap { cursor =>
-              ZIO.fromEither(step(config, cursor, window)).flatMap { (next, bounds) =>
-                cursorRef.set(next).as(bounds)
+              ZIO.fromEither(step(config, cursor, window)).flatMap { (_, bounds) =>
+                cursorRef.set(cursor).as(bounds)
               }
             }
           }
@@ -252,7 +193,6 @@ object PdfObjectScanner {
   def stream(reader: => Reader[Byte], config: Config = Config.default): ZStream[Any, Error, Boundary] =
     streamWindows(reader, config).flattenChunks
 
-  /** Scan byte windows as they arrive. Does not call [[finish]]; use [[stream]] for a complete source. */
   def pipeline(config: Config = Config.default): ZPipeline[Any, Error, Chunk[Byte], Boundary] =
     pipelineWindows(config).flattenChunks
 
@@ -265,8 +205,8 @@ object PdfObjectScanner {
               windows.foldLeft[Either[Error, (Cursor, Chunk[Chunk[Boundary]])]](Right((start, Chunk.empty))) {
                 case (Left(e), _) => Left(e)
                 case (Right((cursor, acc)), window) =>
-                  step(config, cursor, window).map { (next, bounds) =>
-                    (next, if bounds.isEmpty then acc else acc :+ bounds)
+                  step(config, cursor, window).map { (_, bounds) =>
+                    (cursor, if bounds.isEmpty then acc else acc :+ bounds)
                   }
               }
             ZIO.fromEither(folded).flatMap { (next, emitted) =>
