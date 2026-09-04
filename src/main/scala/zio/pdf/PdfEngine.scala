@@ -824,3 +824,11 @@ object PdfEngine:
     opts: Options = Options.default
   ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
     PdfSplit.rotateBytes(bytes, degrees, fromPage, toPage, opts)
+
+  /** Stamp a Helvetica text watermark onto a 1-based page range. */
+  def watermark(
+    bytes: Chunk[Byte],
+    stamp: PdfWatermark.Text,
+    opts: Options = Options.default
+  ): ZIO[PdfEngine, Throwable, Chunk[Byte]] =
+    PdfWatermark.fromBytes(bytes, stamp, opts)

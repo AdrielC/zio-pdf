@@ -56,6 +56,15 @@ export type ScanWorkerRequest =
       readonly kind: "split";
       readonly id: number;
       readonly file: File;
+    }
+  | {
+      readonly kind: "watermark";
+      readonly id: number;
+      readonly file: File;
+      readonly text: string;
+      readonly diagonal: boolean;
+      readonly fromPage: number;
+      readonly toPage: number;
     };
 
 export type ScanWorkerMessage =

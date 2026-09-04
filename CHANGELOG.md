@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Text watermarks (`PdfWatermark`, `PdfEngine.watermark`) stamp Helvetica show-text onto a page range, with a diagonal option and a workbench control that reloads the preview.
 - AcroForm inventory walks nested `/Kids` and reports qualified field names (`Address.Street`).
 - Visual flatten honors Form XObject `/Matrix` when mapping `/BBox` onto the widget `/Rect`.
 - Workbench flatten updates the preview and reports how many appearances were baked.

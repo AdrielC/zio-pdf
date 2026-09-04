@@ -374,6 +374,17 @@ object ScalaJsPdfEngineSpec extends ZIOSpecDefault:
           }
       }
     },
+    test("Scala.js watermark stamps Helvetica text onto caller-owned bytes") {
+      minimalPdfBytes.flatMap { bytes =>
+        PdfEngine
+          .watermark(bytes, PdfWatermark.Text("FILED"))
+          .provide(PdfEngine.live)
+          .map { stamped =>
+            val text = new String(stamped.toArray, java.nio.charset.StandardCharsets.ISO_8859_1)
+            assertTrue(stamped.nonEmpty, text.contains("(FILED)"), text.contains("/Helv"))
+          }
+      }
+    },
     test("Scala.js extract, split, and rotate page helpers") {
       minimalPdfBytes.flatMap { bytes =>
         for

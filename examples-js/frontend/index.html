@@ -319,8 +319,16 @@
                 <button class="run-transform" id="run-split" type="button" disabled>Split pages</button>
                 <button class="run-transform" id="run-append" type="button" disabled>Append revision</button>
                 <button class="run-transform" id="run-flatten" type="button" disabled>Flatten forms</button>
+                <button class="run-transform" id="run-watermark" type="button" disabled>Watermark</button>
                 <button class="run-transform" id="run-thumbnail" type="button" disabled>Attach thumbnail</button>
               </div>
+              <label class="workflow-merge">Watermark text
+                <input id="watermark-text" name="watermark-text" type="text" value="FILED" maxlength="80" />
+              </label>
+              <label class="workflow-merge">
+                <input id="watermark-diagonal" name="watermark-diagonal" type="checkbox" checked />
+                Diagonal stamp
+              </label>
               <label class="workflow-merge">Merge with a second filing
                 <input id="merge-file" name="merge-file" type="file" accept="application/pdf,.pdf" />
               </label>

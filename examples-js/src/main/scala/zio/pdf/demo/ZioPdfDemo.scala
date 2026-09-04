@@ -355,6 +355,18 @@ object ZioPdfDemo:
     }
 
   @JSExport
+  def watermarkBlob(input: dom.Blob, text: String, diagonal: Boolean, fromPage: Int, toPage: Int): js.Promise[js.Dictionary[js.Any]] =
+    runWorkflow(input) { bytes =>
+      val stamp = PdfWatermark.Text(text, diagonal = diagonal, fromPage = fromPage, toPage = Some(toPage))
+      PdfEngine.watermark(bytes, stamp, browserTransformOptions).map { output =>
+        val summary = workflowSummary("watermark", output, None)
+        summary("watermarkText") = text
+        summary("watermarkDiagonal") = diagonal
+        summary
+      }
+    }
+
+  @JSExport
   def extractPagesBlob(input: dom.Blob, fromPage: Int, toPage: Int): js.Promise[js.Dictionary[js.Any]] =
     runWorkflow(input) { bytes =>
       PdfEngine.extractPages(bytes, fromPage, toPage, browserTransformOptions).map { output =>

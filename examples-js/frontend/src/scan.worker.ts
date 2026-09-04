@@ -10,7 +10,8 @@ workerScope.addEventListener("message", (event) => {
   const request = event.data;
   if (
     request.kind === "linearize" || request.kind === "append" || request.kind === "flatten" ||
-    request.kind === "merge" || request.kind === "extract" || request.kind === "rotate" || request.kind === "split"
+    request.kind === "merge" || request.kind === "extract" || request.kind === "rotate" ||
+    request.kind === "split" || request.kind === "watermark"
   ) {
     const pending =
       request.kind === "linearize" ? ZioPdfDemo.linearizeBlob(request.file)
@@ -19,6 +20,8 @@ workerScope.addEventListener("message", (event) => {
       : request.kind === "extract" ? ZioPdfDemo.extractPagesBlob(request.file, request.fromPage, request.toPage)
       : request.kind === "rotate" ? ZioPdfDemo.rotatePagesBlob(request.file, request.degrees, request.fromPage, request.toPage)
       : request.kind === "split" ? ZioPdfDemo.splitPagesBlob(request.file)
+      : request.kind === "watermark"
+        ? ZioPdfDemo.watermarkBlob(request.file, request.text, request.diagonal, request.fromPage, request.toPage)
       : ZioPdfDemo.mergeBlobs(request.file, request.secondary);
     void pending.then(
       (execution) => workerScope.postMessage(

@@ -253,10 +253,46 @@ object PdfWorkflowSpec extends ZIOSpecDefault {
                         encrypted,
                         Chunk(Part.Meta(Trailer(BigDecimal(6), Prim.dict(), None)))
                       ).either
+        watermarked <- PdfEngine.watermark(encrypted, PdfWatermark.Text("FILED")).either
       } yield assertTrue(
         linearized.isLeft,
         merged.isLeft,
-        appended.isLeft
+        appended.isLeft,
+        watermarked.isLeft
+      )
+    },
+    test("watermark stamps Helvetica text onto selected pages") {
+      for {
+        source     <- singlePagePdf("open")
+        stamped    <- PdfEngine.watermark(source, PdfWatermark.Text("FILED", diagonal = true))
+        text        = new String(stamped.toArray, StandardCharsets.ISO_8859_1)
+        decoded    <- PdfEngine.decode(stamped)
+        empty      <- PdfEngine.watermark(source, PdfWatermark.Text("   ")).either
+        limit      <- ZIO.fromEither(ByteLimit.fromBytes(32L))
+        bounded    <- PdfEngine
+                        .watermark(source, PdfWatermark.Text("FILED"), PdfEngine.Options(maxMaterializedDocumentBytes = limit))
+                        .either
+      } yield assertTrue(
+        text.contains("(FILED)"),
+        text.contains("/Helv"),
+        text.contains(" Tm"),
+        decoded.nonEmpty,
+        empty.left.exists(_ == PdfWatermark.EmptyText),
+        bounded.left.exists(_.isInstanceOf[PdfEngine.MaterializedDocumentLimitExceeded])
+      )
+    },
+    test("watermark page range leaves unselected pages unmarked") {
+      for {
+        left   <- singlePagePdf("A")
+        right  <- singlePagePdf("B")
+        merged <- PdfEngine.mergeBytes(NonEmptyChunk(left, right))
+        stamped <- PdfEngine.watermark(merged, PdfWatermark.Text("CONFIDENTIAL", diagonal = false, fromPage = 1, toPage = Some(1)))
+        split  <- PdfEngine.splitPages(stamped)
+        first   = new String(split.head.toArray, StandardCharsets.ISO_8859_1)
+        second  = new String(split.tail.head.toArray, StandardCharsets.ISO_8859_1)
+      } yield assertTrue(
+        first.contains("(CONFIDENTIAL)"),
+        !second.contains("(CONFIDENTIAL)")
       )
     },
     test("linearize fromBytes fails before decode when the document exceeds ByteLimit") {

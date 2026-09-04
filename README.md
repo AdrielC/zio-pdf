@@ -177,6 +177,7 @@ Extract a 1-based page range, split every page, or add `/Rotate`:
 val excerpt   = PdfEngine.extractPages(filing, 3, 7)
 val pages     = PdfEngine.splitPages(filing)
 val landscape = PdfEngine.rotatePages(filing, 90, 1, 2)
+val stamped   = PdfEngine.watermark(filing, PdfWatermark.Text("FILED", diagonal = true))
 ```
 
 Inventory or flatten AcroForm widgets. Flatten walks nested `/Kids`, bakes `/AP` appearances (honoring Form `/Matrix`) into page content, or falls back to `/V` text, then strips the form:

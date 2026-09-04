@@ -103,7 +103,7 @@ declare module "zio-pdf-demo" {
   }
 
   export interface WorkflowExecution {
-    kind: "linearize" | "merge" | "append" | "flatten" | "extract" | "rotate" | "split";
+    kind: "linearize" | "merge" | "append" | "flatten" | "extract" | "rotate" | "split" | "watermark";
     chunks: Uint8Array[];
     outputBytes: number;
     maxMaterializedBytes: number;
@@ -113,6 +113,8 @@ declare module "zio-pdf-demo" {
     appearancesPlaced?: number;
     textFallbacks?: number;
     formRemaining?: boolean;
+    watermarkText?: string;
+    watermarkDiagonal?: boolean;
   }
 
   export const ZioPdfDemo: {
@@ -141,6 +143,13 @@ declare module "zio-pdf-demo" {
   mergeBlobs(primary: Blob, secondary: Blob): Promise<WorkflowExecution>;
   appendRevisionBlob(input: Blob): Promise<WorkflowExecution>;
   flattenFormsBlob(input: Blob): Promise<WorkflowExecution>;
+  watermarkBlob(
+    input: Blob,
+    text: string,
+    diagonal: boolean,
+    fromPage: number,
+    toPage: number
+  ): Promise<WorkflowExecution>;
   extractPagesBlob(input: Blob, fromPage: number, toPage: number): Promise<WorkflowExecution>;
   rotatePagesBlob(input: Blob, degrees: number, fromPage: number, toPage: number): Promise<WorkflowExecution>;
   splitPagesBlob(input: Blob): Promise<WorkflowExecution>;

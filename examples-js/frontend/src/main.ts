@@ -107,6 +107,9 @@ const workflowDownload = document.querySelector<HTMLAnchorElement>("#workflow-do
 const runLinearizeButton = document.querySelector<HTMLButtonElement>("#run-linearize")!;
 const runAppendButton = document.querySelector<HTMLButtonElement>("#run-append")!;
 const runFlattenButton = document.querySelector<HTMLButtonElement>("#run-flatten")!;
+const runWatermarkButton = document.querySelector<HTMLButtonElement>("#run-watermark")!;
+const watermarkTextInput = document.querySelector<HTMLInputElement>("#watermark-text")!;
+const watermarkDiagonalInput = document.querySelector<HTMLInputElement>("#watermark-diagonal")!;
 const runMergeButton = document.querySelector<HTMLButtonElement>("#run-merge")!;
 const runExtractButton = document.querySelector<HTMLButtonElement>("#run-extract")!;
 const runRotateButton = document.querySelector<HTMLButtonElement>("#run-rotate")!;
@@ -554,6 +557,7 @@ function syncWorkflowControls(): void {
   runLinearizeButton.disabled = !ready;
   runAppendButton.disabled = !ready;
   runFlattenButton.disabled = !ready || !lastInspectionHasForm;
+  runWatermarkButton.disabled = !ready || watermarkTextInput.value.trim() === "";
   runExtractButton.disabled = !ready;
   runRotateButton.disabled = !ready;
   runSplitButton.disabled = !ready || lastInspectionPages < 2;
@@ -562,11 +566,13 @@ function syncWorkflowControls(): void {
   workflowBadge.textContent = lastInspectionEncrypted ? "Encrypted" : ready ? "Ready" : "Run inspection";
   workflowCopy.textContent = lastInspectionEncrypted
     ? "This filing is encrypted. zio-pdf will not rewrite it."
-    : "Encrypted PDFs cannot be processed. Form flatten bakes appearances into page content.";
+    : "Encrypted PDFs cannot be processed. Flatten bakes forms; watermark stamps Helvetica text.";
 }
 
+type WorkflowKind = "linearize" | "append" | "flatten" | "merge" | "extract" | "rotate" | "split" | "watermark";
+
 function workflowInWorker(
-  kind: "linearize" | "append" | "flatten" | "merge" | "extract" | "rotate" | "split",
+  kind: WorkflowKind,
   file: File,
   id: number,
   secondary?: File
@@ -614,12 +620,22 @@ function workflowInWorker(
     if (kind === "merge" && secondary) worker.postMessage({ kind, id, file, secondary });
     else if (kind === "extract") worker.postMessage({ kind, id, file, ...pageRange() });
     else if (kind === "rotate") worker.postMessage({ kind, id, file, degrees: Number.parseInt(pageRotateSelect.value, 10) || 90, ...pageRange() });
+    else if (kind === "watermark") {
+      worker.postMessage({
+        kind,
+        id,
+        file,
+        text: watermarkTextInput.value.trim() || "FILED",
+        diagonal: watermarkDiagonalInput.checked,
+        ...pageRange()
+      });
+    }
     else if (kind !== "merge") worker.postMessage({ kind, id, file });
     else reject(new Error("Choose a second PDF to merge."));
   });
 }
 
-async function executeWorkflow(kind: "linearize" | "append" | "flatten" | "merge" | "extract" | "rotate" | "split"): Promise<void> {
+async function executeWorkflow(kind: WorkflowKind): Promise<void> {
   if (!selectedFile) return;
   if (activeWorkflowWorker) {
     stopActiveWorkflow();
@@ -663,16 +679,23 @@ async function executeWorkflow(kind: "linearize" | "append" | "flatten" | "merge
         workflowDownloads.append(link);
       }
     }
-    if (kind === "flatten") {
-      const baked = execution.appearancesPlaced ?? 0;
-      const fallbacks = execution.textFallbacks ?? 0;
-      const leftover = execution.formRemaining === true;
-      workflowStatus.textContent = leftover
-        ? `Flatten wrote ${execution.outputBytes.toLocaleString()} bytes, but a form dictionary is still present.`
-        : `Flatten baked ${baked} appearance${baked === 1 ? "" : "s"}` +
-          (fallbacks > 0 ? ` and ${fallbacks} text fallback${fallbacks === 1 ? "" : "s"}` : "") +
-          `. Form stripped. Preview updated.`;
-      const previewFile = new File([blob], `${file.name.replace(/\.pdf$/i, "") || "document"}.flatten.pdf`, {
+    if (kind === "flatten" || kind === "watermark") {
+      if (kind === "flatten") {
+        const baked = execution.appearancesPlaced ?? 0;
+        const fallbacks = execution.textFallbacks ?? 0;
+        const leftover = execution.formRemaining === true;
+        workflowStatus.textContent = leftover
+          ? `Flatten wrote ${execution.outputBytes.toLocaleString()} bytes, but a form dictionary is still present.`
+          : `Flatten baked ${baked} appearance${baked === 1 ? "" : "s"}` +
+            (fallbacks > 0 ? ` and ${fallbacks} text fallback${fallbacks === 1 ? "" : "s"}` : "") +
+            `. Form stripped. Preview updated.`;
+      } else {
+        const label = execution.watermarkText || watermarkTextInput.value.trim() || "FILED";
+        workflowStatus.textContent = `Watermarked “${label}”` +
+          (execution.watermarkDiagonal === false ? "" : " on the diagonal") +
+          `. Preview updated.`;
+      }
+      const previewFile = new File([blob], `${file.name.replace(/\.pdf$/i, "") || "document"}.${kind}.pdf`, {
         type: "application/pdf"
       });
       void openPreview(previewFile);
@@ -856,10 +879,10 @@ function resetReport(): void {
   workflowPlan.removeAttribute("open");
   workflowBadge.textContent = "Run inspection";
   workflowStatus.textContent = "Run inspection to enable write workflows.";
-  workflowCopy.textContent = "Encrypted PDFs cannot be processed. Form flatten bakes appearances into page content.";
+  workflowCopy.textContent = "Encrypted PDFs cannot be processed. Flatten bakes forms; watermark stamps Helvetica text.";
   clearWorkflowDownload();
   mergeFileInput.value = "";
-  [runLinearizeButton, runAppendButton, runFlattenButton, runMergeButton, runExtractButton, runRotateButton, runSplitButton, runThumbnailButton].forEach((button) => {
+  [runLinearizeButton, runAppendButton, runFlattenButton, runWatermarkButton, runMergeButton, runExtractButton, runRotateButton, runSplitButton, runThumbnailButton].forEach((button) => {
     button.disabled = true;
   });
   planSourceFont.replaceChildren(new Option("Run inspection first", ""));
@@ -1644,12 +1667,14 @@ runTransformButton.addEventListener("click", () => void executeTransform());
 runLinearizeButton.addEventListener("click", () => void executeWorkflow("linearize"));
 runAppendButton.addEventListener("click", () => void executeWorkflow("append"));
 runFlattenButton.addEventListener("click", () => void executeWorkflow("flatten"));
+runWatermarkButton.addEventListener("click", () => void executeWorkflow("watermark"));
 runMergeButton.addEventListener("click", () => void executeWorkflow("merge"));
 runExtractButton.addEventListener("click", () => void executeWorkflow("extract"));
 runRotateButton.addEventListener("click", () => void executeWorkflow("rotate"));
 runSplitButton.addEventListener("click", () => void executeWorkflow("split"));
 runThumbnailButton.addEventListener("click", () => void executeThumbnail());
 mergeFileInput.addEventListener("change", () => syncWorkflowControls());
+watermarkTextInput.addEventListener("input", () => syncWorkflowControls());
 window.addEventListener("beforeunload", clearWorkflowDownload);
 [planRemap, planTokenize].forEach((control) => control.addEventListener("change", () => {
   clearTransformDownload();
