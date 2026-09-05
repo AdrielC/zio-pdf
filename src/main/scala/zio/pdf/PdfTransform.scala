@@ -56,11 +56,9 @@ final class PdfTransform[+A] private[pdf] (
     options: PdfEngine.Options = PdfEngine.Options.default
   ): ZIO[R & PdfEngine, Throwable, Output[A]] =
     PdfEngine.decode(source.via(PdfEngine.materializedInputLimit(options)), options).runCollect.flatMap { decoded =>
-      ZIO.fromEither(PdfCrypto.requireUnencrypted(decoded)).flatMap { _ =>
-        ZIO.fromEither(Document.fromDecoded(decoded)).flatMap { document =>
-          ZIO.fromEither(PdfTransform.compile(plan, document)).flatMap { case (runtime, rewritten) =>
-            ZIO.fromEither(result.read(runtime)).map(value => Output(value, rewritten.render))
-          }
+      ZIO.fromEither(Document.fromDecoded(decoded)).flatMap { document =>
+        ZIO.fromEither(PdfTransform.compile(plan, document)).flatMap { case (runtime, rewritten) =>
+          ZIO.fromEither(result.read(runtime)).map(value => Output(value, rewritten.render))
         }
       }
     }
@@ -130,6 +128,11 @@ object PdfTransform {
       toBaseFont: String,
       private[pdf] val result: ResultSlot[fonts.Replacement]
     ) extends Op[Context, Context]
+    case SubstituteVisualFonts(
+      fromBaseFont: String,
+      toBaseFont: String,
+      private[pdf] val result: ResultSlot[fonts.VisualSubstitution]
+    ) extends Op[Context, Context]
     case TokenizeText[Token](
       tokenizer: text.Tokenizer[Token],
       private[pdf] val result: ResultSlot[Chunk[text.PageTokens[Token]]]
@@ -188,6 +191,8 @@ object PdfTransform {
       op match {
         case Op.RemapExistingFonts(_, _, _) =>
           Profile(Chunk("remap-existing-fonts"), requiresMaterializedDocument = true, readsContentStreams = false)
+        case Op.SubstituteVisualFonts(_, _, _) =>
+          Profile(Chunk("substitute-visual-fonts"), requiresMaterializedDocument = true, readsContentStreams = true)
         case Op.TokenizeText(_, _) =>
           Profile(Chunk("tokenize-text"), requiresMaterializedDocument = true, readsContentStreams = true)
       }
@@ -209,6 +214,13 @@ object PdfTransform {
             case Left(error) => failure = Some(error)
             case Right(prepared) =>
               runtime = runtime.put(slot, prepared.value)
+              document = prepared.document
+          }
+        case Op.SubstituteVisualFonts(fromBaseFont, toBaseFont, slot) =>
+          FontVisualSubstitute.substitute(document, fromBaseFont, toBaseFont) match {
+            case Left(error) => failure = Some(error)
+            case Right(prepared) =>
+              runtime = runtime.put(slot, fonts.VisualSubstitution(prepared.value))
               document = prepared.document
           }
         case Op.TokenizeText(tokenizer, slot) =>
@@ -515,6 +527,39 @@ object PdfTransform {
       resourceBindingsRewritten: Long
     )
 
+    /** A source/target pair that can be substituted visually in the browser demo. */
+    final case class RemapCandidate(
+      sourceBaseFont: String,
+      targetBaseFont: String,
+      sourceObjectNumbers: Chunk[Long],
+      targetObjectNumber: Long,
+      resourceBindingsRewritten: Long,
+      verifiedCompatible: Boolean
+    )
+
+    final case class VisualSubstitution(
+      sourceBaseFont: String,
+      targetBaseFont: String,
+      sourceObjectNumbers: Chunk[Long],
+      targetObjectNumber: Long,
+      streamsRewritten: Long,
+      resourceBindingsRewritten: Long,
+      glyphsRecoded: Long
+    )
+
+    object VisualSubstitution {
+      def apply(result: FontVisualSubstitute.Result): VisualSubstitution =
+        VisualSubstitution(
+          result.sourceBaseFont,
+          result.targetBaseFont,
+          result.sourceObjectNumbers,
+          result.targetObjectNumber,
+          result.streamsRewritten,
+          result.resourceBindingsRewritten,
+          result.glyphsRecoded
+        )
+    }
+
     private val simpleSubtypes = Set("Type1", "TrueType")
     private val compositeSubtype = "Type0"
     private val layoutFields = Chunk("Encoding", "FirstChar", "LastChar", "Widths")
@@ -539,6 +584,92 @@ object PdfTransform {
       val result = new ResultSlot[Replacement]
       operation(Op.RemapExistingFonts(fromBaseFont, toBaseFont, result), result)
     }
+
+    /** Re-encode page text for another embedded face when metrics differ. */
+    def substituteVisual(fromBaseFont: String, toBaseFont: String): PdfTransform[VisualSubstitution] = {
+      val result = new ResultSlot[VisualSubstitution]
+      operation(Op.SubstituteVisualFonts(fromBaseFont, toBaseFont, result), result)
+    }
+
+    /** Every verified source/target pair that can be remapped without changing glyph meaning. */
+    private[pdf] def findCompatibleRemaps(document: Document): Chunk[Replacement] =
+      val targetNames =
+        document.rebindableFonts
+          .flatMap(record => baseFont(record.data).map(_ -> record))
+          .groupBy(_._1)
+          .collect { case (name, entries) if entries.map(_._2.index.number).distinct.size == 1 => name }
+          .toSet
+
+      val sourceNames =
+        document.rebindableFonts.flatMap(record => baseFont(record.data)).distinct
+
+      val out = Chunk.newBuilder[Replacement]
+      sourceNames.foreach { sourceName =>
+        targetNames.foreach { targetName =>
+          if sourceName != targetName then
+            replaceExistingDocument(document, sourceName, targetName) match
+              case Right(prepared) => out += prepared.value
+              case Left(_)         => ()
+        }
+      }
+      out.result().distinctBy(replacement => (replacement.sourceBaseFont, replacement.targetBaseFont))
+
+    /** Every unambiguous source/target pair, including pairs that need visual re-encoding. */
+    private[pdf] def findVisualRemaps(document: Document): Chunk[RemapCandidate] =
+      val unambiguousTargets =
+        document.rebindableFonts
+          .flatMap(record => baseFont(record.data).map(_ -> record))
+          .groupBy(_._1)
+          .collect { case (name, entries) if entries.map(_._2.index.number).distinct.size == 1 =>
+            name -> entries.head._2
+          }
+
+      val sourcesByName =
+        document.rebindableFonts
+          .flatMap(record => baseFont(record.data).map(_ -> record))
+          .groupBy(_._1)
+          .view.mapValues(_.map(_._2)).toMap
+
+      val verified =
+        findCompatibleRemaps(document).map(replacement =>
+          (replacement.sourceBaseFont, replacement.targetBaseFont) -> replacement
+        ).toMap
+
+      val out = Chunk.newBuilder[RemapCandidate]
+      sourcesByName.foreach { case (sourceName, sources) =>
+        unambiguousTargets.foreach { case (targetName, target) =>
+          if sourceName != targetName then
+            verified.get((sourceName, targetName)) match
+              case Some(replacement) =>
+                out += RemapCandidate(
+                  replacement.sourceBaseFont,
+                  replacement.targetBaseFont,
+                  replacement.sourceObjectNumbers,
+                  replacement.targetObjectNumber,
+                  replacement.resourceBindingsRewritten,
+                  verifiedCompatible = true
+                )
+              case None =>
+                out += RemapCandidate(
+                  sourceName,
+                  targetName,
+                  sources.map(_.index.number),
+                  target.index.number,
+                  resourceBindingsRewritten = 0L,
+                  verifiedCompatible = false
+                )
+        }
+      }
+      out.result().distinctBy(candidate => (candidate.sourceBaseFont, candidate.targetBaseFont))
+
+    private[pdf] def substituteVisualDocument(
+      document: Document,
+      fromBaseFont: String,
+      toBaseFont: String
+    ): Either[Throwable, Prepared[VisualSubstitution]] =
+      FontVisualSubstitute.substitute(document, fromBaseFont, toBaseFont).map { prepared =>
+        Prepared(prepared.document, VisualSubstitution(prepared.value))
+      }
 
     private[pdf] def replaceExistingDocument(
       document: Document,

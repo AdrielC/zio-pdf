@@ -8,6 +8,7 @@ import scala.scalajs.js.typedarray.Uint8Array
 import org.scalajs.dom
 import zio.*
 import zio.pdf.*
+import zio.stream.ZStream
 
 /** Minimal JavaScript boundary for the Vite example. The PDF work remains in Scala.js. */
 @JSExportTopLevel("ZioPdfDemo")
@@ -32,7 +33,7 @@ object ZioPdfDemo:
     tokenize: Boolean,
     tokenizer: String
   ): js.Dictionary[js.Any] =
-    val remap = PdfTransform.fonts.replaceExisting(sourceFont, targetFont).program
+    val remap = PdfTransform.fonts.substituteVisual(sourceFont, targetFont).program
     val tokens =
       if tokenizer == "words" then PdfTransform.text.tokenize(PdfTransform.text.Tokenizer.words).program
       else PdfTransform.text.tokenize(PdfTransform.text.Tokenizer.characters).program
@@ -56,6 +57,41 @@ object ZioPdfDemo:
    * decoded graph, so the browser boundary is explicitly capped at 64 MiB.
    */
   @JSExport
+  def findCompatibleRemapsBlob(input: dom.Blob): js.Promise[js.Array[js.Dictionary[js.Any]]] =
+    if input.size > browserTransformLimit.toLong then
+      js.Promise.reject(
+        browserTransformError(PdfEngine.MaterializedDocumentLimitExceeded(browserTransformLimit, input.size.toLong))
+      )
+    else
+      val effect =
+        for
+          bytes   <- PdfSource.fromBlob(input).bytes.runCollect
+          decoded <- PdfEngine
+                       .decode(
+                         ZStream.fromChunk(bytes).via(PdfEngine.materializedInputLimit(browserTransformOptions)),
+                         browserTransformOptions
+                       )
+                       .runCollect
+          document <- ZIO.fromEither(PdfTransform.Document.fromDecoded(decoded))
+        yield PdfTransform.fonts.findVisualRemaps(document).map(remapJson).toSeq.toJSArray
+
+      Unsafe.unsafe { implicit unsafe =>
+        Runtime.default.unsafe
+          .runToFuture(effect.mapError(browserTransformError).provide(PdfEngine.live))
+          .toJSPromise
+      }
+
+  private def remapJson(candidate: PdfTransform.fonts.RemapCandidate): js.Dictionary[js.Any] =
+    js.Dictionary(
+      "sourceFont" -> candidate.sourceBaseFont,
+      "targetFont" -> candidate.targetBaseFont,
+      "sourceObjectNumbers" -> candidate.sourceObjectNumbers.map(_.toDouble).toSeq.toJSArray,
+      "targetObjectNumber" -> candidate.targetObjectNumber.toDouble,
+      "resourceBindingsRewritten" -> candidate.resourceBindingsRewritten.toDouble,
+      "verifiedCompatible" -> candidate.verifiedCompatible
+    )
+
+  @JSExport
   def executeTransformBlob(
     input: dom.Blob,
     remapExistingFonts: Boolean,
@@ -66,9 +102,12 @@ object ZioPdfDemo:
   ): js.Promise[js.Dictionary[js.Any]] =
     val tokenProgram =
       if tokenizer == "words" then
-        PdfTransform.text.tokenize(PdfTransform.text.Tokenizer.words).map(tokenStats)
-      else PdfTransform.text.tokenize(PdfTransform.text.Tokenizer.characters).map(tokenStats)
-    val remapProgram = PdfTransform.fonts.replaceExisting(sourceFont, targetFont)
+        PdfTransform.text.tokenize(PdfTransform.text.Tokenizer.words).map(pages => (tokenStats(pages), tokenPagesJson(pages)))
+      else
+        PdfTransform.text.tokenize(PdfTransform.text.Tokenizer.characters).map(pages =>
+          (tokenStats(pages), tokenPagesJson(pages))
+        )
+    val remapProgram = PdfTransform.fonts.substituteVisual(sourceFont, targetFont)
     val sourceBytes  = PdfSource.fromBlob(input).bytes
 
     val prepared =
@@ -78,8 +117,10 @@ object ZioPdfDemo:
         (remapExistingFonts, tokenize) match
           case (true, true) =>
             remapProgram.andThen(tokenProgram).run(sourceBytes, browserTransformOptions).map { output =>
-              val (replacement, (tokenPages, tokenCount)) = output.value
-              (transformSummary(Some(replacement), tokenPages, tokenCount), output.bytes)
+              val (substitution, ((tokenPages, tokenCount), tokenJson)) = output.value
+              val summary = transformSummary(Some(substitution), tokenPages, tokenCount)
+              summary("tokenPagesJson") = tokenJson
+              (summary, output.bytes)
             }
           case (true, false) =>
             remapProgram.run(sourceBytes, browserTransformOptions).map { output =>
@@ -87,8 +128,10 @@ object ZioPdfDemo:
             }
           case (false, true) =>
             tokenProgram.run(sourceBytes, browserTransformOptions).map { output =>
-              val (tokenPages, tokenCount) = output.value
-              (transformSummary(None, tokenPages, tokenCount), output.bytes)
+              val ((tokenPages, tokenCount), tokenJson) = output.value
+              val summary = transformSummary(None, tokenPages, tokenCount)
+              summary("tokenPagesJson") = tokenJson
+              (summary, output.bytes)
             }
           case (false, false) =>
             ZIO.fail(new IllegalArgumentException("select at least one transform operation"))
@@ -160,18 +203,28 @@ object ZioPdfDemo:
   private def tokenStats[A](pages: Chunk[PdfTransform.text.PageTokens[A]]): (Int, Long) =
     (pages.length, pages.foldLeft(0L)((total, page) => total + page.tokens.length.toLong))
 
+  private def tokenPagesJson[A](pages: Chunk[PdfTransform.text.PageTokens[A]]): js.Array[js.Any] =
+    pages.map { page =>
+      js.Dictionary(
+        "pageObjectNumber" -> page.pageObjectNumber.toDouble,
+        "tokens" -> page.tokens.map(_.toString).toSeq.toJSArray
+      )
+    }.toSeq.toJSArray
+
   private def transformSummary(
-    replacement: Option[PdfTransform.fonts.Replacement],
+    substitution: Option[PdfTransform.fonts.VisualSubstitution],
     tokenPages: Int,
     tokenCount: Long
   ): js.Dictionary[js.Any] =
     js.Dictionary(
-      "sourceFont" -> replacement.fold[js.Any](js.undefined)(_.sourceBaseFont),
-      "targetFont" -> replacement.fold[js.Any](js.undefined)(_.targetBaseFont),
-      "sourceObjectNumbers" -> replacement
+      "sourceFont" -> substitution.fold[js.Any](js.undefined)(_.sourceBaseFont),
+      "targetFont" -> substitution.fold[js.Any](js.undefined)(_.targetBaseFont),
+      "sourceObjectNumbers" -> substitution
         .fold(js.Array[Double]())(_.sourceObjectNumbers.map(_.toDouble).toSeq.toJSArray),
-      "targetObjectNumber" -> replacement.fold[js.Any](js.undefined)(_.targetObjectNumber.toDouble),
-      "resourceBindingsRewritten" -> replacement.fold(0d)(_.resourceBindingsRewritten.toDouble),
+      "targetObjectNumber" -> substitution.fold[js.Any](js.undefined)(_.targetObjectNumber.toDouble),
+      "resourceBindingsRewritten" -> substitution.fold(0d)(_.resourceBindingsRewritten.toDouble),
+      "streamsRewritten" -> substitution.fold(0d)(_.streamsRewritten.toDouble),
+      "glyphsRecoded" -> substitution.fold(0d)(_.glyphsRecoded.toDouble),
       "tokenPages" -> tokenPages.toDouble,
       "tokenCount" -> tokenCount.toDouble
     )
@@ -184,7 +237,7 @@ object ZioPdfDemo:
     tokenizer: String
   ): String =
     val operations = List(
-      Option.when(remapExistingFonts)(s"PdfTransform.fonts.replaceExisting(${literal(sourceFont)}, ${literal(targetFont)})"),
+      Option.when(remapExistingFonts)(s"PdfTransform.fonts.substituteVisual(${literal(sourceFont)}, ${literal(targetFont)})"),
       Option.when(tokenize)(s"PdfTransform.text.tokenize(Tokenizer.$tokenizer)")
     ).flatten
     operations match

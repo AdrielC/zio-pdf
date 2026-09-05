@@ -22,8 +22,9 @@ object PdfTransformPlanSpec extends ZIOSpecDefault {
   private val analysis: PdfTransform.Analyzer[Summary] = new PdfTransform.Analyzer[Summary] {
     def apply(op: PdfTransform.Op[PdfTransform.Context, PdfTransform.Context]): Summary =
       op match {
-        case PdfTransform.Op.RemapExistingFonts(_, _, _) => Summary(1, 0)
-        case PdfTransform.Op.TokenizeText(_, _)          => Summary(0, 1)
+        case PdfTransform.Op.RemapExistingFonts(_, _, _)      => Summary(1, 0)
+        case PdfTransform.Op.SubstituteVisualFonts(_, _, _) => Summary(1, 0)
+        case PdfTransform.Op.TokenizeText(_, _)             => Summary(0, 1)
       }
   }
 

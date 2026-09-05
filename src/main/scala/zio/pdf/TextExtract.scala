@@ -338,6 +338,47 @@ object TextExtract {
   }
 
   object ToUnicode {
+    /** ISO-8859-1 fallback when a font omits `/ToUnicode`. */
+    val identitySingleByte: ToUnicode = ToUnicode(Map(1 -> (0L until 256L).map { code =>
+      code -> code.toChar.toString
+    }.toMap))
+
+    final case class CmapEncoder private (byChar: Map[String, Array[Byte]]) {
+      def encode(text: String): Array[Byte] =
+        val out = ArrayBuffer.empty[Byte]
+        var index = 0
+        while index < text.length do
+          val codePoint = text.codePointAt(index)
+          val key = new String(Character.toChars(codePoint))
+          byChar.get(key) match
+            case Some(bytes) => out ++= bytes
+            case None        => out ++= fallbackBytes(codePoint)
+          index += Character.charCount(codePoint)
+        out.toArray
+
+      private def fallbackBytes(codePoint: Int): Array[Byte] =
+        if codePoint >= 0 && codePoint <= 0xff then Array(codePoint.toByte)
+        else "?".getBytes(StandardCharsets.ISO_8859_1)
+    }
+
+    object CmapEncoder {
+      def apply(byChar: Map[String, Array[Byte]]): CmapEncoder =
+        new CmapEncoder(byChar)
+    }
+
+    def encoder(cmap: ToUnicode): CmapEncoder =
+      val reverse = scala.collection.mutable.Map.empty[String, Array[Byte]]
+      cmap.byWidth.toList.sortBy(_._1).foreach { case (width, entries) =>
+        entries.foreach { case (code, text) =>
+          if text.nonEmpty && !reverse.contains(text) then
+            reverse.update(text, sourceBytes(code, width))
+        }
+      }
+      CmapEncoder(reverse.toMap)
+
+    private def sourceBytes(code: Long, width: Int): Array[Byte] =
+      Array.tabulate(width)(index => ((code >>> ((width - index - 1) * 8)) & 0xff).toByte)
+
     private val bfCharBlocks = "(?is)(?:\\d+\\s+)?beginbfchar\\s*(.*?)\\s*endbfchar".r
     private val bfRangeBlocks = "(?is)(?:\\d+\\s+)?beginbfrange\\s*(.*?)\\s*endbfrange".r
     private val pair = "(?is)<([0-9a-f]+)>\\s*<([0-9a-f]+)>".r

@@ -76,6 +76,20 @@ declare module "zio-pdf-demo" {
     elapsedMs: number;
   }
 
+  export interface CompatibleRemap {
+    sourceFont: string;
+    targetFont: string;
+    sourceObjectNumbers: number[];
+    targetObjectNumber: number;
+    resourceBindingsRewritten: number;
+    verifiedCompatible: boolean;
+  }
+
+  export interface TransformTokenPage {
+    pageObjectNumber: number;
+    tokens: string[];
+  }
+
   export interface TransformPlan {
     operations: string[];
     requiresMaterializedDocument: boolean;
@@ -89,8 +103,11 @@ declare module "zio-pdf-demo" {
     sourceObjectNumbers: number[];
     targetObjectNumber?: number;
     resourceBindingsRewritten: number;
+    streamsRewritten: number;
+    glyphsRecoded: number;
     tokenPages: number;
     tokenCount: number;
+    tokenPagesJson?: TransformTokenPage[];
     chunks: Uint8Array[];
     outputBytes: number;
     maxMaterializedBytes: number;
@@ -145,6 +162,7 @@ declare module "zio-pdf-demo" {
     tokenize: boolean,
     tokenizer: "characters" | "words"
   ): Promise<TransformExecution>;
+  findCompatibleRemapsBlob(input: Blob): Promise<CompatibleRemap[]>;
   linearizeBlob(input: Blob): Promise<WorkflowExecution>;
   mergeBlobs(primary: Blob, secondary: Blob): Promise<WorkflowExecution>;
   appendRevisionBlob(input: Blob): Promise<WorkflowExecution>;

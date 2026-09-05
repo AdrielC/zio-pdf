@@ -207,6 +207,34 @@ object PdfTransformSpec extends ZIOSpecDefault {
           case _ => assertTrue(false)
         }
     },
+    test("findVisualRemaps lists visual-only pairs when ToUnicode maps differ") {
+      for {
+        source <- fontPdf(includeCMaps = true, targetCMapDiffers = true)
+        decoded <- PdfEngine.decode(ZStream.fromChunk(source)).runCollect.provide(PdfEngine.live)
+        document <- ZIO.fromEither(PdfTransform.Document.fromDecoded(decoded))
+        pairs = PdfTransform.fonts.findVisualRemaps(document)
+      } yield assertTrue(
+        pairs.exists(candidate =>
+          candidate.sourceBaseFont == "SourceFace" &&
+            candidate.targetBaseFont == "TargetFace" &&
+            !candidate.verifiedCompatible
+        )
+      )
+    },
+    test("findCompatibleRemaps discovers verified pairs without executing the plan") {
+      for {
+        source <- fontPdf()
+        decoded <- PdfEngine.decode(ZStream.fromChunk(source)).runCollect.provide(PdfEngine.live)
+        document <- ZIO.fromEither(PdfTransform.Document.fromDecoded(decoded))
+        pairs = PdfTransform.fonts.findCompatibleRemaps(document)
+      } yield assertTrue(
+        pairs.exists(replacement =>
+          replacement.sourceBaseFont == "SourceFace" &&
+            replacement.targetBaseFont == "TargetFace" &&
+            replacement.resourceBindingsRewritten == 1L
+        )
+      )
+    },
     test("remaps a verified existing font and tokenizes the rewritten document") {
       val pairTokenizer = PdfTransform.text.Tokenizer.from { text =>
         Chunk.fromIterable(text.grouped(2).toList)
@@ -314,6 +342,24 @@ object PdfTransformSpec extends ZIOSpecDefault {
           case Left(PdfTransform.Error.IncompatibleFont(5L, 6L, "ToUnicode")) => true
           case _ => false
         }
+      )
+    },
+    test("substituteVisual recodes and rebinds when ToUnicode maps differ") {
+      val program = PdfTransform.fonts.substituteVisual("SourceFace", "TargetFace")
+
+      for {
+        source <- fontPdf(includeCMaps = true, targetCMapDiffers = true)
+        output <- program.run(ZStream.fromChunk(source)).provide(PdfEngine.live)
+        rendered <- output.bytes.runCollect
+        elements <- PdfEngine.elements(rendered).provide(PdfEngine.live)
+        validation <- PdfEngine.validate(ZStream.fromChunk(rendered)).provide(PdfEngine.live)
+      } yield assertTrue(
+        output.value.sourceBaseFont == "SourceFace",
+        output.value.targetBaseFont == "TargetFace",
+        output.value.targetObjectNumber == 6L,
+        output.value.resourceBindingsRewritten == 1L,
+        pageFontBinding(elements).contains(Prim.Ref(6, 0)),
+        validation.isSuccess
       )
     },
     test("rejects a replacement whose width table would change layout") {

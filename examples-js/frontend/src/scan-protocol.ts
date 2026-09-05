@@ -1,4 +1,4 @@
-import type { Analysis, TransformExecution, WorkflowExecution } from "zio-pdf-demo";
+import type { Analysis, CompatibleRemap, TransformExecution, WorkflowExecution } from "zio-pdf-demo";
 
 export type ScanWorkerRequest =
   | {
@@ -15,6 +15,11 @@ export type ScanWorkerRequest =
       readonly targetFont: string;
       readonly tokenize: boolean;
       readonly tokenizer: "characters" | "words";
+    }
+  | {
+      readonly kind: "find-remaps";
+      readonly id: number;
+      readonly file: File;
     }
   | {
       readonly kind: "linearize";
@@ -101,6 +106,11 @@ export type ScanWorkerMessage =
       readonly kind: "complete";
       readonly id: number;
       readonly analysis: Analysis;
+    }
+  | {
+      readonly kind: "remaps-complete";
+      readonly id: number;
+      readonly remaps: CompatibleRemap[];
     }
   | {
       readonly kind: "transform-complete";
