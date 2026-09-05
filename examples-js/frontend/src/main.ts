@@ -30,11 +30,14 @@ import "./styles.css";
 
 const fileInput = document.querySelector<HTMLInputElement>("#file-input")!;
 const dropZone = document.querySelector<HTMLLabelElement>("#drop-zone")!;
+const uploadModal = document.querySelector<HTMLDialogElement>("#upload-modal")!;
+const docBar = document.querySelector<HTMLElement>("#doc-bar")!;
+const replacePdfButton = document.querySelector<HTMLButtonElement>("#replace-pdf")!;
+const loadSwapDemoModalButton = document.querySelector<HTMLButtonElement>("#load-swap-demo-modal")!;
 const workbench = document.querySelector<HTMLElement>("#workbench")!;
 const analyzeButton = document.querySelector<HTMLButtonElement>("#analyze-button")!;
 const analyzeButtonLabel = document.querySelector<HTMLElement>("#analyze-button-label")!;
 const resetButton = document.querySelector<HTMLButtonElement>("#reset-button")!;
-const fileFacts = document.querySelector<HTMLElement>("#file-facts")!;
 const inputStatus = document.querySelector<HTMLElement>("#input-status")!;
 const sourceStatus = document.querySelector<HTMLElement>("#source-status")!;
 const dropTitle = document.querySelector<HTMLElement>("#drop-title")!;
@@ -164,7 +167,8 @@ const scanProgress = document.querySelector<HTMLProgressElement>("#scan-progress
 const scanProgressLabel = document.querySelector<HTMLElement>("#scan-progress-label")!;
 const scanProgressDetail = document.querySelector<HTMLElement>("#scan-progress-detail")!;
 const scanFlow = document.querySelector<HTMLElement>("#scan-flow")!;
-const scanCommand = document.querySelector<HTMLElement>("#scan-command")!;
+const railTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-rail-tab]"));
+const railPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-rail-panel]"));
 
 let selectedFile: File | undefined;
 let previewGeneration = 0;
@@ -210,6 +214,7 @@ const MAX_PREVIEW_RANGE_BYTES = 1024 * 1024;
 
 type RunPhase = "idle" | "ready" | "bridge" | "evidence" | "complete" | "error";
 type ObservationState = "positive" | "neutral" | "review";
+type RailTab = "inspection" | "transform" | "workflows";
 
 const runMessages: Record<RunPhase, string> = {
   idle: "Select a PDF to preview.",
@@ -261,6 +266,50 @@ function formatBytes(bytes: number): string {
 
 function setText(selector: string, value: string): void {
   document.querySelector<HTMLElement>(selector)!.textContent = value;
+}
+
+function setActiveRailTab(tab: RailTab): void {
+  for (const button of railTabs) {
+    const active = button.dataset.railTab === tab;
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  }
+  for (const panel of railPanels) {
+    panel.hidden = panel.dataset.railPanel !== tab;
+  }
+}
+
+function setRailTabsEnabled(enabled: boolean): void {
+  for (const tab of railTabs) tab.disabled = !enabled;
+}
+
+function showUploadModal(): void {
+  workbench.dataset.doc = "none";
+  docBar.hidden = true;
+  setRailTabsEnabled(false);
+  if (!uploadModal.open) uploadModal.showModal();
+}
+
+function hideUploadModal(): void {
+  if (uploadModal.open) uploadModal.close();
+  workbench.dataset.doc = "loaded";
+  docBar.hidden = false;
+  setRailTabsEnabled(true);
+}
+
+function loadSwapDemoPdf(): void {
+  void fetch("/font-swap-demo.pdf")
+    .then((response) => {
+      if (!response.ok) throw new Error("Could not load font-swap-demo.pdf");
+      return response.blob();
+    })
+    .then((blob) => {
+      selectFile(new File([blob], "font-swap-demo.pdf", { type: "application/pdf" }));
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Could not load the swap demo PDF.";
+      transformStatus.textContent = message;
+      inputStatus.textContent = message;
+    });
 }
 
 function setRunPhase(phase: RunPhase): void {
@@ -1084,13 +1133,11 @@ function resetReport(): void {
   reportState.dataset.state = "idle";
   emptyStateCopy.textContent = "No inspection results.";
   transformPlan.hidden = true;
-  transformPlan.removeAttribute("open");
   lastInspectionEncrypted = false;
   lastInspectionHasForm = false;
   lastInspectionPages = 1;
   stopActiveWorkflow();
   workflowPlan.hidden = true;
-  workflowPlan.removeAttribute("open");
   workflowBadge.textContent = "Run inspection";
   workflowStatus.textContent = "Run inspection to enable write workflows.";
   workflowCopy.textContent = "Encrypted PDFs cannot be processed. Flatten bakes forms; watermark stamps Helvetica text.";
@@ -1116,17 +1163,17 @@ function resetWorkspace(): void {
   resetButton.disabled = true;
   delete dropZone.dataset.selected;
   dropTitle.textContent = "Choose a PDF";
-  dropCopy.textContent = "or drop a file";
+  dropCopy.textContent = "or drop a file here";
   sourceStatus.textContent = "Blob stream";
-  fileFacts.hidden = true;
-  scanCommand.hidden = true;
   inputStatus.textContent = runMessages.idle;
   destroyPreview();
   previewEmpty.hidden = false;
   previewEmpty.querySelector("strong")!.textContent = "No PDF selected";
-  previewEmpty.querySelector("span")!.textContent = "Choose a PDF above.";
+  previewEmpty.querySelector("span")!.textContent = "Choose a PDF to open the workbench.";
   setPreviewState("idle", "Waiting for a PDF");
   resetReport();
+  setActiveRailTab("inspection");
+  showUploadModal();
 }
 
 function selectFile(file: File | undefined): void {
@@ -1143,14 +1190,14 @@ function selectFile(file: File | undefined): void {
   emptyStateCopy.textContent = "Run Evidence Scan.";
   transformPlan.hidden = false;
   workflowPlan.hidden = false;
+  hideUploadModal();
+  setActiveRailTab("inspection");
   dropZone.dataset.selected = "true";
-  dropTitle.textContent = "Replace PDF";
-  dropCopy.textContent = "choose another file";
+  dropTitle.textContent = "Choose a PDF";
+  dropCopy.textContent = "or drop a file here";
   setText("#file-name", file.name);
   setText("#file-size", formatBytes(file.size));
   sourceStatus.textContent = "Blob stream · not started";
-  fileFacts.hidden = false;
-  scanCommand.hidden = false;
   inputStatus.textContent = runMessages.ready;
   setRunPhase("ready");
   void openPreview(file);
@@ -1659,6 +1706,7 @@ async function executeTransform(): Promise<void> {
   clearTransformDownload();
   transformPlan.dataset.state = "running";
   planBadge.textContent = "Running";
+  setActiveRailTab("transform");
   runTransformButton.disabled = false;
   runTransformButton.textContent = "Stop Pipeline";
   transformStatus.textContent = "Re-encoding page text and writing the output in a worker…";
@@ -1734,8 +1782,7 @@ function renderAnalysis(analysis: Analysis): void {
   pageToInput.max = String(lastInspectionPages);
   pageFromInput.max = String(lastInspectionPages);
   pageToInput.value = String(lastInspectionPages);
-  transformPlan.setAttribute("open", "");
-  workflowPlan.setAttribute("open", "");
+  setActiveRailTab("inspection");
   workflowPlan.dataset.state = lastInspectionEncrypted ? "error" : "ready";
   syncWorkflowControls();
   if (selectedFile) void discoverCompatibleRemaps(selectedFile);
@@ -1998,19 +2045,15 @@ transformPreviewButton.addEventListener("click", () => {
   const base = selectedFile?.name.replace(/\.pdf$/i, "") || "document";
   selectFile(new File([lastTransformBlob], `${base}.transformed.pdf`, { type: "application/pdf" }));
 });
-loadSwapDemoButton.addEventListener("click", () => {
-  void fetch("/font-swap-demo.pdf")
-    .then((response) => {
-      if (!response.ok) throw new Error("Could not load font-swap-demo.pdf");
-      return response.blob();
-    })
-    .then((blob) => {
-      selectFile(new File([blob], "font-swap-demo.pdf", { type: "application/pdf" }));
-    })
-    .catch((error: unknown) => {
-      transformStatus.textContent = error instanceof Error ? error.message : "Could not load the swap demo PDF.";
-    });
-});
+loadSwapDemoButton.addEventListener("click", () => loadSwapDemoPdf());
+loadSwapDemoModalButton.addEventListener("click", () => loadSwapDemoPdf());
+replacePdfButton.addEventListener("click", () => fileInput.click());
+for (const tab of railTabs) {
+  tab.addEventListener("click", () => {
+    const next = tab.dataset.railTab;
+    if (next === "inspection" || next === "transform" || next === "workflows") setActiveRailTab(next);
+  });
+}
 runLinearizeButton.addEventListener("click", () => void executeWorkflow("linearize"));
 runAppendButton.addEventListener("click", () => void executeWorkflow("append"));
 runFlattenButton.addEventListener("click", () => void executeWorkflow("flatten"));
