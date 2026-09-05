@@ -70,6 +70,18 @@ workerScope.addEventListener("message", (event) => {
     return;
   }
 
+  if (request.kind === "find-remaps") {
+    void ZioPdfDemo.findCompatibleRemapsBlob(request.file).then(
+      (remaps) => workerScope.postMessage({ kind: "remaps-complete", id: request.id, remaps }),
+      (error: unknown) => workerScope.postMessage({
+        kind: "error",
+        id: request.id,
+        message: error instanceof Error ? error.message : "The PDF remap discovery worker stopped unexpectedly."
+      })
+    );
+    return;
+  }
+
   if (request.kind === "transform") {
     void ZioPdfDemo.executeTransformBlob(
       request.file,

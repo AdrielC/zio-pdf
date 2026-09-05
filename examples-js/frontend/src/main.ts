@@ -24,7 +24,7 @@ import {
   X,
   createIcons
 } from "lucide";
-import type { Analysis, Citation, FontResource, TextRecoveryRequest, TransformExecution, TransformPlan, WorkflowExecution } from "zio-pdf-demo";
+import type { Analysis, Citation, CompatibleRemap, FontResource, TextRecoveryRequest, TransformExecution, TransformPlan, WorkflowExecution } from "zio-pdf-demo";
 import type { ScanWorkerMessage, ScanWorkerRequest } from "./scan-protocol";
 import "./styles.css";
 
@@ -98,7 +98,20 @@ const fontBindings = document.querySelector<HTMLElement>("#font-bindings")!;
 const swapFontsButton = document.querySelector<HTMLButtonElement>("#swap-fonts")!;
 const runTransformButton = document.querySelector<HTMLButtonElement>("#run-transform")!;
 const transformDownload = document.querySelector<HTMLAnchorElement>("#transform-download")!;
+const transformPreviewButton = document.querySelector<HTMLButtonElement>("#transform-preview")!;
+const transformTokensDownload = document.querySelector<HTMLAnchorElement>("#transform-tokens-download")!;
+const transformResults = document.querySelector<HTMLElement>("#transform-results")!;
+const transformResultStreams = document.querySelector<HTMLElement>("#transform-result-streams")!;
+const transformResultGlyphs = document.querySelector<HTMLElement>("#transform-result-glyphs")!;
+const transformResultBindings = document.querySelector<HTMLElement>("#transform-result-bindings")!;
+const transformResultTokens = document.querySelector<HTMLElement>("#transform-result-tokens")!;
 const transformStatus = document.querySelector<HTMLElement>("#transform-status")!;
+const compatibleSwaps = document.querySelector<HTMLElement>("#compatible-swaps")!;
+const compatibleSwapsStatus = document.querySelector<HTMLElement>("#compatible-swaps-status")!;
+const compatibleSwapsLoading = document.querySelector<HTMLElement>("#compatible-swaps-loading")!;
+const compatibleSwapsList = document.querySelector<HTMLUListElement>("#compatible-swaps-list")!;
+const compatibleSwapsEmpty = document.querySelector<HTMLElement>("#compatible-swaps-empty")!;
+const loadSwapDemoButton = document.querySelector<HTMLButtonElement>("#load-swap-demo")!;
 const workflowPlan = document.querySelector<HTMLElement>("#workflow-plan")!;
 const workflowBadge = document.querySelector<HTMLElement>("#workflow-badge")!;
 const workflowCopy = document.querySelector<HTMLElement>("#workflow-copy")!;
@@ -178,6 +191,10 @@ let citations: Citation[] = [];
 let textRecoveryRequests: TextRecoveryRequest[] = [];
 let citationOpen = false;
 let transformDownloadUrl = "";
+let transformTokensDownloadUrl = "";
+let lastTransformBlob: Blob | undefined;
+let compatibleRemapPairs: CompatibleRemap[] = [];
+let remapDiscoveryGeneration = 0;
 let workflowDownloadUrl = "";
 let lastInspectionEncrypted = false;
 let lastInspectionHasForm = false;
@@ -535,9 +552,48 @@ function stopActiveScan(): boolean {
 
 function clearTransformDownload(): void {
   if (transformDownloadUrl) URL.revokeObjectURL(transformDownloadUrl);
+  if (transformTokensDownloadUrl) URL.revokeObjectURL(transformTokensDownloadUrl);
   transformDownloadUrl = "";
+  transformTokensDownloadUrl = "";
+  lastTransformBlob = undefined;
   transformDownload.hidden = true;
   transformDownload.removeAttribute("href");
+  transformPreviewButton.hidden = true;
+  transformTokensDownload.hidden = true;
+  transformTokensDownload.removeAttribute("href");
+  transformResults.hidden = true;
+}
+
+function renderTransformResults(execution: TransformExecution): void {
+  transformResults.hidden = false;
+  transformResultStreams.textContent = execution.streamsRewritten > 0
+    ? `${execution.streamsRewritten} rewritten`
+    : execution.sourceFont ? "unchanged" : "—";
+  transformResultGlyphs.textContent = execution.glyphsRecoded > 0
+    ? `${execution.glyphsRecoded.toLocaleString()} recoded`
+    : execution.sourceFont ? "unchanged" : "—";
+  transformResultBindings.textContent = execution.sourceFont && execution.targetFont
+    ? `${execution.resourceBindingsRewritten} · ${execution.sourceFont} → ${execution.targetFont}`
+    : "—";
+  transformResultTokens.textContent = execution.tokenPages > 0
+    ? `${execution.tokenCount.toLocaleString()} across ${execution.tokenPages} pages`
+    : "—";
+}
+
+function setTransformTokenDownload(execution: TransformExecution, baseName: string): void {
+  if (transformTokensDownloadUrl) URL.revokeObjectURL(transformTokensDownloadUrl);
+  transformTokensDownloadUrl = "";
+  transformTokensDownload.hidden = true;
+  transformTokensDownload.removeAttribute("href");
+  if (!execution.tokenPagesJson || execution.tokenPagesJson.length === 0) return;
+  const payload = JSON.stringify({
+    tokenizer: planTokenizer.value === "words" ? "words" : "characters",
+    pages: execution.tokenPagesJson
+  }, null, 2);
+  transformTokensDownloadUrl = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+  transformTokensDownload.href = transformTokensDownloadUrl;
+  transformTokensDownload.download = `${baseName.replace(/\.pdf$/i, "") || "document"}.tokens.json`;
+  transformTokensDownload.hidden = false;
 }
 
 function clearWorkflowDownload(): void {
@@ -1088,6 +1144,11 @@ function addObservation(label: string, value: string, detail: string, state: Obs
 
 function operationLabel(operation: string): { title: string; detail: string } {
   switch (operation) {
+    case "substitute-visual-fonts":
+      return {
+        title: "SubstituteVisualFonts",
+        detail: "Decodes glyph codes via /ToUnicode, re-encodes for the replacement font, and rebinds resources."
+      };
     case "remap-existing-fonts":
       return {
         title: "RemapExistingFonts",
@@ -1123,33 +1184,37 @@ function syncPlanControls(): void {
   const remapEnabled = planRemap.checked;
   const tokenizeEnabled = planTokenize.checked;
   const running = activeTransformWorker !== undefined;
-  const candidates = groupDocumentFonts(discoveredFonts).filter(isUnambiguousRemap);
+  const hasFonts = discoveredFonts.length > 0;
   fontBindings.dataset.disabled = String(!remapEnabled);
   planRemap.disabled = running;
   planTokenize.disabled = running;
-  planSourceFont.disabled = running || !remapEnabled || candidates.length === 0;
-  planTargetFont.disabled = running || !remapEnabled || candidates.length === 0;
-  swapFontsButton.disabled = running || !remapEnabled || candidates.length < 2;
+  planSourceFont.disabled = running || !remapEnabled || !hasFonts;
+  planTargetFont.disabled = running || !remapEnabled || !hasFonts;
+  swapFontsButton.disabled = running || !remapEnabled || !hasFonts;
   planTokenizer.disabled = running || !tokenizeEnabled;
 
-  const source = groupForFont(planSourceFont.value);
-  const target = groupForFont(planTargetFont.value);
-  const remapReady = !remapEnabled || Boolean(
-    source && isUnambiguousRemap(source)
-      && target && isUnambiguousRemap(target)
-      && source.resource.baseFont !== target.resource.baseFont
+  const remapReady = !remapEnabled || (
+    planSourceFont.value.trim() !== ""
+      && planTargetFont.value.trim() !== ""
+      && planSourceFont.value !== planTargetFont.value
+      && isSelectedTargetUsable()
   );
   const hasOperation = remapEnabled || tokenizeEnabled;
-  runTransformButton.disabled = running ? false : lastInspectionEncrypted || !selectedFile || !hasOperation || !remapReady;
+  runTransformButton.disabled = running ? false : lastInspectionEncrypted || !selectedFile || !hasOperation || (remapEnabled && !remapReady);
 
   if (activeTransformWorker) return;
   const pipelineState = transformPlan.dataset.state;
   if (pipelineState === "complete" || pipelineState === "error") return;
   if (!hasOperation) transformStatus.textContent = "Select at least one pipeline step.";
-  else if (remapEnabled && candidates.length < 2) transformStatus.textContent = "This PDF needs two unambiguous font resources to test replacement.";
-  else if (remapEnabled && !remapReady) transformStatus.textContent = "Choose different source and replacement fonts.";
-  else if (remapEnabled) transformStatus.textContent = "Ready to verify. No output is created unless this font pair passes.";
+  else if (remapEnabled && !hasFonts) transformStatus.textContent = "Run inspection to discover fonts.";
+  else if (remapEnabled && !remapReady) transformStatus.textContent = "Choose a source font and an unambiguous replacement resource.";
+  else if (remapEnabled) transformStatus.textContent = "Ready — Run Pipeline re-encodes text via /ToUnicode and rebinds resources.";
   else transformStatus.textContent = "Ready to run. Browser transforms are capped at 64 MiB.";
+}
+
+function isSelectedTargetUsable(): boolean {
+  const target = groupForFont(planTargetFont.value.trim());
+  return target !== undefined && isUnambiguousRemap(target);
 }
 
 type FontGroup = { resource: FontResource; records: FontResource[]; remapCandidates: FontResource[] };
@@ -1175,30 +1240,127 @@ function isUnambiguousRemap(group: FontGroup): boolean {
   return group.remapCandidates.length === 1;
 }
 
+function applyCompatibleRemap(pair: CompatibleRemap): void {
+  planSourceFont.value = pair.sourceFont;
+  planTargetFont.value = pair.targetFont;
+  clearTransformDownload();
+  renderCompatibleSwaps();
+  renderFontInventory(discoveredFonts);
+  renderMappingRoute();
+  void compileTransformPlan();
+  syncPlanControls();
+}
+
+function renderCompatibleSwaps(): void {
+  compatibleSwaps.hidden = discoveredFonts.length === 0;
+  compatibleSwapsLoading.hidden = true;
+  compatibleSwapsEmpty.hidden = compatibleRemapPairs.length > 0;
+  compatibleSwapsStatus.textContent = compatibleRemapPairs.length
+    ? `${compatibleRemapPairs.length} substitutable · ${compatibleRemapPairs.filter((pair) => pair.verifiedCompatible).length} verified`
+    : "none substitutable";
+  compatibleSwapsList.replaceChildren();
+
+  compatibleRemapPairs.forEach((pair) => {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    const source = document.createElement("strong");
+    const arrow = document.createElement("span");
+    const target = document.createElement("strong");
+    const detail = document.createElement("small");
+    button.type = "button";
+    button.className = "compatible-swap-button";
+    if (pair.sourceFont === planSourceFont.value && pair.targetFont === planTargetFont.value) {
+      button.dataset.selected = "true";
+    }
+    source.textContent = pair.sourceFont;
+    arrow.textContent = "→";
+    target.textContent = pair.targetFont;
+    detail.textContent = pair.verifiedCompatible
+      ? `${pair.resourceBindingsRewritten} binding${pair.resourceBindingsRewritten === 1 ? "" : "s"} · verified`
+      : "visual substitution";
+    button.append(source, arrow, target, detail);
+    button.addEventListener("click", () => applyCompatibleRemap(pair));
+    item.append(button);
+    compatibleSwapsList.append(item);
+  });
+}
+
+function findRemapsInWorker(file: File, id: number): Promise<CompatibleRemap[]> {
+  const worker = new Worker(new URL("./scan.worker.ts", import.meta.url), {
+    type: "module",
+    name: "zio-pdf-remap-discovery"
+  });
+
+  return new Promise((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<ScanWorkerMessage>) => {
+      const message = event.data;
+      if (message.id !== id) return;
+      worker.terminate();
+      if (message.kind === "remaps-complete") resolve(message.remaps);
+      else if (message.kind === "error") reject(new Error(message.message));
+    };
+    worker.onerror = (event) => {
+      worker.terminate();
+      reject(new Error(event.message || "The PDF remap discovery worker could not start."));
+    };
+    worker.postMessage({ kind: "find-remaps", id, file });
+  });
+}
+
+async function discoverCompatibleRemaps(file: File): Promise<void> {
+  const generation = ++remapDiscoveryGeneration;
+  compatibleSwaps.hidden = false;
+  compatibleSwapsLoading.hidden = false;
+  compatibleSwapsEmpty.hidden = true;
+  compatibleSwapsList.replaceChildren();
+  compatibleSwapsStatus.textContent = "scanning";
+
+  try {
+    const remaps = await findRemapsInWorker(file, generation);
+    if (generation !== remapDiscoveryGeneration) return;
+    compatibleRemapPairs = remaps;
+    renderCompatibleSwaps();
+    syncFontSelectors(groupDocumentFonts(discoveredFonts));
+    syncPlanControls();
+  } catch (error) {
+    if (generation !== remapDiscoveryGeneration) return;
+    compatibleRemapPairs = [];
+    renderCompatibleSwaps();
+    syncPlanControls();
+  }
+}
+
 function groupForFont(fontName: string): FontGroup | undefined {
   return groupDocumentFonts(discoveredFonts).find(({ resource }) => resource.baseFont === fontName);
 }
 
 function syncFontSelectors(groups: FontGroup[]): void {
-  const candidates = groups.filter(isUnambiguousRemap);
-  const names = candidates.map(({ resource }) => resource.baseFont);
-  const currentSource = names.includes(planSourceFont.value) ? planSourceFont.value : names[0] ?? "";
-  const currentTarget = names.includes(planTargetFont.value) && planTargetFont.value !== currentSource
-    ? planTargetFont.value
-    : names.find((name) => name !== currentSource) ?? names[0] ?? "";
+  if (groups.length === 0) {
+    planSourceFont.replaceChildren(new Option("Run inspection first", ""));
+    planTargetFont.replaceChildren(new Option("Run inspection first", ""));
+    return;
+  }
 
-  const renderOptions = (select: HTMLSelectElement, selected: string): void => {
-    select.replaceChildren(...candidates.map(({ resource }) => {
-      const subtype = resource.subtype ? ` /${resource.subtype}` : "";
-      const option = new Option(`${resource.baseFont} · #${resource.objectNumber}${subtype}`, resource.baseFont);
-      option.selected = resource.baseFont === selected;
+  const sourceNames = groups.map(({ resource }) => resource.baseFont);
+  const targetNames = groups.filter(isUnambiguousRemap).map(({ resource }) => resource.baseFont);
+  const currentSource = sourceNames.includes(planSourceFont.value) ? planSourceFont.value : sourceNames[0] ?? "";
+  const filteredTargets = targetNames.filter((name) => name !== currentSource);
+  const currentTarget = filteredTargets.includes(planTargetFont.value) ? planTargetFont.value : filteredTargets[0] ?? "";
+
+  const renderOptions = (select: HTMLSelectElement, names: string[], selected: string, placeholder: string): void => {
+    if (names.length === 0) {
+      select.replaceChildren(new Option(placeholder, ""));
+      return;
+    }
+    select.replaceChildren(...names.map((name) => {
+      const option = new Option(name, name);
+      option.selected = name === selected;
       return option;
     }));
-    if (candidates.length === 0) select.append(new Option("No testable fonts", ""));
   };
 
-  renderOptions(planSourceFont, currentSource);
-  renderOptions(planTargetFont, currentTarget);
+  renderOptions(planSourceFont, sourceNames, currentSource, "No fonts discovered");
+  renderOptions(planTargetFont, filteredTargets, currentTarget, "No unambiguous replacement fonts");
 }
 
 function endpointDescription(fontName: string, group: FontGroup | undefined): string {
@@ -1230,12 +1392,12 @@ function renderMappingRoute(): void {
   mappingSourceDetail.textContent = endpointDescription(sourceName, source);
   mappingTargetName.textContent = targetName;
   mappingTargetDetail.textContent = endpointDescription(targetName, target);
-  mappingRouteState.textContent = remapDisabled ? "disabled" : candidatePair ? "check required" : "select fonts";
+  mappingRouteState.textContent = remapDisabled ? "disabled" : candidatePair ? "visual substitution" : "select fonts";
   mappingRouteCopy.textContent = remapDisabled
     ? "Enable font replacement to add this step."
     : candidatePair
-    ? "Run verifies encoding, glyph widths, and Unicode mapping before changing the PDF."
-    : "Choose different testable source and replacement fonts.";
+    ? "Re-encodes page text through /ToUnicode, then rebinds page resources to the replacement font."
+    : "Choose a source font and an unambiguous replacement resource.";
   renderIcons();
 }
 
@@ -1472,7 +1634,7 @@ async function executeTransform(): Promise<void> {
   planBadge.textContent = "Running";
   runTransformButton.disabled = false;
   runTransformButton.textContent = "Stop Pipeline";
-  transformStatus.textContent = "Verifying the selected resources and rendering the output in a worker…";
+  transformStatus.textContent = "Re-encoding page text and writing the output in a worker…";
 
   try {
     const pending = transformInWorker(file, generation);
@@ -1480,14 +1642,22 @@ async function executeTransform(): Promise<void> {
     const execution = await pending;
     if (generation !== transformGeneration) return;
     const blob = new Blob(execution.chunks.map((chunk) => chunk.buffer as ArrayBuffer), { type: "application/pdf" });
+    lastTransformBlob = blob;
     transformDownloadUrl = URL.createObjectURL(blob);
     transformDownload.href = transformDownloadUrl;
     transformDownload.download = `${file.name.replace(/\.pdf$/i, "") || "document"}.transformed.pdf`;
     transformDownload.hidden = false;
+    transformPreviewButton.hidden = false;
+    renderTransformResults(execution);
+    setTransformTokenDownload(execution, file.name);
 
     const outcomes: string[] = [];
     if (execution.sourceFont && execution.targetFont) {
-      outcomes.push(`${execution.resourceBindingsRewritten} bindings changed from ${execution.sourceFont} to ${execution.targetFont}`);
+      const detail: string[] = [];
+      if (execution.streamsRewritten > 0) detail.push(`${execution.streamsRewritten} streams rewritten`);
+      if (execution.glyphsRecoded > 0) detail.push(`${execution.glyphsRecoded} glyphs recoded`);
+      const suffix = detail.length > 0 ? ` · ${detail.join(" · ")}` : "";
+      outcomes.push(`${execution.resourceBindingsRewritten} bindings: ${execution.sourceFont} → ${execution.targetFont}${suffix}`);
     }
     if (execution.tokenPages > 0) outcomes.push(`${execution.tokenCount.toLocaleString()} tokens across ${execution.tokenPages} pages`);
     transformStatus.textContent = `${formatBytes(execution.outputBytes)} ready. ${outcomes.join(" · ")}`;
@@ -1541,6 +1711,7 @@ function renderAnalysis(analysis: Analysis): void {
   workflowPlan.setAttribute("open", "");
   workflowPlan.dataset.state = lastInspectionEncrypted ? "error" : "ready";
   syncWorkflowControls();
+  if (selectedFile) void discoverCompatibleRemaps(selectedFile);
   void compileTransformPlan();
   citations = content.citations.filter((citation) => citation.excerpt.length > 0);
   textRecoveryRequests = content.textRecoveryRequests;
@@ -1795,6 +1966,24 @@ window.addEventListener("resize", () => {
 window.addEventListener("beforeunload", clearTransformDownload);
 window.addEventListener("beforeunload", () => previewWorker?.terminate());
 runTransformButton.addEventListener("click", () => void executeTransform());
+transformPreviewButton.addEventListener("click", () => {
+  if (!lastTransformBlob) return;
+  const base = selectedFile?.name.replace(/\.pdf$/i, "") || "document";
+  selectFile(new File([lastTransformBlob], `${base}.transformed.pdf`, { type: "application/pdf" }));
+});
+loadSwapDemoButton.addEventListener("click", () => {
+  void fetch("/font-swap-demo.pdf")
+    .then((response) => {
+      if (!response.ok) throw new Error("Could not load font-swap-demo.pdf");
+      return response.blob();
+    })
+    .then((blob) => {
+      selectFile(new File([blob], "font-swap-demo.pdf", { type: "application/pdf" }));
+    })
+    .catch((error: unknown) => {
+      transformStatus.textContent = error instanceof Error ? error.message : "Could not load the swap demo PDF.";
+    });
+});
 runLinearizeButton.addEventListener("click", () => void executeWorkflow("linearize"));
 runAppendButton.addEventListener("click", () => void executeWorkflow("append"));
 runFlattenButton.addEventListener("click", () => void executeWorkflow("flatten"));

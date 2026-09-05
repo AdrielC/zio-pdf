@@ -211,7 +211,23 @@
                   <span><i data-lucide="search" aria-hidden="true"></i><input id="font-filter" name="font-filter" type="search" placeholder="Font, subtype, or object…" autocomplete="off" /></span>
                 </label>
                 <ul class="font-inventory-list" id="font-inventory-list"></ul>
-                <p class="font-inventory-note">Ambiguous names are excluded. Incompatible encodings or metrics are rejected.</p>
+                <p class="font-inventory-note">Ambiguous replacement names are excluded. Visual substitution re-encodes via /ToUnicode when metrics differ.</p>
+              </section>
+
+              <section class="compatible-swaps" id="compatible-swaps" hidden aria-labelledby="compatible-swaps-title">
+                <div class="section-heading">
+                  <div>
+                    <h3 id="compatible-swaps-title">Substitutable pairs</h3>
+                    <p class="compatible-swaps-copy">Verified pairs skip re-encoding; others use /ToUnicode visual substitution.</p>
+                  </div>
+                  <span id="compatible-swaps-status"></span>
+                </div>
+                <p class="compatible-swaps-loading" id="compatible-swaps-loading" hidden>Scanning font pairs…</p>
+                <ul class="compatible-swaps-list" id="compatible-swaps-list"></ul>
+                <p class="compatible-swaps-empty" id="compatible-swaps-empty" hidden>
+                  No substitutable pairs found yet. Pick source and replacement fonts above, or
+                  <button class="demo-load-button" id="load-swap-demo" type="button">Try font-swap-demo.pdf</button>
+                </p>
               </section>
 
               <fieldset class="plan-controls" id="plan-controls">
@@ -263,8 +279,8 @@
                   </div>
                   <div class="mapping-gate">
                     <i data-lucide="shield-check" aria-hidden="true"></i>
-                    <span>verified before write</span>
-                    <small>encoding · CID metrics · ToUnicode</small>
+                    <span>visual substitution</span>
+                    <small>/ToUnicode decode · re-encode · rebind</small>
                   </div>
                   <div class="mapping-endpoint" data-role="target">
                     <span>target resource</span>
@@ -281,11 +297,19 @@
                 <div><dt>Scope</dt><dd id="plan-scope"></dd></div>
                 <div><dt>Content</dt><dd id="plan-content"></dd></div>
               </dl>
-              <pre class="plan-source"><code id="plan-source">PdfTransform.fonts.replaceExisting("SourceFace", "TargetFace")
+              <pre class="plan-source"><code id="plan-source">PdfTransform.fonts.substituteVisual("SourceFace", "TargetFace")
   &gt;&gt;&gt; PdfTransform.text.tokenize(Tokenizer.characters)</code></pre>
+              <dl class="transform-results" id="transform-results" hidden>
+                <div><dt>Streams</dt><dd id="transform-result-streams">—</dd></div>
+                <div><dt>Glyphs</dt><dd id="transform-result-glyphs">—</dd></div>
+                <div><dt>Bindings</dt><dd id="transform-result-bindings">—</dd></div>
+                <div><dt>Tokens</dt><dd id="transform-result-tokens">—</dd></div>
+              </dl>
               <div class="transform-actions">
                 <button class="run-transform" id="run-transform" type="button" disabled>Run Pipeline</button>
-                <a class="transform-download" id="transform-download" href="#" download hidden>Download Transformed PDF</a>
+                <a class="transform-download" id="transform-download" href="#" download hidden>Download PDF</a>
+                <button class="ghost-button transform-preview" id="transform-preview" type="button" hidden>Preview result</button>
+                <a class="transform-download transform-tokens-download" id="transform-tokens-download" href="#" download hidden>Download tokens JSON</a>
                 <p id="transform-status" role="status" aria-live="polite">Run inspection to configure the pipeline.</p>
               </div>
             </div>

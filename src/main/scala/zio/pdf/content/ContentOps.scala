@@ -1,8 +1,6 @@
-/*
- * Best-effort PDF content-stream tokenizer (page operators).
- */
-
 package zio.pdf.content
+
+import java.nio.charset.StandardCharsets
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -263,4 +261,64 @@ object ContentOps {
 
   def tjArrayText(arr: ContentToken.Array): String =
     arr.elems.flatMap(tokenText).mkString
+
+  def render(tokens: List[ContentToken]): Array[Byte] =
+    val out = ArrayBuffer.empty[Byte]
+    def writeAscii(value: String): Unit = out ++= value.getBytes(StandardCharsets.US_ASCII)
+    def writeLiteral(value: _root_.scodec.bits.ByteVector): Unit =
+      out += '('.toByte
+      value.toArray.foreach { byte =>
+        val unsigned = byte & 0xff
+        if byte == '\\'.toByte || byte == '('.toByte || byte == ')'.toByte then
+          out ++= Array('\\'.toByte, byte)
+        else if unsigned >= 32 && unsigned <= 126 then out += byte
+        else out ++= Array('\\'.toByte, ('0'.toInt + (unsigned / 100)).toByte, ('0'.toInt + ((unsigned / 10) % 10)).toByte, ('0'.toInt + (unsigned % 10)).toByte)
+      }
+      out += ')'.toByte
+
+    tokens.foreach {
+      case ContentToken.Number(value) =>
+        writeAscii(value.bigDecimal.toPlainString)
+        out += ' '.toByte
+      case ContentToken.Name(value) =>
+        writeAscii("/")
+        writeAscii(escapeName(value))
+        out += ' '.toByte
+      case ContentToken.Literal(value) =>
+        writeLiteral(value)
+        out += ' '.toByte
+      case ContentToken.Hex(value) =>
+        writeAscii("<")
+        value.toArray.foreach(byte => writeAscii(f"${byte & 0xff}%02X"))
+        writeAscii(">")
+        out += ' '.toByte
+      case ContentToken.Array(elems) =>
+        out += '['.toByte
+        out ++= render(elems)
+        out += ']'.toByte
+        out += ' '.toByte
+      case ContentToken.Dict(entries) =>
+        writeAscii("<< ")
+        entries.foreach { case (key, value) =>
+          writeAscii(s"/${escapeName(key)} ")
+          out ++= render(List(value))
+          out += ' '.toByte
+        }
+        writeAscii(">>")
+        out += ' '.toByte
+      case ContentToken.Op(name) =>
+        writeAscii(name)
+        out += '\n'.toByte
+      case ContentToken.Null =>
+        writeAscii("null ")
+      case ContentToken.Bool(value) =>
+        writeAscii(if value then "true " else "false ")
+    }
+    out.toArray
+
+  private def escapeName(raw: String): String =
+    raw.flatMap {
+      case c if c.isLetterOrDigit || c == '_' || c == '-' || c == '.' || c == '$' => c.toString
+      case c => f"#${c.toInt}%02X"
+    }
 }
