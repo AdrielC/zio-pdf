@@ -33,12 +33,13 @@ end
 endstream
 endobj
 8 0 obj
-<</Length 88>>
+<</Length 100>>
 stream
 /CIDInit /ProcSet findresource begin
-2 beginbfchar
+3 beginbfchar
 <41> <0041>
 <42> <0043>
+<43> <0042>
 endbfchar
 end
 endstream
@@ -57,5 +58,5 @@ xref
 trailer
 <</Root 1 0 R/Size 9>>
 startxref
-888
+901
 %%EOF

@@ -83,6 +83,7 @@ declare module "zio-pdf-demo" {
     targetObjectNumber: number;
     resourceBindingsRewritten: number;
     verifiedCompatible: boolean;
+    recodingSafe: boolean;
   }
 
   export interface TransformTokenPage {

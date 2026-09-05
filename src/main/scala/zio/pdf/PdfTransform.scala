@@ -290,6 +290,18 @@ object PdfTransform {
 
     final case class CompositeFontDataUnavailable(fontObjectNumber: Long, field: String)
         extends Error(s"composite font object $fontObjectNumber lacks a usable /$field required for an existing-resource remap")
+
+    final case class VisualRecodingFailed(
+      sourceBaseFont: String,
+      targetBaseFont: String,
+      reason: String,
+      missingCharacters: Chunk[String] = Chunk.empty,
+      undecodableOffset: Option[Long] = None
+    ) extends Error(
+          s"cannot visually substitute /BaseFont /$sourceBaseFont with /$targetBaseFont: $reason" +
+            (if missingCharacters.nonEmpty then s" Missing target glyphs for: ${missingCharacters.mkString(", ")}." else "") +
+            undecodableOffset.fold("")(offset => s" Undecodable source bytes at offset $offset.")
+        )
   }
 
   private[pdf] final case class Prepared[+A](document: Document, value: A)
@@ -534,7 +546,8 @@ object PdfTransform {
       sourceObjectNumbers: Chunk[Long],
       targetObjectNumber: Long,
       resourceBindingsRewritten: Long,
-      verifiedCompatible: Boolean
+      verifiedCompatible: Boolean,
+      recodingSafe: Boolean
     )
 
     final case class VisualSubstitution(
@@ -647,16 +660,19 @@ object PdfTransform {
                   replacement.sourceObjectNumbers,
                   replacement.targetObjectNumber,
                   replacement.resourceBindingsRewritten,
-                  verifiedCompatible = true
+                  verifiedCompatible = true,
+                  recodingSafe = true
                 )
               case None =>
+                val recodingSafe = FontVisualSubstitute.preflight(document, sourceName, targetName).isRight
                 out += RemapCandidate(
                   sourceName,
                   targetName,
                   sources.map(_.index.number),
                   target.index.number,
                   resourceBindingsRewritten = 0L,
-                  verifiedCompatible = false
+                  verifiedCompatible = false,
+                  recodingSafe = recodingSafe
                 )
         }
       }

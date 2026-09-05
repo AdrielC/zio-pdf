@@ -88,7 +88,8 @@ object ZioPdfDemo:
       "sourceObjectNumbers" -> candidate.sourceObjectNumbers.map(_.toDouble).toSeq.toJSArray,
       "targetObjectNumber" -> candidate.targetObjectNumber.toDouble,
       "resourceBindingsRewritten" -> candidate.resourceBindingsRewritten.toDouble,
-      "verifiedCompatible" -> candidate.verifiedCompatible
+      "verifiedCompatible" -> candidate.verifiedCompatible,
+      "recodingSafe" -> candidate.recodingSafe
     )
 
   @JSExport
