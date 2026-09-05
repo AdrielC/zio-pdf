@@ -175,6 +175,7 @@ let previewDocument: PDFDocumentProxy | undefined;
 let previewPageProxy: PDFPageProxy | undefined;
 let previewRenderTask: RenderTask | undefined;
 let previewWorker: Worker | undefined;
+let previewSession: Promise<void> = Promise.resolve();
 let previewZoom = 1;
 let previewRanges: Array<readonly [number, number]> = [];
 let activeScanWorker: Worker | undefined;
@@ -351,18 +352,39 @@ function renderCitationOverlay(): void {
   renderTextRecoveryAction();
 }
 
+async function disposePreviewDocument(): Promise<void> {
+  previewRenderTask?.cancel();
+  previewRenderTask = undefined;
+  previewPageProxy?.cleanup();
+  previewPageProxy = undefined;
+  const loadingTask = previewLoadingTask;
+  previewLoadingTask = undefined;
+  previewDocument = undefined;
+  if (loadingTask) await loadingTask.destroy().catch(() => undefined);
+}
+
+async function withPreviewSession<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = previewSession;
+  let release!: () => void;
+  previewSession = previous.then(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      })
+  );
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
 function destroyPreview(): void {
   previewGeneration += 1;
   ocrGeneration += 1;
   currentPreviewPage = 1;
   previewTotalPages = 0;
-  previewRenderTask?.cancel();
-  previewRenderTask = undefined;
-  previewPageProxy?.cleanup();
-  previewPageProxy = undefined;
-  if (previewLoadingTask) void previewLoadingTask.destroy().catch(() => undefined);
-  previewLoadingTask = undefined;
-  previewDocument = undefined;
   previewRanges = [];
   previewZoom = 1;
   delete previewStage.dataset.firstPageMs;
@@ -378,6 +400,9 @@ function destroyPreview(): void {
   previewError.hidden = true;
   citationLayer.hidden = true;
   citationOpen = false;
+  void withPreviewSession(async () => {
+    await disposePreviewDocument();
+  });
 }
 
 function previewBytesRead(): number {
@@ -451,11 +476,6 @@ async function renderPreviewPage(pageNumber: number, generation = previewGenerat
 async function openPreview(file: File): Promise<void> {
   const startedAt = performance.now();
   const generation = ++previewGeneration;
-  previewRenderTask?.cancel();
-  if (previewLoadingTask) void previewLoadingTask.destroy().catch(() => undefined);
-  previewLoadingTask = undefined;
-  previewDocument = undefined;
-  previewPageProxy = undefined;
   previewRanges = [];
   previewZoom = 1;
   setPreviewZoomLabel();
@@ -466,67 +486,74 @@ async function openPreview(file: File): Promise<void> {
   previewHost.hidden = true;
   setPreviewState("loading", "Opening PDF…");
 
-  try {
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    previewWorker ??= new PdfPreviewWorker();
-    pdfjs.GlobalWorkerOptions.workerPort = previewWorker;
-    class BlobRangeTransport extends pdfjs.PDFDataRangeTransport {
-      private stopped = false;
+  await withPreviewSession(async () => {
+    if (generation !== previewGeneration) return;
 
-      constructor() {
-        super(file.size, null, false, file.name);
-      }
+    try {
+      await disposePreviewDocument();
+      if (generation !== previewGeneration) return;
 
-      requestDataRange(begin: number, end: number): void {
-        const length = end - begin;
-        if (length <= 0 || length > MAX_PREVIEW_RANGE_BYTES) {
-          this.onDataRange(begin, null);
-          return;
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      previewWorker ??= new PdfPreviewWorker();
+      pdfjs.GlobalWorkerOptions.workerPort = previewWorker;
+      class BlobRangeTransport extends pdfjs.PDFDataRangeTransport {
+        private stopped = false;
+
+        constructor() {
+          super(file.size, null, false, file.name);
         }
-        void file.slice(begin, end).arrayBuffer().then(
-          (buffer) => {
-            if (this.stopped || generation !== previewGeneration) return;
-            recordPreviewRange(begin, end, file.size);
-            this.onDataRange(begin, new Uint8Array(buffer));
-          },
-          () => this.onDataRange(begin, null)
-        );
+
+        requestDataRange(begin: number, end: number): void {
+          const length = end - begin;
+          if (length <= 0 || length > MAX_PREVIEW_RANGE_BYTES) {
+            this.onDataRange(begin, null);
+            return;
+          }
+          void file.slice(begin, end).arrayBuffer().then(
+            (buffer) => {
+              if (this.stopped || generation !== previewGeneration) return;
+              recordPreviewRange(begin, end, file.size);
+              this.onDataRange(begin, new Uint8Array(buffer));
+            },
+            () => this.onDataRange(begin, null)
+          );
+        }
+
+        abort(): void {
+          this.stopped = true;
+        }
       }
 
-      abort(): void {
-        this.stopped = true;
+      const range = new BlobRangeTransport();
+      previewLoadingTask = pdfjs.getDocument({
+        range,
+        rangeChunkSize: PREVIEW_RANGE_BYTES,
+        disableStream: true,
+        disableAutoFetch: true,
+        stopAtErrors: false,
+        isOffscreenCanvasSupported: true
+      });
+      const document = await previewLoadingTask.promise;
+      if (generation !== previewGeneration) return;
+      previewDocument = document;
+      previewTotalPages = document.numPages;
+      await renderPreviewPage(1, generation);
+      if (generation === previewGeneration && previewStage.dataset.state === "ready") {
+        const elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
+        previewStage.dataset.firstPageMs = String(elapsedMs);
+        previewEngine.textContent = `${previewEngine.textContent} · ${elapsedMs.toLocaleString()} ms`;
       }
+    } catch (error) {
+      if (generation !== previewGeneration) return;
+      const message = error instanceof Error ? error.message : "The local previewer could not render this PDF.";
+      previewHost.hidden = true;
+      previewEmpty.hidden = true;
+      previewError.hidden = false;
+      previewErrorMessage.textContent = message;
+      inputStatus.textContent = `${message} The worker-based evidence scan is still available.`;
+      setPreviewState("error", "Preview failed");
     }
-
-    const range = new BlobRangeTransport();
-    previewLoadingTask = pdfjs.getDocument({
-      range,
-      rangeChunkSize: PREVIEW_RANGE_BYTES,
-      disableStream: true,
-      disableAutoFetch: true,
-      stopAtErrors: false,
-      isOffscreenCanvasSupported: true
-    });
-    const document = await previewLoadingTask.promise;
-    if (generation !== previewGeneration) return;
-    previewDocument = document;
-    previewTotalPages = document.numPages;
-    await renderPreviewPage(1, generation);
-    if (generation === previewGeneration && previewStage.dataset.state === "ready") {
-      const elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
-      previewStage.dataset.firstPageMs = String(elapsedMs);
-      previewEngine.textContent = `${previewEngine.textContent} · ${elapsedMs.toLocaleString()} ms`;
-    }
-  } catch (error) {
-    if (generation !== previewGeneration) return;
-    const message = error instanceof Error ? error.message : "The local previewer could not render this PDF.";
-    previewHost.hidden = true;
-    previewEmpty.hidden = true;
-    previewError.hidden = false;
-    previewErrorMessage.textContent = message;
-    inputStatus.textContent = `${message} The worker-based evidence scan is still available.`;
-    setPreviewState("error", "Preview failed");
-  }
+  });
 }
 
 function resetScanUi(): void {
