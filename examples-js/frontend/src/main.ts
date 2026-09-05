@@ -1271,7 +1271,7 @@ function syncPlanControls(): void {
     planSourceFont.value.trim() !== ""
       && planTargetFont.value.trim() !== ""
       && planSourceFont.value !== planTargetFont.value
-      && isSelectedTargetUsable()
+      && isSelectedRemapAllowed()
   );
   const hasOperation = remapEnabled || tokenizeEnabled;
   runTransformButton.disabled = running ? false : lastInspectionEncrypted || !selectedFile || !hasOperation || (remapEnabled && !remapReady);
@@ -1281,7 +1281,7 @@ function syncPlanControls(): void {
   if (pipelineState === "complete" || pipelineState === "error") return;
   if (!hasOperation) transformStatus.textContent = "Select at least one pipeline step.";
   else if (remapEnabled && !hasFonts) transformStatus.textContent = "Run inspection to discover fonts.";
-  else if (remapEnabled && !remapReady) transformStatus.textContent = "Choose a source font and an unambiguous replacement resource.";
+  else if (remapEnabled && !remapReady) transformStatus.textContent = "Choose a verified pair or a preflight-safe visual substitution.";
   else if (remapEnabled) transformStatus.textContent = "Ready — Run Pipeline re-encodes text via /ToUnicode and rebinds resources.";
   else transformStatus.textContent = "Ready to run. Browser transforms are capped at 64 MiB.";
 }
@@ -1289,6 +1289,17 @@ function syncPlanControls(): void {
 function isSelectedTargetUsable(): boolean {
   const target = groupForFont(planTargetFont.value.trim());
   return target !== undefined && isUnambiguousRemap(target);
+}
+
+function isSelectedRemapAllowed(): boolean {
+  if (!planRemap.checked) return true;
+  const source = planSourceFont.value.trim();
+  const target = planTargetFont.value.trim();
+  if (!source || !target || source === target) return false;
+  if (!isSelectedTargetUsable()) return false;
+  const pair = compatibleRemapPairs.find((candidate) => candidate.sourceFont === source && candidate.targetFont === target);
+  if (pair?.verifiedCompatible) return true;
+  return pair?.recodingSafe === true;
 }
 
 type FontGroup = { resource: FontResource; records: FontResource[]; remapCandidates: FontResource[] };
@@ -1325,12 +1336,19 @@ function applyCompatibleRemap(pair: CompatibleRemap): void {
   syncPlanControls();
 }
 
+function selectedRemapPreflightSafe(): boolean {
+  const source = planSourceFont.value.trim();
+  const target = planTargetFont.value.trim();
+  const pair = compatibleRemapPairs.find((candidate) => candidate.sourceFont === source && candidate.targetFont === target);
+  return pair?.verifiedCompatible === true || pair?.recodingSafe === true;
+}
+
 function renderCompatibleSwaps(): void {
   compatibleSwaps.hidden = discoveredFonts.length === 0;
   compatibleSwapsLoading.hidden = true;
   compatibleSwapsEmpty.hidden = compatibleRemapPairs.length > 0;
   compatibleSwapsStatus.textContent = compatibleRemapPairs.length
-    ? `${compatibleRemapPairs.length} substitutable · ${compatibleRemapPairs.filter((pair) => pair.verifiedCompatible).length} verified`
+    ? `${compatibleRemapPairs.length} substitutable · ${compatibleRemapPairs.filter((pair) => pair.verifiedCompatible).length} verified · ${compatibleRemapPairs.filter((pair) => pair.recodingSafe && !pair.verifiedCompatible).length} preflight-safe`
     : "none substitutable";
   compatibleSwapsList.replaceChildren();
 
@@ -1351,7 +1369,10 @@ function renderCompatibleSwaps(): void {
     target.textContent = pair.targetFont;
     detail.textContent = pair.verifiedCompatible
       ? `${pair.resourceBindingsRewritten} binding${pair.resourceBindingsRewritten === 1 ? "" : "s"} · verified`
-      : "visual substitution";
+      : pair.recodingSafe
+      ? "visual substitution · preflight-safe"
+      : "visual substitution · unsafe";
+    if (!pair.verifiedCompatible && !pair.recodingSafe) button.disabled = true;
     button.append(source, arrow, target, detail);
     button.addEventListener("click", () => applyCompatibleRemap(pair));
     item.append(button);
@@ -1470,7 +1491,9 @@ function renderMappingRoute(): void {
   mappingRouteCopy.textContent = remapDisabled
     ? "Enable font replacement to add this step."
     : candidatePair
-    ? "Re-encodes page text through /ToUnicode, then rebinds page resources to the replacement font."
+    ? selectedRemapPreflightSafe()
+      ? "Re-encodes page text through /ToUnicode, then rebinds page resources to the replacement font."
+      : "This pair failed preflight — the target font cannot represent all extracted text."
     : "Choose a source font and an unambiguous replacement resource.";
   renderIcons();
 }

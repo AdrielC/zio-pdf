@@ -312,7 +312,33 @@ object TextExtract {
   final case class ToUnicode private (byWidth: Map[Int, Map[Long, String]]) {
     private val widths = byWidth.keys.toArray.sorted(using Ordering.Int.reverse)
 
-    def decode(bytes: _root_.scodec.bits.ByteVector): String = {
+    def decode(bytes: _root_.scodec.bits.ByteVector): String =
+      decodeStrict(bytes).getOrElse(decodeLenient(bytes))
+
+    /** Fail closed when any glyph code is absent from the CMap. */
+    def decodeStrict(bytes: _root_.scodec.bits.ByteVector): Either[Long, String] = {
+      val out = new StringBuilder
+      var offset = 0L
+      while offset < bytes.size do
+        var matched = false
+        var widthIndex = 0
+        while widthIndex < widths.length && !matched do
+          val width = widths(widthIndex)
+          if offset + width <= bytes.size then {
+            val code = sourceCode(bytes, offset, width)
+            byWidth(width).get(code) match
+              case Some(value) =>
+                out.append(value)
+                offset += width
+                matched = true
+              case None => ()
+          }
+          widthIndex += 1
+        if !matched then return Left(offset)
+      Right(out.toString)
+    }
+
+    private def decodeLenient(bytes: _root_.scodec.bits.ByteVector): String = {
       val out = new StringBuilder
       var offset = 0L
       while offset < bytes.size do
@@ -338,13 +364,40 @@ object TextExtract {
   }
 
   object ToUnicode {
+    private val winAnsiCharset = java.nio.charset.Charset.forName("Windows-1252")
+
     /** ISO-8859-1 fallback when a font omits `/ToUnicode`. */
     val identitySingleByte: ToUnicode = ToUnicode(Map(1 -> (0L until 256L).map { code =>
       code -> code.toChar.toString
     }.toMap))
 
+    /** WinAnsi single-byte mapping for simple Type1/TrueType fonts without `/ToUnicode`. */
+    val winAnsiSingleByte: ToUnicode = ToUnicode(Map(1 -> (0L until 256L).map { code =>
+      val byte = (code & 0xff).toByte
+      code -> new String(Array(byte), winAnsiCharset)
+    }.toMap))
+
     final case class CmapEncoder private (byChar: Map[String, Array[Byte]]) {
       def encode(text: String): Array[Byte] =
+        encodeStrict(text).getOrElse(encodeLenient(text))
+
+      /** Fail closed when any Unicode scalar lacks a target glyph code. */
+      def encodeStrict(text: String): Either[Chunk[String], Array[Byte]] = {
+        val out = ArrayBuffer.empty[Byte]
+        val missing = ArrayBuffer.empty[String]
+        var index = 0
+        while index < text.length do
+          val codePoint = text.codePointAt(index)
+          val key = new String(Character.toChars(codePoint))
+          byChar.get(key) match
+            case Some(bytes) => out ++= bytes
+            case None        => missing += key
+          index += Character.charCount(codePoint)
+        if missing.nonEmpty then Left(Chunk.fromIterable(missing.distinct))
+        else Right(out.toArray)
+      }
+
+      private def encodeLenient(text: String): Array[Byte] =
         val out = ArrayBuffer.empty[Byte]
         var index = 0
         while index < text.length do

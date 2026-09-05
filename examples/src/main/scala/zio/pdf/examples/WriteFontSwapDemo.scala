@@ -39,9 +39,10 @@ object WriteFontSwapDemo extends ZIOAppDefault {
 
   private val targetCMap = BitVector(
     """/CIDInit /ProcSet findresource begin
-      |2 beginbfchar
+      |3 beginbfchar
       |<41> <0041>
       |<42> <0043>
+      |<43> <0042>
       |endbfchar
       |end""".stripMargin.getBytes
   )

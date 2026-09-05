@@ -30,6 +30,7 @@ object PdfTransformSpec extends ZIOSpecDefault {
     targetWidth: Int = 500,
     includeCMaps: Boolean = false,
     targetCMapDiffers: Boolean = false,
+    targetCMapIncomplete: Boolean = false,
     targetSubtype: String = "Type1"
   ): ZIO[Any, Throwable, Chunk[Byte]] = {
     val catalog = IndirectObj.nostream(
@@ -75,12 +76,22 @@ object PdfTransformSpec extends ZIOSpecDefault {
         |end""".stripMargin.getBytes
     )
     val targetCMap =
-      if targetCMapDiffers then
+      if targetCMapIncomplete then
         BitVector(
           """/CIDInit /ProcSet findresource begin
             |2 beginbfchar
             |<41> <0041>
             |<42> <0043>
+            |endbfchar
+            |end""".stripMargin.getBytes
+        )
+      else if targetCMapDiffers then
+        BitVector(
+          """/CIDInit /ProcSet findresource begin
+            |3 beginbfchar
+            |<41> <0041>
+            |<42> <0043>
+            |<43> <0042>
             |endbfchar
             |end""".stripMargin.getBytes
         )
@@ -213,12 +224,9 @@ object PdfTransformSpec extends ZIOSpecDefault {
         decoded <- PdfEngine.decode(ZStream.fromChunk(source)).runCollect.provide(PdfEngine.live)
         document <- ZIO.fromEither(PdfTransform.Document.fromDecoded(decoded))
         pairs = PdfTransform.fonts.findVisualRemaps(document)
+        candidate = pairs.find(c => c.sourceBaseFont == "SourceFace" && c.targetBaseFont == "TargetFace")
       } yield assertTrue(
-        pairs.exists(candidate =>
-          candidate.sourceBaseFont == "SourceFace" &&
-            candidate.targetBaseFont == "TargetFace" &&
-            !candidate.verifiedCompatible
-        )
+        candidate.exists(c => !c.verifiedCompatible && c.recodingSafe)
       )
     },
     test("findCompatibleRemaps discovers verified pairs without executing the plan") {
@@ -352,14 +360,30 @@ object PdfTransformSpec extends ZIOSpecDefault {
         output <- program.run(ZStream.fromChunk(source)).provide(PdfEngine.live)
         rendered <- output.bytes.runCollect
         elements <- PdfEngine.elements(rendered).provide(PdfEngine.live)
+        text <- PdfEngine.extractText(ZStream.fromChunk(rendered)).runCollect.provide(PdfEngine.live)
         validation <- PdfEngine.validate(ZStream.fromChunk(rendered)).provide(PdfEngine.live)
       } yield assertTrue(
         output.value.sourceBaseFont == "SourceFace",
         output.value.targetBaseFont == "TargetFace",
         output.value.targetObjectNumber == 6L,
         output.value.resourceBindingsRewritten == 1L,
+        output.value.glyphsRecoded > 0L,
         pageFontBinding(elements).contains(Prim.Ref(6, 0)),
+        text == Chunk(PageText(3L, "AB")),
         validation.isSuccess
+      )
+    },
+    test("substituteVisual rejects pairs whose target font cannot encode extracted text") {
+      val program = PdfTransform.fonts.substituteVisual("SourceFace", "TargetFace")
+
+      for {
+        source <- fontPdf(includeCMaps = true, targetCMapIncomplete = true)
+        result <- program.run(ZStream.fromChunk(source)).either.provide(PdfEngine.live)
+      } yield assertTrue(
+        result match {
+          case Left(_: PdfTransform.Error.VisualRecodingFailed) => true
+          case _ => false
+        }
       )
     },
     test("rejects a replacement whose width table would change layout") {
