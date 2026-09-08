@@ -3,7 +3,6 @@ package zio.pdf.tacit
 import zio.Chunk
 import zio.pdf.Decoded
 import zio.pdf.arrow.*
-import zio.pdf.pipe.{DecodePipeline, IngestPipeline, Pipe}
 import zio.pdf.pipe.FusedDecode.Cfg
 import zio.pdf.pipe.IngestPipeline.DecodeDigest
 
@@ -23,10 +22,8 @@ object PdfFlow {
     PipelineFlow
       .init(name)
       .input[Array[Byte]]("bytes")
-      .pipe("slice")(DecodePipeline.sliceWhole)
-      .pipe("hyperfuse-decode-digest") {
-        Pipe(slice => IngestPipeline.fusedDecodeAndDigest(slice, cfg))
-      }
+      .pipe("slice")(PdfPipes.sliceWhole)
+      .pipe("hyperfuse-decode-digest")(PdfPipes.fusedDecodeAndDigest(cfg))
       .build
 
   /** Staged decode+digest — parity / debug path. */
@@ -34,8 +31,8 @@ object PdfFlow {
     PipelineFlow
       .init(name)
       .input[Array[Byte]]("bytes")
-      .pipe("slice")(DecodePipeline.sliceWhole)
-      .pipe("staged-decode-digest")(IngestPipeline.stagedDecodeAndDigest(cfg))
+      .pipe("slice")(PdfPipes.sliceWhole)
+      .pipe("staged-decode-digest")(PdfPipes.stagedDecodeAndDigest(cfg))
       .build
 
   /** Inspect any [[PipelineFlow.Flow]] as a tacit [[PdfPipeline.PipelinePlan]]. */
