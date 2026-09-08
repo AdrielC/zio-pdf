@@ -13,7 +13,9 @@ type WiringV1          = V[Nat.`1`]
 given wiringCat: SymmetricCat[WiringDiag, PropOb] = FreeProp.propCat[WiringLabel]
 val wiringProp                                      = smc.syntax[WiringDiag, PropOb, Nat.Plus]
 
+val wiringANode = ArrowSyntax.node("a", 0, 1)
 val wiringBNode = ArrowSyntax.node("b", 1, 0)
+val wiringCNode = ArrowSyntax.node("c", 1, 3)
 
 object ArrowSyntaxSpec extends ZIOSpecDefault {
 
@@ -33,14 +35,18 @@ object ArrowSyntaxSpec extends ZIOSpecDefault {
       val (out, edges) = GraphRender.wiring(exp, ("x", "y"))
       assertTrue(edges.isEmpty, out == Vector("y", "x"))
     },
-    test("sequential FreeProp wiring chains nodes") {
-      val one = Nat.Succ(Nat.Zero())
-      val a   = FreeProp.Embed[WiringLabel, Nat.Zero, Nat.`1`]("a")
-      val c   = FreeProp.Embed[WiringLabel, Nat.`1`, Nat.OfInt[3]]("c")
-      val exp = FreeProp.AndThen(a, c, one)
+    test("complex pipeline wiring matches volga SyntaxTest") {
+      val exp = wiringProp.of0:
+        val x         = wiringANode()
+        val (u, v, w) = wiringCNode(x)
+        wiringBNode(v)
+        (w, u)
 
       val (out, edges) = GraphRender.wiring(exp, EmptyTuple)
-      assertTrue(edges == Vector("a" -> "c"), out == Vector("c", "c", "c"))
+      assertTrue(
+        edges == Vector("a" -> "c", "c" -> "b"),
+        out == Vector("c", "c")
+      )
     },
     test("GraphRender produces mermaid and dot") {
       val exp     = wiringProp.of1((v: WiringV1) => wiringBNode(v))
