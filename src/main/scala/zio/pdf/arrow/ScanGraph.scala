@@ -41,6 +41,16 @@ object ScanGraph {
     case Empty | Edge(_, _)                => false
   }
 
+  /** All node names appearing in a schema (for agent / tacit summaries). */
+  def nodeNames(schema: ScanGraph): Vector[String] = {
+    def collect(g: ScanGraph): Vector[String] = g match {
+      case Node(name, _, _, children) => Vector(name) ++ children.flatMap(collect)
+      case Graph(nodes, edges)        => (nodes ++ edges).flatMap(collect).toVector
+      case Empty | Edge(_, _)         => Vector.empty
+    }
+    collect(schema).distinct
+  }
+
   given scanGraphMonoid: ScanGraphMonoid with {
     def empty: ScanGraph                               = ScanGraph.empty
     def combine(a: ScanGraph, b: ScanGraph): ScanGraph = ScanGraph.combine(a, b)

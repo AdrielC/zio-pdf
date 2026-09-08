@@ -1,0 +1,13 @@
+// Add to tacit/src/main/scala/executor/CodeValidator.scala forbiddenPatterns:
+// Block direct hyperdrive bypass — agents must use requestPdfPipeline.
+
+ForbiddenPattern(
+  "pdf-hyperdrive-bypass",
+  raw"\bPdfHyperdrive\b".r,
+  "PdfHyperdrive is forbidden; use requestPdfPipeline / pdfRunFused"
+),
+ForbiddenPattern(
+  "pdf-engine-bypass",
+  raw"\bPdfEngine\b".r,
+  "PdfEngine is forbidden; use requestPdfPipeline / pdfRunFused"
+),
