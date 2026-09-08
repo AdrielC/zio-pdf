@@ -14,7 +14,7 @@ import zio.pdf.pipe.FusedDecode.Cfg
  */
 object PdfPipeline {
 
-  /** Serializable pipeline description an agent can inspect before running effects. */
+  /** Serializable, inspectable pipeline description (diagrams + durable [[ScanGraph]] JSON). */
   final case class PipelinePlan(
       name:       String,
       mermaid:    String,
@@ -22,13 +22,13 @@ object PdfPipeline {
       edges:      Vector[(String, String)],
       nodes:      Vector[String],
       schemaJson: String
-  )
+  ) derives Schema, CanEqual
 
   /** Result summary safe to log (no raw PDF bytes). */
   final case class IngestSummary(
       decodedCount: Int,
       digestHex:    String
-  )
+  ) derives Schema, CanEqual
 
   def planFused(name: String = "ingest-fused", cfg: Cfg = Cfg()): PipelinePlan =
     planFromSchema(name, IngestGraph.schemaFused(cfg))
@@ -48,13 +48,11 @@ object PdfPipeline {
     )
   }
 
-  /** Run the production fused ingest graph on in-memory bytes. */
   def runFused(bytes: Array[Byte], cfg: Cfg = Cfg()): IngestSummary = {
     val result = IngestGraph.runFused(cfg).run(bytes)
     summarize(result.decoded, result.digest)
   }
 
-  /** Run the staged (parity) ingest graph on in-memory bytes. */
   def runStaged(bytes: Array[Byte], cfg: Cfg = Cfg()): IngestSummary = {
     val result = IngestGraph.runStaged(cfg).run(bytes)
     summarize(result.decoded, result.digest)
@@ -64,6 +62,14 @@ object PdfPipeline {
   def planFromGraph(name: String, graph: FreeArrow[PipelineGraph.Node, ?, ?]): PipelinePlan =
     planFromSchema(name, PipelineGraph.analyze(graph))
 
+  /** Pure: inspect a [[PipelineFlow.Flow]] — serializable plan, no execution. */
+  def planFromFlow[A, B](flow: PipelineFlow.Flow[A, B]): PipelinePlan =
+    planFromGraph(flow.name, flow.graph)
+
+  /** Round-trip [[ScanGraph]] through zio-blocks [[Schema]] (durable storage). */
+  def schemaRoundTrip(schema: ScanGraph): Either[String, ScanGraph] =
+    summon[Schema[ScanGraph]].fromDynamicValue(summon[Schema[ScanGraph]].toDynamicValue(schema)).left.map(_.toString)
+
   private def summarize(decoded: Chunk[Decoded], digest: Array[Byte]): IngestSummary =
     IngestSummary(
       decodedCount = decoded.size,
@@ -71,9 +77,8 @@ object PdfPipeline {
     )
 
   private def schemaToJson(schema: ScanGraph): String = {
-    val dv     = summon[Schema[ScanGraph]].toDynamicValue(schema)
-    val pretty = dynamicValueToJson(dv)
-    pretty
+    val dv = summon[Schema[ScanGraph]].toDynamicValue(schema)
+    dynamicValueToJson(dv)
   }
 
   private def dynamicValueToJson(dv: DynamicValue): String =

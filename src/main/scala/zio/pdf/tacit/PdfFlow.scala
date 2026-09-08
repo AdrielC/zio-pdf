@@ -37,7 +37,7 @@ object PdfFlow {
 
   /** Inspect any [[PipelineFlow.Flow]] as a tacit [[PdfPipeline.PipelinePlan]]. */
   def planOf[A, B](flow: PipelineFlow.Flow[A, B]): PdfPipeline.PipelinePlan =
-    PdfPipeline.planFromGraph(flow.name, flow.graph).copy(name = flow.name)
+    PdfPipeline.planFromFlow(flow)
 
   /** Run a flow and return a log-safe summary. */
   def runIngest(flow: PipelineFlow.Flow[Array[Byte], IngestResult], bytes: Array[Byte]): PdfPipeline.IngestSummary = {

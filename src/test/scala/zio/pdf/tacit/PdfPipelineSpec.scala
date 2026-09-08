@@ -1,5 +1,6 @@
 package zio.pdf.tacit
 
+import zio.blocks.schema.Schema
 import zio.test.*
 import zio.test.TestAspect.*
 import zio.pdf.arrow.*
@@ -35,6 +36,18 @@ object PdfPipelineSpec extends ZIOSpecDefault {
     test("runFused ingests sample PDF bytes") {
       val summary = PdfPipeline.runFused(samplePdfBytes)
       assertTrue(summary.decodedCount > 0, summary.digestHex.nonEmpty)
+    },
+    test("ScanGraph and PipelinePlan are Schema-serializable (inspectable)") {
+      val schema = IngestGraph.schemaFused()
+      val plan   = PdfPipeline.planFromFlow(PdfFlow.ingestFused())
+      val planSchema = summon[Schema[PdfPipeline.PipelinePlan]]
+      val planRt     = planSchema.fromDynamicValue(planSchema.toDynamicValue(plan))
+      assertTrue(
+        PdfPipeline.schemaRoundTrip(schema) == Right(schema),
+        planRt.isRight,
+        plan.schemaJson.contains("Node"),
+        plan.mermaid.contains("flowchart")
+      )
     }
   ) @@ sequential
 }
