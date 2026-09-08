@@ -9,6 +9,9 @@ final case class GraphSummary(
 
 object GraphSummary {
 
+  /** Synthetic port name for shared fan-out input (remapped to caller's label at render). */
+  val InputPort: String = "⟨in⟩"
+
   def empty: GraphSummary = GraphSummary()
 
   def fromLabeled(node: LabeledFnArrow[?, ?]): GraphSummary = {
@@ -38,9 +41,10 @@ object GraphSummary {
       outputs = left.outputs ++ right.outputs
     )
 
-  /** Cartesian fan-out — shared upstream feeds both arms. */
+  /** Cartesian fan-out — shared upstream feeds both arms (no self-loops). */
   def fanout(left: GraphSummary, right: GraphSummary, fork: String): GraphSummary = {
-    val forkEdges = (left.inputs ++ right.inputs).distinct.map(to => ScanGraph.edge(fork, to))
+    val branches = (left.inputs ++ right.inputs).distinct.filterNot(_ == fork)
+    val forkEdges = branches.map(to => ScanGraph.edge(fork, to))
     val forkGraph = forkEdges.foldLeft(ScanGraph.Empty: ScanGraph)(ScanGraph.combine)
     GraphSummary(
       graph   = ScanGraph.combine(forkGraph, ScanGraph.combine(left.graph, right.graph)),

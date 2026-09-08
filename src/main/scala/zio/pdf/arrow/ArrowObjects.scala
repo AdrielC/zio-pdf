@@ -15,24 +15,33 @@ type ArrowU[t] = t match {
   case Dual[a]       => a
 }
 
-/** Object universe for path-dependent `x` / `+` over volga tags. */
+/**
+ * Object universe for path-dependent `x` / `+` over volga tags.
+ *
+ * '''Important:''' `Ob[A]` is defined as `ArrowU[Obj[A]]`, which erases to the plain
+ * Scala type `A` (see [[ArrowU]]). It is compile-time evidence for volga's categorical
+ * operators — our interpreters never read these values at runtime.
+ *
+ * volga's own `FreeU` uses distinct enum witnesses (`FreeObj.One`, `FreeObj.Prod`, …)
+ * instead of this erasure; that is the proper long-term direction if we outgrow plain
+ * `FnArrow` types. Until then, `()` for `Ob[Unit]` and [[phantomOb]] cover the rest.
+ */
 object ArrowObjects extends ObAliases[ArrowU] {
 
   type U[t] = ArrowU[t]
 
-  /** Phantom evidence — never read at runtime; avoid routing through a shared `ob` val (JDK 21+). */
-  inline def ob[A]: Ob[A] = null.asInstanceOf[Ob[A]]
+  inline def ob[A]: Ob[A] = phantomOb[A]
 
-  /** Fallback phantom evidence for object tags (never read at runtime). */
+  /** Compile-time-only evidence; never read at runtime (would be meaningless for most `A`). */
   given phantomOb[A]: Ob[A] = null.asInstanceOf[Ob[A]]
 
   given monoidalObjects: MonoidalObjects[ArrowU] with {
-    given unitOb: Ob[I]                     = null.asInstanceOf[Ob[I]]
-    given tensorOb[A: Ob, B: Ob]: Ob[A x B] = null.asInstanceOf[Ob[A x B]]
+    given unitOb: Ob[I]                     = ()
+    given tensorOb[A: Ob, B: Ob]: Ob[A x B] = summon[Ob[A x B]]
   }
 
   given scalaObjects: ScalaObjects[ArrowU] with {
-    given scalaOb[A]: Ob[$[A]] = null.asInstanceOf[Ob[$[A]]]
+    given scalaOb[A]: Ob[$[A]] = summon[Ob[$[A]]]
   }
 
   type Prod[A, B] = A x B

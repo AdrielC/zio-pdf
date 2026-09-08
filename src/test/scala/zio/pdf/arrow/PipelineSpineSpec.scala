@@ -16,6 +16,16 @@ object PipelineSpineSpec extends ZIOSpecDefault {
         formats.mermaid.contains("inc")
       )
     },
+    test("mermaid is syntactically valid and wires input to nodes") {
+      val spine = PipelineSpine.node("inc", 1, 1)(Pipe[Int, Int](_ + 1)) >>>
+        PipelineSpine.node("dbl", 1, 1)(Pipe[Int, Int](_ * 2))
+      val mermaid = PipelineSpine.render("seq", spine, "x").mermaid
+      assertTrue(
+        mermaid.startsWith("flowchart LR"),
+        mermaid.contains("x --> inc"),
+        mermaid.contains("inc --> dbl")
+      )
+    },
     test("fanout zip preserves branch nodes in analyze") {
       val left  = PipelineSpine.node("left", 1, 1)(Pipe[Int, Int](_ + 1))
       val right = PipelineSpine.node("right", 1, 1)(Pipe[Int, Int](_ * 10))
@@ -25,6 +35,16 @@ object PipelineSpineSpec extends ZIOSpecDefault {
         PipelineSpine.run(spine).run(2) == (3, 20),
         names.contains("left"),
         names.contains("right")
+      )
+    },
+    test("fanout mermaid fans input to both branches") {
+      val left  = PipelineSpine.node("left", 1, 1)(Pipe[Int, Int](_ + 1))
+      val right = PipelineSpine.node("right", 1, 1)(Pipe[Int, Int](_ * 10))
+      val mermaid = PipelineSpine.render("fan", left &&& right, "bytes").mermaid
+      assertTrue(
+        mermaid.startsWith("flowchart LR"),
+        mermaid.contains("bytes --> left"),
+        mermaid.contains("bytes --> right")
       )
     },
     test("fromFreePipe structural round-trip matches fold") {
