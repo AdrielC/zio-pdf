@@ -1,12 +1,11 @@
 package zio.pdf.arrow
 
-import volga.ObAliases
-import zio.pdf.pipe.{ObjWitness, WitnessObjects, WitnessU}
+import zio.pdf.pipe.{EvalObAliases, HomU, ObjWitness, WitnessObjects}
 
 /** Object universe for path-dependent `x` / `+` over volga tags (witness-backed `Ob`). */
-object ArrowObjects extends ObAliases[WitnessU] {
+object ArrowObjects extends EvalObAliases[HomU] {
 
-  type U[t] = WitnessU[t]
+  type U[t] = HomU[t]
 
   export WitnessObjects.{ob, tagOb, monoidalObjects, zeroOb, sumOb, scalaObjects}
 

@@ -43,7 +43,12 @@ object GraphSummary {
 
   /** Cartesian fan-out — shared upstream feeds both arms (no self-loops). */
   def fanout(left: GraphSummary, right: GraphSummary, fork: String): GraphSummary = {
-    val branches = (left.inputs ++ right.inputs).distinct.filterNot(_ == fork)
+    def expandInputs(summary: GraphSummary): List[String] =
+      summary.inputs.flatMap {
+        case `InputPort` => portTargets(summary.graph).filterNot(_ == fork)
+        case name        => List(name)
+      }
+    val branches = (expandInputs(left) ++ expandInputs(right)).distinct.filterNot(_ == fork)
     val forkEdges = branches.map(to => ScanGraph.edge(fork, to))
     val forkGraph = forkEdges.foldLeft(ScanGraph.Empty: ScanGraph)(ScanGraph.combine)
     GraphSummary(
@@ -54,4 +59,12 @@ object GraphSummary {
   }
 
   def toScanGraph(summary: GraphSummary): ScanGraph = summary.graph
+
+  private def portTargets(graph: ScanGraph): List[String] = graph match {
+    case ScanGraph.Edge(from, to) if from == InputPort => List(to)
+    case ScanGraph.Edge(_, _)                           => Nil
+    case ScanGraph.Node(_, _, _, children)              => children.flatMap(portTargets)
+    case ScanGraph.Graph(nodes, edges)                  => (nodes ++ edges).flatMap(portTargets)
+    case ScanGraph.Empty                                => Nil
+  }
 }

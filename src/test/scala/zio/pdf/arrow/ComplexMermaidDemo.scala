@@ -56,7 +56,14 @@ object ComplexMermaidDemo extends ZIOSpecDefault {
       val formats = PipelineSpine.render("agent-ingest-complex", complexSpine, "bytes")
       println("\n===== SPINE MERMAID (12 nodes, nested fan-out) =====\n")
       println(formats.mermaid)
-      assertTrue(formats.wiring._2.size >= 12)
+      assertTrue(
+        formats.wiring._2.size >= 11,
+        formats.mermaid.contains("slice --> xref-scan"),
+        formats.mermaid.contains("slice --> boundary-scan"),
+        formats.mermaid.contains("slice --> crypto-detect"),
+        !formats.mermaid.contains("bytes --> xref-scan"),
+        !formats.mermaid.contains("⟨in⟩")
+      )
     },
     test("print complex flow mermaid (PipelineFlow DSL)") {
       val flow = complexFlow

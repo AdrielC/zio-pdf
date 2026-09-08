@@ -1,15 +1,13 @@
 /*
- * volga object witnesses for [[Pipe]] — shared [[WitnessU]] / [[ObjWitness]] kit.
+ * volga object witnesses for [[Pipe]] — shared [[HomU]] / [[ObjWitness]] kit.
  * Reference: modules/volga-core/.../free/FreeU.scala
  */
 
 package zio.pdf.pipe
 
-import volga.ObAliases
+object PipeObjects extends EvalObAliases[HomU] {
 
-object PipeObjects extends ObAliases[WitnessU] {
-
-  type U[t] = WitnessU[t]
+  type U[t] = HomU[t]
 
   export WitnessObjects.{ob, tagOb, monoidalObjects, zeroOb, sumOb, scalaObjects}
 }

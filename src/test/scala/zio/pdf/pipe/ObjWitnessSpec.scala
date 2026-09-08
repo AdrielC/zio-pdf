@@ -6,16 +6,25 @@ object ObjWitnessSpec extends ZIOSpecDefault {
 
   def spec: Spec[Any, Any] = suite("ObjWitness")(
     test("witnesses are distinct real objects (not null)") {
-      val unit = ObjWitness.UnitObj
+      val one  = ObjWitness.One
       val int  = ObjWitness.Tag[Int]()
       val str  = ObjWitness.Tag[String]()
       val prod = ObjWitness.Prod(int, str)
       assertTrue(
-        unit ne null,
+        one ne null,
         int ne null,
         str ne null,
         prod ne null,
         prod.isInstanceOf[ObjWitness.Prod[Int, String]]
+      )
+    },
+    test("One and Zero are witnesses like volga FreeObj (not plain Unit/Nothing)") {
+      val unitOb = WitnessObjects.monoidalObjects.unitOb
+      val zeroOb = WitnessObjects.zeroOb
+      assertTrue(
+        unitOb eq ObjWitness.One,
+        zeroOb eq ObjWitness.Zero,
+        unitOb.isInstanceOf[ObjWitness.One.type]
       )
     },
     test("tensorOb builds Prod witnesses like volga FreeU") {
@@ -31,7 +40,12 @@ object ObjWitnessSpec extends ZIOSpecDefault {
     test("Ob evidence is a witness, not a plain Int") {
       import PipeObjects.Ob
       val wit: Ob[Int] = ObjWitness.Tag[Int]()
-      assertTrue(wit.isInstanceOf[ObjWitness[Int]], !wit.equals(0))
+      assertTrue(wit.isInstanceOf[ObjWitness.Tag[Int]], !wit.equals(0))
+    },
+    test("hom-sets erase to plain Scala via EvalU") {
+      val _: EvalU[volga.tags.One]                  = ()
+      val _: EvalU[volga.tags.Tensor[Int, String]] = (0, "")
+      assertTrue(true)
     }
   )
 }

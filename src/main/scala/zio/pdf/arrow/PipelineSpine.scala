@@ -87,9 +87,18 @@ object PipelineSpine {
 
   /** Best-effort wiring view from an analyzed [[ScanGraph]]. */
   def schemaToWiring(schema: ScanGraph, inputLabel: String): GraphRender.Wiring = {
-    val internal   = collectEdges(schema).distinct.filterNot { case (a, b) => a == b }
-    val remapped   = internal.map { case (a, b) =>
-      (if a == GraphSummary.InputPort then inputLabel else a) -> b
+    val internal = collectEdges(schema).distinct.filterNot { case (a, b) => a == b }
+    val portSources =
+      internal.collect { case (a, GraphSummary.InputPort) if a != GraphSummary.InputPort => a }.distinct
+    def resolveSource(from: String): String =
+      if from == GraphSummary.InputPort then portSources match {
+        case Seq(single) => single
+        case _           => inputLabel
+      }
+      else from
+    val remapped = internal.flatMap { case (a, b) =>
+      if b == GraphSummary.InputPort then Vector.empty
+      else Vector(resolveSource(a) -> b)
     }
     val nodeNames  = ScanGraph.nodeNames(schema)
     val incoming   = remapped.map(_._2).toSet

@@ -53,6 +53,21 @@ object PipelineSpineSpec extends ZIOSpecDefault {
       val direct = FreePipe.fold(fp)
       assertTrue(PipelineSpine.run(spine).run(4) == direct.run(4))
     },
+    test("nested fanout mermaid fans from upstream node not global input") {
+      type B = Array[Byte]
+      val id = Pipe[B, B](identity)
+      val slice = PipelineSpine.node("slice", 1, 1)(id)
+      val left  = PipelineSpine.node("left", 1, 1)(id)
+      val inner = PipelineSpine.node("inner-a", 1, 1)(id) &&& PipelineSpine.node("inner-b", 1, 1)(id)
+      val spine = slice >>> (left &&& inner)
+      val mermaid = PipelineSpine.render("nested", spine, "bytes").mermaid
+      assertTrue(
+        mermaid.contains("slice --> left"),
+        mermaid.contains("slice --> inner-a"),
+        mermaid.contains("slice --> inner-b"),
+        !mermaid.contains("bytes --> inner-a")
+      )
+    },
     test("planFromFlow matches PipelineFlow schema") {
       val flow = PipelineFlow.init("demo").input[Int]("x").pipe("inc")(Pipe(_ + 1)).build
       val plan = PipelineSpine.planFromFlow(flow)
