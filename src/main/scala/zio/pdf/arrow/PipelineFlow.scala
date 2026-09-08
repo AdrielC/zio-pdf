@@ -46,13 +46,11 @@ object PipelineFlow {
   def andThen[In, Mid, Out](left: Flow[In, Mid], right: Flow[Mid, Out]): Flow[In, Out] =
     left.andThen(right)
 
-  /** Parallel on shared input (Kyo Flow `.zip`). */
+  /** Parallel on shared input (Kyo Flow `.zip`) — honest fan-out in the AST. */
   def zip[In, A, B](left: Flow[In, A], right: Flow[In, B]): Flow[In, (A, B)] =
     Flow(
       name       = s"${left.name}+${right.name}",
-      graph      = PipelineGraph.node(s"zip:${left.name}+${right.name}", 1, 1) {
-        Pipe[In, (A, B)](in => (left.runLocal(in), right.runLocal(in)))
-      },
+      graph      = FreeArrow.fanout(left.graph, right.graph),
       inputLabel = left.inputLabel
     )
 

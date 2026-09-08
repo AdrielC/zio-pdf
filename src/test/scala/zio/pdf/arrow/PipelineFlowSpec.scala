@@ -33,11 +33,17 @@ object PipelineFlowSpec extends ZIOSpecDefault {
       val both = PipelineFlow.andThen(inc, dbl)
       assertTrue(both.runLocal(3) == 8)
     },
-    test("zip runs parallel branches") {
+    test("zip runs parallel branches with honest fan-out graph") {
       val left  = PipelineFlow.init("l").input[Int]("x").pipe("a")(Pipe(_ + 1)).build
       val right = PipelineFlow.init("r").input[Int]("x").pipe("b")(Pipe(_ * 10)).build
       val both  = PipelineFlow.zip(left, right)
-      assertTrue(both.runLocal(2) == (3, 20))
+      val names = ScanGraph.nodeNames(both.schema)
+      assertTrue(
+        both.runLocal(2) == (3, 20),
+        names.contains("a"),
+        names.contains("b"),
+        !names.contains("zip:l+r")
+      )
     },
     test("dispatch first-match branch") {
       val flow = PipelineFlow

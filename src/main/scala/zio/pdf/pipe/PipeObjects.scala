@@ -1,5 +1,5 @@
 /*
- * Scala-object interpreter for [[Cat]] — objects are plain types.
+ * Scala-object interpreter for volga [[Cat]] — objects are plain types.
  *
  * Pattern matches volga `FreeU`: `PipeU` at package scope, nested
  * `monoidalObjects` / `scalaObjects` givens under [[PipeObjects]].
@@ -8,7 +8,8 @@
 
 package zio.pdf.pipe
 
-import zio.pdf.pipe.tags.*
+import volga.*
+import volga.tags.*
 
 type PipeU[t] = t match
   case Obj[a]        => a
@@ -30,10 +31,6 @@ object PipeObjects extends ObAliases[PipeU]:
   given monoidalObjects: MonoidalObjects[PipeU] with
     given unitOb: Ob[I]                     = ob
     given tensorOb[A: Ob, B: Ob]: Ob[A x B] = ob
-
-  given cocartesianObjects: CocartesianObjects[PipeU] with
-    given zeroOb: Ob[O]                     = ob
-    given sumOb[A: Ob, B: Ob]: Ob[A + B]   = ob
 
   given scalaObjects: ScalaObjects[PipeU] with
     given scalaOb[A]: Ob[$[A]] = ob

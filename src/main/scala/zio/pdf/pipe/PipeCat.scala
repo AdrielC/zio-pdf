@@ -4,8 +4,8 @@
 
 package zio.pdf.pipe
 
+import volga.*
 import PipeObjects.U
-import PipeObjects.cocartesianObjects
 import PipeObjects.monoidalObjects
 import PipeObjects.scalaObjects
 
@@ -53,6 +53,8 @@ object PipeCat:
 
   /** Sum-side structure over `Either` / `Nothing` — volga `CocartesianCat`. */
   given pipeCocartesian: CocartesianCat[Pipe, U] with
+    given zeroOb: Ob[O]                   = PipeObjects.ob
+    given sumOb[A: Ob, B: Ob]: Ob[A + B] = PipeObjects.ob
     export pipeCat.{identity, compose}
     def initial[A: Ob]: Pipe[Nothing, A] =
       Pipe((n: Nothing) => n)
@@ -63,6 +65,8 @@ object PipeCat:
 
   /** Cartesian × cocartesian distributive laws — volga `DistributiveCat`. */
   given pipeDistributive: DistributiveCat[Pipe, U] with
+    given zeroOb: Ob[O]                   = PipeObjects.ob
+    given sumOb[A: Ob, B: Ob]: Ob[A + B] = PipeObjects.ob
     export pipeCartesian.{
       identity,
       compose,
