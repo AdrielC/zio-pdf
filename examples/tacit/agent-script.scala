@@ -1,23 +1,43 @@
-// Paste into TACIT REPL (after wiring zio-pdf into the library — see README.md).
-//
-// Capability-safe PDF ingest: inspect wiring (pure), then read + run (effects).
+// TACIT agent script — Kyo Flow / volga-style pipeline composition.
+// Paste into TACIT REPL after wiring zio-pdf (see README.md).
 
 import language.experimental.safe
 import tacit.library.*
-import zio.pdf.tacit.PdfPipeline
+import zio.pdf.arrow.*
+import zio.pdf.tacit.*
+import zio.pdf.pipe.*
 
 requestFileSystem("/workspace") {
   requestPdfPipeline {
-    // Pure — no bytes read yet; agent can verify the graph before execution
-    val plan = pdfPlanFused("court-ingest")
-    println("=== ingest graph (mermaid) ===")
-    println(plan.mermaid)
-    println(s"nodes: ${plan.nodes.mkString(" → ")}")
-    println(s"edges: ${plan.edges.mkString(", ")}")
 
-    // Effect — only under granted filesystem root
-    val pdf = access("/workspace/src/test/resources/empty-kids.pdf")
-    val summary = pdfRunFused(pdf.readBytes())
+    // ── Kyo Flow style (fluent named steps) ─────────────────────────────
+    val ingest = PipelineFlow
+      .init("court-ingest")
+      .input[Array[Byte]]("bytes")
+      .pipe("slice")(DecodePipeline.sliceWhole)
+      .pipe("hyperfuse-decode-digest") {
+        Pipe(slice => IngestPipeline.fusedDecodeAndDigest(slice, FusedDecode.Cfg()))
+      }
+      .build
+
+    println(ingest.renderMermaid)
+
+    val bytes   = access("/workspace/src/test/resources/empty-kids.pdf").readBytes()
+    val summary = PdfFlow.runIngest(ingest, bytes)
     println(s"decoded=${summary.decodedCount} digest=${summary.digestHex.take(32)}...")
+
+    // ── Or use canonical PDF recipes ────────────────────────────────────
+    val fused = PdfFlow.ingestFused()
+    println(PdfFlow.planOf(fused).nodes.mkString(" → "))
+
+    // ── Volga SMC wiring (port graph, single edge) ──────────────────────
+    import volga.free.Nat
+    import volga.syntax.smc.V
+    type V1 = V[Nat.`1`]
+    val wiring = PipelineFlow.wiring[Nat.`1`, Nat.`0`]("wiring", Tuple1("bytes")) { prop =>
+      val fuse = ArrowSyntax.node("hyperfuse-decode-digest", 1, 0)
+      prop.of1((v: V1) => fuse(v))
+    }
+    println(wiring.mermaid)
   }
 }
