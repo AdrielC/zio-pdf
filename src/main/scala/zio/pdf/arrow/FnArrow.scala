@@ -19,12 +19,20 @@ final case class FnArrow[A, B](private val f: A => B) extends Arrow[A, B] {
   inline infix def ***[C, D](inline g: FnArrow[C, D]): FnArrow[(A, C), (B, D)] =
     FnArrow { case (a, c) => (f(a), g.f(c)) }
 
-  /** Invariant wiring label + optional graph metadata for [[ScanGraph.analyze]]. */
-  def labeled(name: String): LabeledFnArrow[A, B] = LabeledFnArrow(name, this)
+  /** Invariant wiring label + port arity for [[ScanGraph.analyze]] / volga diagrams. */
+  def labeled(name: String, inPorts: Int = 1, outPorts: Int = 1): LabeledFnArrow[A, B] =
+    LabeledFnArrow(name, this, inPorts, outPorts)
 }
 
-/** [[FnArrow]] tagged with a stable node name for wiring / schema graphs. */
-final case class LabeledFnArrow[A, B](name: String, arrow: FnArrow[A, B])
+/** [[FnArrow]] tagged with stable ports for wiring / durable [[ScanGraph]] schemas. */
+final case class LabeledFnArrow[A, B](
+    name:     String,
+    arrow:    FnArrow[A, B],
+    inPorts:  Int = 1,
+    outPorts: Int = 1
+) {
+  def run(in: A): B = arrow.run(in)
+}
 
 object FnArrow {
 

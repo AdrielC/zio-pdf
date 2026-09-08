@@ -22,6 +22,9 @@ sealed abstract class FreeArrow[Flow[_, _], In, Out] {
 
   final def compile[G[_, _]](fg: Flow ~~> G)(using G: Category[G]): G[In, Out] =
     foldMap(fg)
+
+  /** Reassociate nested `Seq` before interpretation (volga / [[zio.pdf.pipe.FreePipe.flatten]]). */
+  final def flatCompile: FreeArrow[Flow, In, Out] = FreeArrow.flatten(self)
 }
 
 object FreeArrow {
@@ -34,6 +37,18 @@ object FreeArrow {
   def ident[Flow[_, _], A]: FreeArrow[Flow, A, A] = Id()
 
   def embed[Flow[_, _], A, B](f: Flow[A, B]): FreeArrow[Flow, A, B] = Embed(f)
+
+  def embedLabeled[A, B](node: LabeledFnArrow[A, B]): FreeArrow[LabeledFnArrow, A, B] = Embed(node)
+
+  /** Reassociate left-nested `Seq` chains (same strategy as [[zio.pdf.pipe.FreePipe.flatten]]). */
+  def flatten[Flow[_, _], A, B](fa: FreeArrow[Flow, A, B]): FreeArrow[Flow, A, B] = fa match {
+    case Seq(l, r) =>
+      (flatten(l), flatten(r)) match {
+        case (Seq(l2, m), r2) => Seq(l2, Seq(m, r2))
+        case (l2, r2)         => Seq(l2, r2)
+      }
+    case other => other
+  }
 
   def sequential[Flow[_, _], A, M, B](
       left:  FreeArrow[Flow, A, M],
@@ -91,5 +106,13 @@ object FreeArrow {
 
     infix def &&&[C](right: FreeArrow[Flow, A, C])(using F: Category[Flow]): FreeArrow[Flow, A, Prod[B, C]] =
       fanout(self, right)
+  }
+
+  extension [In, Out](self: FreeArrow[LabeledFnArrow, In, Out]) {
+    /** Invariant graph summary via [[BiConst]] / [[GraphSummary]]. */
+    def analyze: ScanGraph = {
+      val summary = flatten(self).foldMap(BiConst.labeledAnalyze)(using BiConst.graphSummaryCategory)
+      GraphSummary.toScanGraph(BiConst.getConst(summary))
+    }
   }
 }
