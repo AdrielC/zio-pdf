@@ -4,10 +4,18 @@ This GitHub repository is the public source and release project. Every change in
 
 ## Workflow
 
-1. Clone `https://github.com/AdrielC/zio-pdf.git` and branch from `main`.
-2. Keep byte streams incremental. Any collecting helper must state and enforce its bound or return a type whose full materialization is the method's explicit contract.
-3. Keep public decode APIs on `PdfEngine`, `PdfStream`, and `PdfIO`. Use `PdfObjectScanner` for bounded structural observation.
-4. Run:
+1. Clone with submodules (required for the volga reference tree under `modules/volga`):
+
+   ```bash
+   git clone --recurse-submodules https://github.com/AdrielC/zio-pdf.git
+   # or, after a plain clone:
+   git submodule update --init --recursive
+   ```
+
+2. Branch from `main`.
+3. Keep byte streams incremental. Any collecting helper must state and enforce its bound or return a type whose full materialization is the method's explicit contract.
+4. Keep public decode APIs on `PdfEngine`, `PdfStream`, and `PdfIO`. Use `PdfObjectScanner` for bounded structural observation.
+5. Run:
 
    ```bash
    npm ci

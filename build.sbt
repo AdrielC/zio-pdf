@@ -57,7 +57,28 @@ ThisBuild / scalacOptions ++= List(
   "-Werror"
 )
 
+lazy val purgeStaleJmhGenerated = taskKey[Unit]("Remove cached JMH classes from deleted benchmarks")
+
+/**
+ * [tofu-tf/volga](https://github.com/tofu-tf/volga) core (git submodule at
+ * `modules/volga`). Provides FreeProp wiring diagrams, SMC pipeline syntax
+ * macros, and the symmetric-monoidal category kit consumed by `zio.pdf.arrow`.
+ */
+lazy val volgaCore = (project in file("modules/volga/modules/core"))
+  .settings(
+    name           := "volga-core",
+    publish / skip := true,
+    Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala-3",
+    Test / scalaSource    := baseDirectory.value / "src" / "test" / "scala",
+    scalacOptions := (ThisBuild / scalacOptions).value.filterNot(o => o == "-Werror" || o.startsWith("-Wunused")) ++ List(
+      "-Xkind-projector:underscores",
+      "-Yshow-suppressed-errors"
+    ),
+    libraryDependencies += "org.scalameta" %% "munit" % "1.0.0-M7" % Test
+  )
+
 lazy val root = (project in file("."))
+  .dependsOn(volgaCore)
   .settings(
     name := "zio-pdf",
     libraryDependencies ++= List(
@@ -182,8 +203,6 @@ lazy val scalaJsFrontend = (project in file("examples-js"))
  * (-i = measurement iterations, -wi = warmup iterations,
  *  -f = forks, -t = threads).
  */
-lazy val purgeStaleJmhGenerated = taskKey[Unit]("Remove cached JMH classes from deleted benchmarks")
-
 lazy val bench = (project in file("bench"))
   .enablePlugins(JmhPlugin)
   .dependsOn(root)
