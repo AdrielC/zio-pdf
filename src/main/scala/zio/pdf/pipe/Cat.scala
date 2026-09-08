@@ -163,10 +163,12 @@ trait CartesianCat[H[_, _], U[_]] extends SymmetricCat[H, U]:
     extension [A: Ob, B: Ob](f: A --> B) def <>[C: Ob](g: A --> C): A --> (B x C) = product(f, g)
 end CartesianCat
 
-trait CocartesianCat[H[_, _], U[_]] extends Cat[H, U]:
+trait CocartesianObjects[U[_]] extends ObAliases[U]:
     given zeroOb: Ob[O]
     given sumOb[A: Ob, B: Ob]: Ob[A + B]
 
+trait CocartesianCat[H[_, _], U[_]](using objects: CocartesianObjects[U]) extends Cat[H, U]:
+    export objects.given
     def initial[A: Ob]: O --> A
 
     def injectLeft[A: Ob, B: Ob]: A --> (A + B)

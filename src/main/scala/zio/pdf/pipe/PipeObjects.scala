@@ -28,8 +28,12 @@ object PipeObjects extends ObAliases[PipeU]:
   def ob[A]: Ob[A] = null.asInstanceOf[Ob[A]]
 
   given monoidalObjects: MonoidalObjects[PipeU] with
-    given unitOb: Ob[I]                              = ob
-    given tensorOb[A: Ob, B: Ob]: Ob[A x B]          = ob
+    given unitOb: Ob[I]                     = ob
+    given tensorOb[A: Ob, B: Ob]: Ob[A x B] = ob
+
+  given cocartesianObjects: CocartesianObjects[PipeU] with
+    given zeroOb: Ob[O]                     = ob
+    given sumOb[A: Ob, B: Ob]: Ob[A + B]   = ob
 
   given scalaObjects: ScalaObjects[PipeU] with
     given scalaOb[A]: Ob[$[A]] = ob
