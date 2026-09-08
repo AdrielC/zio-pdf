@@ -60,16 +60,18 @@ ThisBuild / scalacOptions ++= List(
 lazy val purgeStaleJmhGenerated = taskKey[Unit]("Remove cached JMH classes from deleted benchmarks")
 
 /**
- * [tofu-tf/volga](https://github.com/tofu-tf/volga) core (git submodule at
- * `modules/volga`). Provides FreeProp wiring diagrams, SMC pipeline syntax
- * macros, and the symmetric-monoidal category kit consumed by `zio.pdf.arrow`.
+ * Vendored volga core (`modules/volga-core`) — FreeProp wiring diagrams, SMC
+ * pipeline syntax macros, and symmetric-monoidal category kit for `zio.pdf.arrow`.
+ * Forked from tofu-tf/volga with Scala 3.8 SMC parsing fixes; see module README.
  */
-lazy val volgaCore = (project in file("modules/volga/modules/core"))
+lazy val volgaCore = (project in file("modules/volga-core"))
   .settings(
     name           := "volga-core",
     publish / skip := true,
     Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala-3",
     Test / scalaSource    := baseDirectory.value / "src" / "test" / "scala",
+    // Upstream volga diag tests need PlantUML/GUI; zio-pdf covers SMC via ArrowSyntaxSpec.
+    Test / sources := Seq.empty,
     scalacOptions := (ThisBuild / scalacOptions).value.filterNot(o => o == "-Werror" || o.startsWith("-Wunused")) ++ List(
       "-Xkind-projector:underscores",
       "-Yshow-suppressed-errors"

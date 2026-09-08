@@ -4,12 +4,10 @@ This GitHub repository is the public source and release project. Every change in
 
 ## Workflow
 
-1. Clone with submodules (required for the volga reference tree under `modules/volga`):
+1. Clone the repository:
 
    ```bash
-   git clone --recurse-submodules https://github.com/AdrielC/zio-pdf.git
-   # or, after a plain clone:
-   git submodule update --init --recursive
+   git clone https://github.com/AdrielC/zio-pdf.git
    ```
 
 2. Branch from `main`.

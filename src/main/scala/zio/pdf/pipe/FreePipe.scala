@@ -4,7 +4,7 @@
  * Use when stages are assembled dynamically (config, plugins) and you still
  * want volga reassociation before interpretation.
  *
- * Reference: modules/volga/.../free/FreeCat.scala
+ * Reference: modules/volga-core/.../free/FreeCat.scala
  */
 
 package zio.pdf.pipe

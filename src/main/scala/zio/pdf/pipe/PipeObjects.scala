@@ -3,7 +3,7 @@
  *
  * Pattern matches volga `FreeU`: `PipeU` at package scope, nested
  * `monoidalObjects` / `scalaObjects` givens under [[PipeObjects]].
- * Reference: modules/volga/.../free/FreeU.scala
+ * Reference: modules/volga-core/.../free/FreeU.scala
  */
 
 package zio.pdf.pipe

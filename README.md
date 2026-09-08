@@ -403,9 +403,9 @@ Production invariants are recorded in [`docs/PRODUCTION_INVARIANTS.md`](docs/PRO
 | `examples/` | runnable JVM examples (PDFBox optional for rendered thumbnails) | no |
 | `bench/`, `bench-fs2/` | JMH projects | no |
 | `legacy/` | archived fs2-pdf source for provenance | no |
-| `modules/volga/` | [tofu-tf/volga](https://github.com/tofu-tf/volga) git submodule — reference SMC / arrow algebra for `zio.pdf.pipe` / `zio.pdf.arrow` | no |
+| `modules/volga-core/` | Vendored [tofu-tf/volga](https://github.com/tofu-tf/volga) core (SMC / FreeProp) for `zio.pdf.arrow` | no |
 
-Clone with `git clone --recurse-submodules` (or run `git submodule update --init --recursive` after clone). CI checkouts initialize submodules automatically.
+Plain `git clone` is enough — no submodules.
 
 ## Release process
 

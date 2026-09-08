@@ -1,3 +1,0 @@
-[submodule "modules/volga"]
-	path = modules/volga
-	url = https://github.com/tofu-tf/volga.git

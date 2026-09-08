@@ -43,3 +43,4 @@ examples-js/frontend/tsconfig.tsbuildinfo
 .cursor/
 bench/jmh-result.csv
 project/metals.sbt
+tacit/

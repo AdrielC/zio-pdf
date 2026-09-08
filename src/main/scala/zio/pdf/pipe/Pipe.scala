@@ -6,7 +6,7 @@
  * Full [[CartesianCat]] instance: [[PipeCat.pipeCartesian]].
  * Full [[CocartesianCat]] / [[DistributiveCat]]: [[PipeCat]].
  * volga `Arr` / `ArrChoice` extensions: [[PipeArrow]].
- * Reference SMC: modules/volga (git submodule).
+ * Reference SMC: modules/volga-core (vendored volga).
  */
 
 package zio.pdf.pipe

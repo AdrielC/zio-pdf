@@ -1,5 +1,5 @@
 /*
- * Volga `State` / `StateCont` — see modules/volga/.../functors/State.scala
+ * Volga `State` / `StateCont` — see modules/volga-core/.../functors/State.scala
  * Cont composition reassociates binds the same way FreeScan flattens AndThen.
  */
 

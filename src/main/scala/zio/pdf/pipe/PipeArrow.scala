@@ -4,7 +4,7 @@
  * Projection helpers live on [[Pipe.proj1]] / [[Pipe.proj2]] (volga `proj1`/`proj2`).
  * Morphism threading uses extension methods here (`first`, `second`, `left`, `right`).
  *
- * Reference: modules/volga/.../old/core/.../Arr.scala
+ * Reference: modules/volga-core/.../old/core/.../Arr.scala
  */
 
 package zio.pdf.pipe
