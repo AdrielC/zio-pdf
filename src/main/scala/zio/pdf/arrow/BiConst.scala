@@ -43,7 +43,7 @@ object BiConst {
         f: BiConst[GraphSummary, A, C],
         g: BiConst[GraphSummary, B, C]
     ): BiConst[GraphSummary, Sum[A, B], C] =
-      BiConst(GraphSummary.par(BiConst.getConst(f), BiConst.getConst(g)))
+      BiConst(GraphSummary.fanin(BiConst.getConst(f), BiConst.getConst(g)))
 
     def choose[A: Ob, B: Ob, C: Ob, D: Ob](
         f: BiConst[GraphSummary, A, C],

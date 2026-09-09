@@ -48,7 +48,7 @@ object PipelineGraph {
       graph:  FreeProp[ArrowSyntax.Label, I, J],
       inputs: Nat.Vec[I, String]
   ): GraphFormats =
-    ArrowSyntax.render(title, graph, inputs)
+    ArrowSyntax.render(title, graph, inputs.toVector*)
 
   def renderGraph[A, B](title: String, graph: FreeArrow[Node, A, B], inputLabel: String): GraphFormats =
     PipelineSpine.render(title, graph, inputLabel)

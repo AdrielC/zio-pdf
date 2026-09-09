@@ -11,9 +11,16 @@ import zio.pdf.pipe.Pipe
  * Structure is analyzed to [[ScanGraph]] and rendered as Mermaid/DOT like
  * [kyo-flow](https://getkyo.io/latest/kyo-flow/) diagrams.
  *
- * Volga SMC wiring (`PipelineFlow.wiring(...)(prop.ofN { ... })`) is for port-level graphs.
+ * Volga SMC wiring — construct with `prop.of0` / `of1` / `of2`; port arities are
+ * inferred from the block, not declared upfront. Only boundary labels (if any) are
+ * given at render time.
  */
 object PipelineFlow {
+
+  type Prop = volga.syntax.smc.Syntax[ArrowSyntax.Diag, PropOb, Nat.Plus]
+
+  /** Inline SMC syntax — `prop.of1 { … }`, `prop.of0 { … }`, etc. */
+  def prop: Prop = PipelineGraph.wiringProp
 
   final case class Flow[In, Out](
       name:       String,
@@ -100,11 +107,18 @@ object PipelineFlow {
     }
   }
 
-  /** Volga SMC wiring (port graphs). */
-  def wiring[I: Nat, J: Nat](title: String, inputs: Nat.Vec[I, String])(
-      build: volga.syntax.smc.Syntax[ArrowSyntax.Diag, PropOb, Nat.Plus] => FreeProp[ArrowSyntax.Label, I, J]
-  ): GraphFormats =
-    PipelineGraph.renderProp(title, build(PipelineGraph.wiringProp), inputs)
+  /**
+   * Render volga SMC wiring — construct with `prop.of0` / `of1` / `of2` / … inside the block.
+   * Input/output arity (`I`, `J`) is inferred from the returned [[FreeProp]]; boundary
+   * labels are optional (defaults: `in`, `in1`, …).
+   *
+   * {{{
+   * PipelineFlow.wiring("demo") { prop.of0 { … } }
+   * PipelineFlow.wiring("demo", "brief.pdf") { prop.of1 { v => … } }
+   * }}}
+   */
+  def wiring[I: Nat, J: Nat](title: String, labels: String*)(block: Prop ?=> FreeProp[ArrowSyntax.Label, I, J]): GraphFormats =
+    ArrowSyntax.render(title, block(using prop), labels*)
 
   final class Init private[PipelineFlow] (val name: String) {
     def input[In](label: String = "in"): Start[In] =

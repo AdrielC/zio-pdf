@@ -40,11 +40,13 @@ object PipelineSpineSpec extends ZIOSpecDefault {
     test("fanout mermaid fans input to both branches") {
       val left  = PipelineSpine.node("left", 1, 1)(Pipe[Int, Int](_ + 1))
       val right = PipelineSpine.node("right", 1, 1)(Pipe[Int, Int](_ * 10))
-      val mermaid = PipelineSpine.render("fan", left &&& right, "bytes").mermaid
+      val formats = PipelineSpine.render("fan", left &&& right, "bytes")
+      val edges   = formats.wiring._2
       assertTrue(
-        mermaid.startsWith("flowchart LR"),
-        mermaid.contains("bytes --> left"),
-        mermaid.contains("bytes --> right")
+        formats.mermaid.startsWith("flowchart LR"),
+        edges.contains("bytes" -> GraphSummary.FanOp),
+        edges.contains(GraphSummary.FanOp -> "left"),
+        edges.contains(GraphSummary.FanOp -> "right")
       )
     },
     test("fromFreePipe structural round-trip matches fold") {
@@ -60,12 +62,14 @@ object PipelineSpineSpec extends ZIOSpecDefault {
       val left  = PipelineSpine.node("left", 1, 1)(id)
       val inner = PipelineSpine.node("inner-a", 1, 1)(id) &&& PipelineSpine.node("inner-b", 1, 1)(id)
       val spine = slice >>> (left &&& inner)
-      val mermaid = PipelineSpine.render("nested", spine, "bytes").mermaid
+      val formats = PipelineSpine.render("nested", spine, "bytes")
+      val edges   = formats.wiring._2
       assertTrue(
-        mermaid.contains("slice --> left"),
-        mermaid.contains("slice --> inner-a"),
-        mermaid.contains("slice --> inner-b"),
-        !mermaid.contains("bytes --> inner-a")
+        edges.contains("slice" -> GraphSummary.FanOp),
+        edges.contains(GraphSummary.FanOp -> "left"),
+        edges.contains(GraphSummary.FanOp -> "inner-a"),
+        edges.contains(GraphSummary.FanOp -> "inner-b"),
+        !edges.contains("bytes" -> "inner-a")
       )
     },
     test("planFromFlow matches PipelineFlow schema") {
