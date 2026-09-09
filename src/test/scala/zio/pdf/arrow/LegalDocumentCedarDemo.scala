@@ -132,22 +132,22 @@ object LegalDocumentCedarDemo extends ZIOSpecDefault {
         !m.contains("⟨in⟩")
       )
     },
-    test("arrows wiring: of2 arity from construction (volga SyntaxTest complex-3 shape)") {
+    test("arrows wiring: of2 join chain to export (producer → consumer)") {
       type V1 = V[Nat.`1`]
-      val formats = PipelineFlow.wiring("legal-join", "left-in", "right-in") {
+      val formats = PipelineFlow.wiring("legal-join", "structure-attest", "entity-attest") {
         PipelineFlow.prop.of2 { (s: V1, e: V1) =>
           ArrowSyntax.node("structure-attest", 1, 0)(s)
           ArrowSyntax.node("entity-attest", 1, 0)(e)
           val merge = ArrowSyntax.node(GraphSummary.MergeOp, 0, 1)()
-          merge
+          ArrowSyntax.node("legal-export-bundle", 1, 0)(merge)
         }
       }
-      println("\n===== LEGAL JOIN (discovered wiring) =====\n")
+      println("\n===== LEGAL JOIN (produce → consume) =====\n")
       println(formats.mermaid)
       assertTrue(
-        formats.mermaid.contains("left-in --> structure-attest"),
-        formats.mermaid.contains("right-in --> entity-attest"),
-        formats.wiring._1.contains("|||")
+        formats.wiring._2.contains("structure-attest" -> "structure-attest"),
+        formats.wiring._2.contains("entity-attest" -> "entity-attest"),
+        formats.wiring._2.exists(e => e._1 == GraphSummary.MergeOp && e._2 == "legal-export-bundle")
       )
     },
   )
