@@ -1,5 +1,6 @@
 import org.scalajs.linker.interface.ModuleKind
 import org.scalajs.sbtplugin.ScalaJSPlugin
+import scala.scalanative.sbtplugin.ScalaNativePlugin
 
 val zioVersion                 = "2.1.26"
 val zioPreludeVersion          = "1.0.0-RC47"
@@ -8,6 +9,8 @@ val zioBlocksMediaTypeVersion  = "0.0.51"
 val zioBlocksRingbufferVersion = "0.0.51"
 val zioBlocksChunkVersion      = "0.0.51"
 val zioBlocksStreamsVersion    = "0.0.51"
+/** Latest zio-blocks artifacts published for Scala Native (chunk/schema/streams only). */
+val zioBlocksNativeVersion     = "0.0.14"
 val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.5"
 val scalaJsDomVersion          = "2.8.1"
@@ -141,6 +144,58 @@ private def jsSharedSources(base: File): Seq[File] = {
   }
 }
 
+private val nativeExcludedSourcePaths = (jsExcludedSourcePaths -- Set(
+  "zio/pdf/FlateDecode.scala",
+  "zio/pdf/FilterEncode.scala",
+  "zio/pdf/EvidenceDigestPlatform.scala"
+)) ++ Set(
+  "zio/pdf/BlocksLift.scala",
+  "zio/pdf/PdfMime.scala"
+) ++ Set(
+  "ArrowObjects.scala",
+  "BiConst.scala",
+  "BiFunctionK.scala",
+  "Category.scala",
+  "FnArrowCat.scala",
+  "FnArrow.scala",
+  "FreeArrow.scala",
+  "GraphRender.scala",
+  "GraphSummary.scala",
+  "IngestGraph.scala",
+  "LabeledFnArrowCat.scala",
+  "PipelineFlow.scala",
+  "PipelineGraph.scala",
+  "PipelineSpine.scala",
+  "ScanGraph.scala",
+  "WiringBoundary.scala"
+).map(name => s"zio/pdf/arrow/$name") ++ Set(
+  "PdfFlow.scala",
+  "PdfPipeline.scala",
+  "PdfPipes.scala"
+).map(name => s"zio/pdf/tacit/$name")
+
+private def nativeSharedSources(base: File): Seq[File] = {
+  val sourceRoot = base / "src" / "main" / "scala"
+  (sourceRoot ** "*.scala").get().filter { source =>
+    IO.relativize(sourceRoot, source).forall(path => !nativeExcludedSourcePaths.contains(path))
+  }
+}
+
+private val nativeExcludedTestPaths = Set(
+  "zio/pdf/arrow",
+  "zio/pdf/pipe",
+  "zio/scodec/stream/ZioBlocksRingbufferSmokeSpec.scala",
+  "zio/pdf/ScannerLiftPerfBench.scala"
+)
+
+private def nativeSharedTests(base: File): Seq[File] = {
+  val sourceRoot = base / "src" / "test" / "scala"
+  (sourceRoot ** "*.scala").get().filter { source =>
+    val rel = IO.relativize(sourceRoot, source).getOrElse("")
+    nativeExcludedTestPaths.forall(excluded => !rel.startsWith(excluded) && rel != excluded)
+  }
+}
+
 /**
  * Browser / Node.js artifact. Shared parser code continues to live in the
  * primary source tree; JVM-only I/O, mmap, and crypto implementations are
@@ -180,6 +235,45 @@ lazy val scalaJs = (project in file("js"))
       (LocalRootProject / Test / resourceDirectory).value,
     Test / fork := false,
     scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+/** Flip to true once zio-blocks publishes Native 0.0.51+ artifacts. */
+private val NativeIncludeSharedSources = false
+
+/**
+ * Linux/macOS native artifact. JVM-only mmap, pipe fusion, and arrow/tacit
+ * wiring are excluded; platform I/O lives under `native/src` (posix read today,
+ * io_uring backend stub for phase 2).
+ */
+lazy val native = (project in file("native"))
+  .enablePlugins(ScalaNativePlugin)
+  .settings(
+    name := "zio-pdf",
+    libraryDependencySchemes += "org.scala-native" % "test-interface_native0.5_3" % "always",
+    Compile / unmanagedSources := {
+      val platform = (baseDirectory.value / "src" / "main" / "scala") ** "*.scala"
+      if NativeIncludeSharedSources then
+        val repo = (LocalRootProject / baseDirectory).value
+        nativeSharedSources(repo) ++ platform.get()
+      else platform.get()
+    },
+    Test / unmanagedSources := {
+      val platform = (baseDirectory.value / "src" / "test" / "scala") ** "*.scala"
+      if NativeIncludeSharedSources then
+        val repo = (LocalRootProject / baseDirectory).value
+        nativeSharedTests(repo) ++ platform.get()
+      else platform.get()
+    },
+    libraryDependencies ++= List(
+      "dev.zio" % "zio_native0.5_3"         % zioVersion,
+      "dev.zio" % "zio-streams_native0.5_3" % zioVersion,
+      "dev.zio" % "zio-test_native0.5_3"    % zioVersion % Test,
+      "dev.zio" % "zio-test-sbt_native0.5_3" % zioVersion % Test
+    ),
+    Test / unmanagedResourceDirectories +=
+      (LocalRootProject / Test / resourceDirectory).value,
+    Test / fork := false,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 
