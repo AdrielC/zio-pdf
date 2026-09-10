@@ -12,8 +12,8 @@ effects with the official `kyo-zio` bridge.
 Internal coordinates:
 
 ```scala
-libraryDependencies += "com.tybera" %% "kyo-pdf"     % "0.2.0-internal.1"
-libraryDependencies += "com.tybera" %% "kyo-pdf-zio" % "0.2.0-internal.1" // optional
+libraryDependencies += "com.tybera" %% "kyo-pdf"     % "0.2.0-internal.2"
+libraryDependencies += "com.tybera" %% "kyo-pdf-zio" % "0.2.0-internal.2" // optional
 ```
 
 The original `zio-pdf` implementation remains in this repository as a parity
@@ -435,6 +435,19 @@ bash scripts/verify-external-consumer.sh
 ```
 
 The corpus suite checks exact hashes, fused-versus-streaming parity, object baselines, early downstream termination, content preservation, evidence extraction, and no-collection sink paths. The external-consumer script publishes to a fresh local Ivy repository and runs a separate sbt build against the resulting dependency.
+
+Run the decoded-graph round-trip gate over any additional local corpus without
+copying private PDFs into the repository:
+
+```bash
+scripts/run-kyo-pdf-corpus-gate.sh "/path/to/pdf-corpus"
+```
+
+The gate reads every nested `.pdf` without modifying it. Encrypted PDFs must be
+reported through the typed unsupported path. For every unencrypted PDF, Kyo
+decodes the retained graph, selects both the first and last page, writes each
+derivative, requires `qpdf --check` to pass without warnings, and decodes the
+derivative again.
 
 Production invariants are recorded in [`docs/PRODUCTION_INVARIANTS.md`](docs/PRODUCTION_INVARIANTS.md).
 
