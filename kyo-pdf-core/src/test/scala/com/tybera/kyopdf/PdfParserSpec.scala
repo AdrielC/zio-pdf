@@ -1,12 +1,25 @@
 package com.tybera.kyopdf
 
-import java.io.ByteArrayOutputStream
+import java.io.{ByteArrayOutputStream, File}
 import java.nio.charset.StandardCharsets.ISO_8859_1
+import java.nio.file.{Files, Path}
 import java.util.zip.DeflaterOutputStream
 import kyo.*
 import zio.test.*
 
 object PdfParserSpec extends ZIOSpecDefault:
+  private val qpdf = sys.env.get("PATH").toVector.flatMap(_.split(File.pathSeparator)).map(directory => Path.of(directory, "qpdf"))
+    .find(path => Files.isRegularFile(path) && Files.isExecutable(path))
+
+  private val courtFixtures = Vector(
+    "court-corpus/scotus-atlantic-richfield-slip-opinion.pdf",
+    "court-corpus/scotus-order-list-2025-05-19.pdf",
+    "court-corpus/ca4-bayramov-v-american-credit-acceptance.pdf",
+    "court-corpus/cafc-janich-v-collins.pdf",
+    "court-corpus/govinfo-district-court-order.pdf",
+    "court-corpus/oknd-general-order-2024-09.pdf"
+  )
+
   private def assemble(objects: List[String], trailer: String = ""): Array[Byte] =
     val out = new StringBuilder("%PDF-1.7\n")
     val offsets = objects.zipWithIndex.map { (obj, index) =>
@@ -46,6 +59,18 @@ object PdfParserSpec extends ZIOSpecDefault:
       s"<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length ${compressed.getBytes(ISO_8859_1).length} >>\nstream\n$compressed\nendstream"
     ))
 
+  private def twoPagePdf: Array[Byte] =
+    val first = "BT (First) Tj ET"
+    val second = "BT (Second) Tj ET"
+    assemble(List(
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>",
+      s"<< /Length ${first.length} >>\nstream\n$first\nendstream",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R >>",
+      s"<< /Length ${second.length} >>\nstream\n$second\nendstream"
+    ))
+
   private def result[A](value: A < Abort[PdfError]): Either[PdfError, A] =
     Abort.run[PdfError](value).eval match
       case kyo.Result.Success(value) => Right(value)
@@ -58,6 +83,26 @@ object PdfParserSpec extends ZIOSpecDefault:
       case kyo.Result.Success(value) => Right(value)
       case kyo.Result.Failure(error) => Left(error)
       case kyo.Result.Panic(error) => Left(PdfError.ThumbnailFailed(Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+
+  private def syncResult[A](value: A < (Abort[PdfError] & Sync)): Either[PdfError, A] =
+    import kyo.AllowUnsafe.embrace.danger
+    Abort.run[PdfError](Sync.Unsafe.run(value)).eval match
+      case kyo.Result.Success(value) => Right(value)
+      case kyo.Result.Failure(error) => Left(error)
+      case kyo.Result.Panic(error) => Left(PdfError.InvalidPdf(Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+
+  private def qpdfCheck(bytes: Array[Byte], fixture: String): Either[PdfError, Unit] = qpdf match
+    case None => Right(())
+    case Some(executable) =>
+      val path = Files.createTempFile("kyo-pdf-round-trip-", ".pdf")
+      try
+        val written = Files.write(path, bytes)
+        val process = ProcessBuilder(executable.toString, "--check", written.toString).redirectErrorStream(true).start()
+        val output = new String(process.getInputStream.readAllBytes(), ISO_8859_1)
+        val exit = process.waitFor()
+        Either.cond(exit == 0, (), PdfError.InvalidPdf(s"qpdf rejected $fixture: $output"))
+      finally
+        val _ = Files.deleteIfExists(path)
 
   def spec = suite("kyo-pdf")(
     test("kyo-parse scans objects, streams, pages, and bounded retention") {
@@ -116,6 +161,99 @@ object PdfParserSpec extends ZIOSpecDefault:
       val valid = result(PdfContentParser.parse("BT /F1 12 Tf [(Kyo) -20 <504446>] TJ ET".getBytes(ISO_8859_1)))
       val unsupported = result(PdfContentParser.parse("BT (\\101) Tj ET".getBytes(ISO_8859_1)))
       assertTrue(valid.exists(_.exists(_ == ContentToken.Operator("TJ"))), unsupported.isLeft)
+    },
+    test("decoded document graph preserves page and stream objects") {
+      val decoded = result(ByteLimit.mebibytes(1).map(limit => PdfDocument.decode(twoPagePdf, limit)))
+      val pages = decoded.flatMap(document => result(PdfPages.pageRefs(document)))
+      val content = decoded.flatMap { document =>
+        document.byRef.get(ObjectRef(6)).toRight(PdfError.InvalidPdf("missing content stream"))
+          .flatMap(stream => syncResult(PdfDocument.decodedStream(stream)))
+      }
+      assertTrue(
+        decoded.exists(_.objects.length == 6),
+        pages.exists(_.map(_.number) == Vector(3L, 5L)),
+        content.exists(bytes => new String(bytes.toArray, ISO_8859_1).contains("Second"))
+      )
+    },
+    test("name escapes stop at a compact array boundary") {
+      val compact = assemble(List(
+        "<< /Type /Catalog /Pages 2 0 R /Prop_Build << /App << /OS [/Windows#20NT#20#28unknown#29] /TrustedMode false /Name /Adobe#20LiveCycle /REx /11.0 >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>"
+      ))
+      assertTrue(result(ByteLimit.mebibytes(1).map(limit => PdfDocument.decode(compact, limit))).isRight)
+    },
+    test("chunked input decodes without an unbounded adapter collection") {
+      val bytes = twoPagePdf
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val first = result(PdfInput.empty(limit).feed(bytes.take(31))).toOption.get
+      val second = result(first.feed(bytes.slice(31, 137))).toOption.get
+      val decoded = result(second.feed(bytes.drop(137))).flatMap(input => result(input.finish()))
+      assertTrue(decoded.exists(_.objects.length == 6))
+    },
+    test("page selection writes a self-contained PDF that decodes again") {
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val selected = for
+        original <- result(PdfDocument.decode(twoPagePdf, limit))
+        document <- result(PdfPages.select(original, 2, 2))
+        bytes <- syncResult(PdfWriter.write(document))
+        decoded <- result(PdfDocument.decode(bytes.toArray, limit))
+        pages <- result(PdfPages.pageRefs(decoded))
+      yield (decoded, pages, bytes)
+      val content = selected.flatMap { (document, _, _) =>
+        document.objects.find(_.stream.nonEmpty).toRight(PdfError.InvalidPdf("selected content stream is missing"))
+          .flatMap(stream => syncResult(PdfDocument.decodedStream(stream)))
+      }
+      assertTrue(
+        selected.exists(_._2.length == 1),
+        selected.exists(_._1.root.contains(ObjectRef(1))),
+        content.exists(bytes => new String(bytes.toArray, ISO_8859_1).contains("Second"))
+      )
+    },
+    test("page selection materializes inherited page attributes") {
+      val inherited = assemble(List(
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] /Rotate 90 >>",
+        "<< /Type /Page /Parent 2 0 R >>"
+      ))
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val selected = for
+        original <- result(PdfDocument.decode(inherited, limit))
+        rewritten <- result(PdfPages.select(original, 1, 1))
+        page <- result(PdfPages.pageRefs(rewritten)).flatMap(_.headOption.toRight(PdfError.InvalidPdf("missing page")))
+        dict <- rewritten.byRef.get(page).flatMap(_.dictionary).toRight(PdfError.InvalidPdf("missing page dictionary"))
+      yield dict
+      assertTrue(
+        selected.toOption.flatMap(_.get("MediaBox")).contains(PdfValue.Array(Vector(
+          PdfValue.Number(0), PdfValue.Number(0), PdfValue.Number(612), PdfValue.Number(792)))),
+        selected.toOption.flatMap(_.get("Rotate")).contains(PdfValue.Number(90))
+      )
+    },
+    test("decoded graph rejects encrypted rewrite through a typed error") {
+      val decoded = result(ByteLimit.mebibytes(1).map(limit => PdfDocument.decode(pdf(trailer = "/Encrypt 9 0 R "), limit)))
+      assertTrue(decoded.left.exists(_.isInstanceOf[PdfError.InvalidPdf]))
+    },
+    test("public court PDFs decode, select page one, write, and decode again") {
+      val limit = result(ByteLimit.mebibytes(20)).toOption.get
+      val checked = courtFixtures.map { fixture =>
+        val input = Option(getClass.getResourceAsStream(s"/$fixture")).toRight(PdfError.InvalidPdf(s"Missing $fixture"))
+        input.flatMap { stream =>
+          try
+            for
+              decoded <- result(PdfDocument.decode(stream.readAllBytes(), limit)).left.map(error => PdfError.InvalidPdf(s"$fixture decode: ${error.message}"))
+              pages <- result(PdfPages.pageRefs(decoded)).left.map(error => PdfError.InvalidPdf(s"$fixture pages: ${error.message}"))
+              _ <- Either.cond(pages.nonEmpty, (), PdfError.InvalidPdf(s"$fixture has no pages"))
+              selected <- result(PdfPages.select(decoded, 1, 1)).left.map(error => PdfError.InvalidPdf(s"$fixture select: ${error.message}"))
+              written <- syncResult(PdfWriter.write(selected)).left.map(error => PdfError.InvalidPdf(s"$fixture write: ${error.message}"))
+              _ <- qpdfCheck(written.toArray, fixture)
+              roundTrip <- result(PdfDocument.decode(written.toArray, limit)).left.map(error => PdfError.InvalidPdf(s"$fixture round trip decode: ${error.message}"))
+              roundTripPages <- result(PdfPages.pageRefs(roundTrip)).left.map(error => PdfError.InvalidPdf(s"$fixture round trip pages: ${error.message}"))
+              _ <- Either.cond(roundTripPages.length == 1, (), PdfError.InvalidPdf(s"$fixture round trip has ${roundTripPages.length} pages"))
+            yield ()
+          finally stream.close()
+        }
+      }
+      assertTrue(checked.forall(_.isRight))
     },
     test("kyo-schema derives the public parser report") {
       val schema = Schema[ScanReport]

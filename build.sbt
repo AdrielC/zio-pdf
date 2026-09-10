@@ -13,7 +13,7 @@ val scodecBitsVersion          = "1.2.5"
 val scalaJsDomVersion          = "2.8.1"
 val scalaJavaTimeVersion       = "2.7.0"
 val kyoVersion                 = "1.0.0-RC4"
-val kyoPdfInternalVersion      = "0.1.0-internal.3"
+val kyoPdfInternalVersion      = "0.2.0-internal.1"
 
 ThisBuild / organization      := "io.github.adrielc"
 ThisBuild / scalaVersion      := "3.8.4"
@@ -119,6 +119,7 @@ lazy val kyoPdf = (project in file("kyo-pdf-core"))
       "dev.zio"   %% "zio-test"     % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt" % zioVersion % Test
     ),
+    Test / unmanagedResourceDirectories += (LocalRootProject / Test / resourceDirectory).value,
     Test / mainClass := Some("com.tybera.kyopdf.PdfParserSpec"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
@@ -268,7 +269,7 @@ lazy val scalaJsFrontend = (project in file("examples-js"))
  */
 lazy val bench = (project in file("bench"))
   .enablePlugins(JmhPlugin)
-  .dependsOn(root)
+  .dependsOn(root, kyoPdf)
   .settings(
     name              := "zio-pdf-bench",
     publish / skip    := true,

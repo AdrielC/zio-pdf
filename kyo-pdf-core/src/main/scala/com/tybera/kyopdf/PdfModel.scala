@@ -53,3 +53,5 @@ object PdfError:
     val message = reason
   final case class ThumbnailFailed(reason: String) extends PdfError:
     val message = reason
+  final case class InvalidPageRange(first: Int, last: Int, count: Int) extends PdfError:
+    val message = s"PDF page range $first-$last is outside 1-$count"
