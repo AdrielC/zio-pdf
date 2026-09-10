@@ -45,11 +45,11 @@ object PdfDocumentParser:
               case Left(error) => return Left(error)
               case Right(parsed) =>
                 objects ++= parsed.objects
-                trailer = parsed.trailer.orElse(trailer)
+                trailer = parsed.trailer.map(mergeTrailer(trailer, _)).orElse(trailer)
                 cursor = parsed.end
           case None if keywordAt(text, cursor, "trailer") =>
             ValueReader(text, cursor + 7, text.length).read() match
-              case Right((value: Dict, next)) => trailer = Some(value); cursor = next
+              case Right((value: Dict, next)) => trailer = Some(mergeTrailer(trailer, value)); cursor = next
               case Right((_, _)) => return Left((cursor, "PDF trailer is not a dictionary"))
               case Left(error) => return Left(error)
           case None => cursor += 1
@@ -57,6 +57,13 @@ object PdfDocumentParser:
     trailer match
       case Some(value) => Right(PdfDocument(version, retained, value))
       case None => Left((0, "PDF has no trailer or xref-stream dictionary"))
+
+  /** Incremental and linearized PDFs may omit unchanged entries such as
+    * `/Root` from the newest trailer. Preserve earlier fields while letting
+    * later revisions win through the dictionary's last-entry semantics.
+    */
+  private def mergeTrailer(previous: Option[Dict], next: Dict): Dict =
+    previous.fold(next)(value => Dict(value.fields ++ next.fields))
 
   private def parseObject(text: String, header: Header, indirect: Map[ObjectRef, Long]): Either[(Int, String), Parsed] =
     ValueReader(text, header.bodyStart, text.length).read().flatMap { (value, afterValue) =>
@@ -100,7 +107,9 @@ object PdfDocumentParser:
               if end > text.length then Left((cursor, "PDF stream exceeds input"))
               else
                 val marker = skip(text, end.toInt)
-                if !keywordAt(text, marker, "endstream") then Left((marker, "PDF stream length does not land on endstream"))
+                // `marker` is exact because it is derived from /Length. The
+                // preceding byte is stream payload and may be non-delimiting.
+                if !keywordStartsAt(text, marker, "endstream") then Left((marker, "PDF stream length does not land on endstream"))
                 else Right((Some(text.substring(valueStart, end.toInt).getBytes(ISO_8859_1).toVector), marker + 9))
             }
         }
@@ -381,6 +390,10 @@ object PdfDocumentParser:
 
   private def keywordAt(text: String, at: Int, keyword: String): Boolean =
     at >= 0 && text.startsWith(keyword, at) && (at == 0 || delimiter(text.charAt(at - 1))) &&
+      (at + keyword.length >= text.length || delimiter(text.charAt(at + keyword.length)))
+
+  private def keywordStartsAt(text: String, at: Int, keyword: String): Boolean =
+    at >= 0 && text.startsWith(keyword, at) &&
       (at + keyword.length >= text.length || delimiter(text.charAt(at + keyword.length)))
 
   private def white(char: Char): Boolean = char.isWhitespace || char == 0

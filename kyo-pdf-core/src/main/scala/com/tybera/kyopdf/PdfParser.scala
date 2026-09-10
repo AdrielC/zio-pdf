@@ -222,7 +222,11 @@ object PdfParser:
             val dataEnd = dataStart.toLong + length
             if dataEnd > text.length then return Left((cursor, "PDF stream exceeds input"))
             val endstream = skipWhitespace(text, dataEnd.toInt)
-            if !keywordAt(text, endstream, "endstream") then return Left((endstream, "PDF stream length does not land on endstream"))
+            // The byte immediately before this exact, /Length-derived offset is
+            // payload and need not be a PDF delimiter (qpdf commonly ends a
+            // Flate stream with an ordinary byte). Only the trailing boundary
+            // belongs to the endstream token.
+            if !keywordStartsAt(text, endstream, "endstream") then return Left((endstream, "PDF stream length does not land on endstream"))
             if objectStream then
               val dictionary = text.substring(start, cursor)
               val raw = text.substring(dataStart, dataEnd.toInt).getBytes(ISO_8859_1)
@@ -497,6 +501,9 @@ object PdfParser:
   private def keywordAt(text: String, at: Int, keyword: String): Boolean =
     at >= 0 && text.startsWith(keyword, at) &&
       (at == 0 || delimiter(text.charAt(at - 1))) && tokenBoundary(text, at + keyword.length)
+
+  private def keywordStartsAt(text: String, at: Int, keyword: String): Boolean =
+    at >= 0 && text.startsWith(keyword, at) && tokenBoundary(text, at + keyword.length)
 
   private def tokenBoundary(text: String, at: Int): Boolean = at >= text.length || delimiter(text.charAt(at))
   private def delimiter(ch: Char): Boolean = ch.isWhitespace || "()<>[]{}/%".contains(ch) || ch == 0

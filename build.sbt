@@ -13,7 +13,7 @@ val scodecBitsVersion          = "1.2.5"
 val scalaJsDomVersion          = "2.8.1"
 val scalaJavaTimeVersion       = "2.7.0"
 val kyoVersion                 = "1.0.0-RC4"
-val kyoPdfInternalVersion      = "0.2.0-internal.1"
+val kyoPdfInternalVersion      = "0.2.0-internal.2"
 
 ThisBuild / organization      := "io.github.adrielc"
 ThisBuild / scalaVersion      := "3.8.4"

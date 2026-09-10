@@ -37,7 +37,7 @@ object PdfParserSpec extends ZIOSpecDefault:
     val base = List(
       "<< /Type /Catalog /Pages 2 0 R >>",
       "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R >>",
       s"<< /Length ${if indirectLength then "5 0 R" else content.length.toString} >>\nstream\n$content\nendstream"
     )
     assemble(if indirectLength then base :+ content.length.toString else base, trailer)
@@ -65,10 +65,22 @@ object PdfParserSpec extends ZIOSpecDefault:
     assemble(List(
       "<< /Type /Catalog /Pages 2 0 R >>",
       "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
-      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R >>",
       s"<< /Length ${first.length} >>\nstream\n$first\nendstream",
-      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 6 0 R >>",
       s"<< /Length ${second.length} >>\nstream\n$second\nendstream"
+    ))
+
+  private def signedFormPdf: Array[Byte] =
+    val content = "BT (Signed form) Tj ET"
+    assemble(List(
+      "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>",
+      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R /Annots [6 0 R] >>",
+      s"<< /Length ${content.length} >>\nstream\n$content\nendstream",
+      "<< /Fields [6 0 R] /SigFlags 3 >>",
+      "<< /Type /Annot /Subtype /Widget /FT /Sig /T (Signature1) /P 3 0 R /V 7 0 R /Rect [10 10 110 40] >>",
+      "<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 0 0 0] /Contents <00> >>"
     ))
 
   private def result[A](value: A < Abort[PdfError]): Either[PdfError, A] =
@@ -103,6 +115,38 @@ object PdfParserSpec extends ZIOSpecDefault:
         Either.cond(exit == 0, (), PdfError.InvalidPdf(s"qpdf rejected $fixture: $output"))
       finally
         val _ = Files.deleteIfExists(path)
+
+  private def qpdfTransform(bytes: Array[Byte], arguments: Vector[String]): Either[PdfError, Array[Byte]] = qpdf match
+    case None => Left(PdfError.InvalidPdf("qpdf is not installed"))
+    case Some(executable) =>
+      val input = Files.write(Files.createTempFile("kyo-pdf-input-", ".pdf"), bytes)
+      val output = Files.createTempFile("kyo-pdf-output-", ".pdf")
+      try
+        val command = Vector(executable.toString, input.toString) ++ arguments ++ Vector(output.toString)
+        val process = ProcessBuilder(command*).redirectErrorStream(true).start()
+        val message = new String(process.getInputStream.readAllBytes(), ISO_8859_1)
+        val exit = process.waitFor()
+        if exit == 0 then Right(Files.readAllBytes(output))
+        else Left(PdfError.InvalidPdf(s"qpdf transform failed: $message"))
+      finally
+        val _ = Files.deleteIfExists(input)
+        val _ = Files.deleteIfExists(output)
+
+  private def roundTripCheck(bytes: Array[Byte], fixture: String, limit: ByteLimit): Either[PdfError, Unit] =
+    for
+      decoded <- result(PdfDocument.decode(bytes, limit)).left.map { error =>
+        val context = new String(bytes, ISO_8859_1).map(char => if char >= ' ' && char <= '~' then char else '.').take(512)
+        PdfError.InvalidPdf(s"$fixture decode: ${error.message}; input prefix: $context")
+      }
+      pages <- result(PdfPages.pageRefs(decoded)).left.map(error => PdfError.InvalidPdf(s"$fixture pages: ${error.message}"))
+      _ <- Either.cond(pages.nonEmpty, (), PdfError.InvalidPdf(s"$fixture has no pages"))
+      selected <- result(PdfPages.select(decoded, 1, 1)).left.map(error => PdfError.InvalidPdf(s"$fixture select: ${error.message}"))
+      written <- syncResult(PdfWriter.write(selected)).left.map(error => PdfError.InvalidPdf(s"$fixture write: ${error.message}"))
+      _ <- qpdfCheck(written.toArray, fixture)
+      roundTrip <- result(PdfDocument.decode(written.toArray, limit)).left.map(error => PdfError.InvalidPdf(s"$fixture round trip decode: ${error.message}"))
+      roundTripPages <- result(PdfPages.pageRefs(roundTrip)).left.map(error => PdfError.InvalidPdf(s"$fixture round trip pages: ${error.message}"))
+      _ <- Either.cond(roundTripPages.length == 1, (), PdfError.InvalidPdf(s"$fixture round trip has ${roundTripPages.length} pages"))
+    yield ()
 
   def spec = suite("kyo-pdf")(
     test("kyo-parse scans objects, streams, pages, and bounded retention") {
@@ -233,23 +277,73 @@ object PdfParserSpec extends ZIOSpecDefault:
       val decoded = result(ByteLimit.mebibytes(1).map(limit => PdfDocument.decode(pdf(trailer = "/Encrypt 9 0 R "), limit)))
       assertTrue(decoded.left.exists(_.isInstanceOf[PdfError.InvalidPdf]))
     },
+    test("qpdf linearized and object-stream inputs survive Kyo page rewrite") {
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val checked = qpdf.toVector.flatMap { _ =>
+        Vector(
+          "linearized" -> Vector("--linearize"),
+          "object-stream" -> Vector("--object-streams=generate")
+        ).map { (name, arguments) =>
+          qpdfTransform(twoPagePdf, arguments).flatMap(roundTripCheck(_, s"qpdf-$name", limit))
+        }
+      }
+      assertTrue(checked.forall(_.isRight))
+    },
+    test("qpdf encryption is detected and rejected as a typed PDF failure") {
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val checked = qpdf.toVector.map { _ =>
+        for
+          encrypted <- qpdfTransform(pdf(), Vector("--encrypt", "user", "owner", "256", "--"))
+          scan <- result(PdfParser.scan(encrypted, limit)).left.map { error =>
+            val context = new String(encrypted, ISO_8859_1).map(char => if char >= ' ' && char <= '~' then char else '.').take(512)
+            PdfError.InvalidPdf(s"${error.message}; input prefix: $context")
+          }
+          _ <- Either.cond(scan.encrypted, (), PdfError.InvalidPdf("qpdf encrypted input was not classified as encrypted"))
+          _ <- Either.cond(result(PdfDocument.decode(encrypted, limit)).isLeft, (), PdfError.InvalidPdf("encrypted input decoded unexpectedly"))
+        yield ()
+      }
+      assertTrue(checked.forall(_.isRight))
+    },
+    test("repairable startxref damage is normalized by Kyo rewrite") {
+      val malformed = new String(pdf(), ISO_8859_1).replaceFirst("startxref\\n[0-9]+", "startxref\n1").getBytes(ISO_8859_1)
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      assertTrue(roundTripCheck(malformed, "damaged-startxref", limit).isRight)
+    },
+    test("signed AcroForm graph remains self-contained after page rewrite") {
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val checked = for
+        decoded <- result(PdfDocument.decode(signedFormPdf, limit))
+        selected <- result(PdfPages.select(decoded, 1, 1))
+        _ <- Either.cond(selected.objects.exists(_.dictionary.flatMap(_.get("Type")).contains(PdfValue.Name("Sig"))), (),
+          PdfError.InvalidPdf("signature dictionary was not retained"))
+        written <- syncResult(PdfWriter.write(selected))
+        _ <- qpdfCheck(written.toArray, "signed-acroform")
+        roundTrip <- result(PdfDocument.decode(written.toArray, limit))
+        _ <- result(PdfPages.pageRefs(roundTrip))
+      yield ()
+      assertTrue(checked.isRight)
+    },
+    test("unsupported page filters are preserved without pretending to decode them") {
+      val encoded = "4254202841736369694865782920546A204554>"
+      val filtered = assemble(List(
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R >>",
+        s"<< /Length ${encoded.length} /Filter /ASCIIHexDecode >>\nstream\n$encoded\nendstream"
+      ))
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val decoded = result(PdfDocument.decode(filtered, limit))
+      val streamDecode = decoded.flatMap(_.objects.find(_.stream.nonEmpty).toRight(PdfError.InvalidPdf("missing filtered stream")))
+        .flatMap(value => syncResult(PdfDocument.decodedStream(value)))
+      assertTrue(streamDecode.isLeft, roundTripCheck(filtered, "unsupported-filter", limit).isRight)
+    },
     test("public court PDFs decode, select page one, write, and decode again") {
       val limit = result(ByteLimit.mebibytes(20)).toOption.get
       val checked = courtFixtures.map { fixture =>
         val input = Option(getClass.getResourceAsStream(s"/$fixture")).toRight(PdfError.InvalidPdf(s"Missing $fixture"))
         input.flatMap { stream =>
           try
-            for
-              decoded <- result(PdfDocument.decode(stream.readAllBytes(), limit)).left.map(error => PdfError.InvalidPdf(s"$fixture decode: ${error.message}"))
-              pages <- result(PdfPages.pageRefs(decoded)).left.map(error => PdfError.InvalidPdf(s"$fixture pages: ${error.message}"))
-              _ <- Either.cond(pages.nonEmpty, (), PdfError.InvalidPdf(s"$fixture has no pages"))
-              selected <- result(PdfPages.select(decoded, 1, 1)).left.map(error => PdfError.InvalidPdf(s"$fixture select: ${error.message}"))
-              written <- syncResult(PdfWriter.write(selected)).left.map(error => PdfError.InvalidPdf(s"$fixture write: ${error.message}"))
-              _ <- qpdfCheck(written.toArray, fixture)
-              roundTrip <- result(PdfDocument.decode(written.toArray, limit)).left.map(error => PdfError.InvalidPdf(s"$fixture round trip decode: ${error.message}"))
-              roundTripPages <- result(PdfPages.pageRefs(roundTrip)).left.map(error => PdfError.InvalidPdf(s"$fixture round trip pages: ${error.message}"))
-              _ <- Either.cond(roundTripPages.length == 1, (), PdfError.InvalidPdf(s"$fixture round trip has ${roundTripPages.length} pages"))
-            yield ()
+            roundTripCheck(stream.readAllBytes(), fixture, limit)
           finally stream.close()
         }
       }
