@@ -33,5 +33,13 @@ object PdfZIOSpec extends ZIOSpecDefault:
         limit <- PdfZIO.run(kyo.Async.defer(ByteLimit.fromBytes(bytes.length.toLong - 1L)))
         result <- PdfZIO.scanStream(ZStream.fromIterable(bytes), limit).either
       yield assertTrue(result.left.exists(_.isInstanceOf[PdfError.TooLarge]))
+    },
+    test("a parser effect can be reused across direct and ZIO-lifted scans") {
+      val direct = kyo.Abort.run[PdfError](ByteLimit.mebibytes(1).map(limit => com.tybera.kyopdf.PdfParser.scan(bytes, limit))).eval
+      for
+        limit <- PdfZIO.run(kyo.Async.defer(ByteLimit.mebibytes(1)))
+        first <- PdfZIO.scanStream(ZStream.fromIterable(bytes), limit)
+        second <- PdfZIO.scanStream(ZStream.fromIterable(bytes), limit)
+      yield assertTrue(direct.exists(_.facts == Facts(3, 0, 1)), first.facts == Facts(3, 0, 1), second.facts == Facts(3, 0, 1))
     }
   )

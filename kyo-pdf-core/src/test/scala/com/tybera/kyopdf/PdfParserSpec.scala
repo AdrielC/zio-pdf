@@ -64,6 +64,13 @@ object PdfParserSpec extends ZIOSpecDefault:
       val parsed = result(ByteLimit.mebibytes(1).map(limit => PdfParser.scan(pdf(), limit)))
       assertTrue(parsed.exists(_.facts == Facts(4, 1, 1)), parsed.exists(_.version == "1.7"), parsed.exists(_.retention.nodes > 0))
     },
+    test("zio-pdf writer binary marker may immediately follow the version") {
+      val written = new String(pdf(), ISO_8859_1)
+        .replace("%PDF-1.7\n", "%PDF-1.7%\u00e2\u00e3\u00cf\u00d3\n")
+        .getBytes(ISO_8859_1)
+      val parsed = result(ByteLimit.mebibytes(1).map(limit => PdfParser.scan(written, limit)))
+      assertTrue(parsed.exists(_.version == "1.7"), parsed.exists(_.facts == Facts(4, 1, 1)))
+    },
     test("stream bytes cannot inject fake object or page markers") {
       val payload = "5 0 obj << /Type /Page >> endobj"
       val parsed = result(ByteLimit.mebibytes(1).map(limit => PdfParser.scan(pdf(payload), limit)))

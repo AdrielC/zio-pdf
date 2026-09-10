@@ -11,8 +11,8 @@ adapter, which interprets Kyo effects with the official `kyo-zio` bridge.
 Internal coordinates:
 
 ```scala
-libraryDependencies += "com.tybera" %% "kyo-pdf"     % "0.1.0-internal.1"
-libraryDependencies += "com.tybera" %% "kyo-pdf-zio" % "0.1.0-internal.1" // optional
+libraryDependencies += "com.tybera" %% "kyo-pdf"     % "0.1.0-internal.3"
+libraryDependencies += "com.tybera" %% "kyo-pdf-zio" % "0.1.0-internal.3" // optional
 ```
 
 The original `zio-pdf` implementation remains in this repository while its

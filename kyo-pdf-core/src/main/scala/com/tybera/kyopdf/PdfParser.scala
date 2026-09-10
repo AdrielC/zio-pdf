@@ -69,7 +69,9 @@ object PdfParser:
         val detail = result.errors.map(_.message).mkString("; ")
         Abort.fail(PdfError.InvalidPdf(if detail.nonEmpty then detail else "Invalid linearized first-page byte boundary"))
 
-  private val document: ScanReport < Parse[Char] =
+  // Parse effects carry handler state and must not be cached across runs or
+  // lifted onto a different runtime thread.
+  private def document: ScanReport < Parse[Char] =
     Parse.read { input =>
       val text = input.remaining.mkString
       scanDocument(text) match
@@ -82,7 +84,7 @@ object PdfParser:
     if header < 0 || header > 1024 then Left((0, "Missing PDF header"))
     else
       val versionStart = header + 5
-      val versionEnd = text.indexWhere(ch => ch == '\r' || ch == '\n' || ch.isWhitespace, versionStart) match
+      val versionEnd = text.indexWhere(ch => ch == '%' || ch == '\r' || ch == '\n' || ch.isWhitespace, versionStart) match
         case -1 => text.length
         case at => at
       val version = text.substring(versionStart, versionEnd)

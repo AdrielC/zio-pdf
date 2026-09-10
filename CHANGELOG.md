@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Internal `0.1.0-internal.3` artifacts accept a binary-marker comment directly
+  after the PDF version, matching zio-pdf writer output.
+- Internal `0.1.0-internal.2` artifacts create a fresh `kyo-parse` effect for
+  every scan, making repeated and ZIO-lifted parser runs independent.
+
 ### Added
 
 - Internal `com.tybera:kyo-pdf_3:0.1.0-internal.1` artifact with a ZIO-free
