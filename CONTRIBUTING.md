@@ -12,12 +12,14 @@ This GitHub repository is the public source and release project. Every change in
 
 2. Branch from `main`.
 3. Keep byte streams incremental. Any collecting helper must state and enforce its bound or return a type whose full materialization is the method's explicit contract.
-4. Keep public decode APIs on `PdfEngine`, `PdfStream`, and `PdfIO`. Use `PdfObjectScanner` for bounded structural observation.
+4. Put new parser and inspection work in the ZIO-free `kyo-pdf` core. Keep
+   ZIO compatibility in `kyo-pdf-zio`; the legacy `PdfEngine`, `PdfStream`,
+   and `PdfIO` surface remains available during the writer/layout migration.
 5. Run:
 
    ```bash
    npm ci
-   sbt -batch ";root/test;scalaJs/test;bench/test"
+   sbt -batch ";kyoPdf/test;kyoPdfZio/test;root/test;scalaJs/test;bench/test"
    sbt -batch examples/run
    sbt -batch "bench/Jmh/compile" "benchFs2/Jmh/compile"
    npm --prefix examples-js/frontend ci
@@ -31,7 +33,8 @@ This GitHub repository is the public source and release project. Every change in
 
 ## Code conventions
 
-- Use Scala 3 and ZIO 2 idioms.
+- Use Scala 3 and Kyo idioms in `kyo-pdf-core`; ZIO belongs only in the
+  compatibility module and legacy implementation.
 - Prefer typed errors and explicit error translation at transport boundaries.
 - Do not use `runCollect`, `toArray`, or full-payload buffers on an arbitrary-size streaming path.
 - Bounded parser carry and content-stream payload handling are separate concerns. Document both.
@@ -45,5 +48,10 @@ Public coordinates are:
 ```scala
 libraryDependencies += "io.github.adrielc" %% "zio-pdf" % version
 ```
+
+Internal Kyo coordinates are published explicitly to Tybera Maven from the
+`kyoPdf/publish` and `kyoPdfZio/publish` tasks. They require `MAVEN_USER` and
+`MAVEN_TOKEN` (or the documented Gitea equivalents); credentials are never
+stored in the repository.
 
 Tags matching `v*` run the full tests, examples, package audit, external-consumer proof, and signed Maven Central publication before GitHub creates a release. Publication requires repository secrets named `PGP_SECRET`, `PGP_PASSPHRASE`, `SONATYPE_USERNAME`, and `SONATYPE_PASSWORD`. The workflow fails if any are missing.

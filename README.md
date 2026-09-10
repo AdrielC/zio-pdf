@@ -1,7 +1,44 @@
-# zio-pdf
+# kyo-pdf
 
 [![CI](https://github.com/AdrielC/zio-pdf/actions/workflows/ci.yml/badge.svg)](https://github.com/AdrielC/zio-pdf/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+The canonical internal line is now Kyo-native. Its core parsing, validation,
+content grammar, schema, and thumbnail-object APIs live in `kyo-pdf-core` and
+do not depend on ZIO. Existing ZIO applications use the small `kyo-pdf-zio`
+adapter, which interprets Kyo effects with the official `kyo-zio` bridge.
+
+Internal coordinates:
+
+```scala
+libraryDependencies += "com.tybera" %% "kyo-pdf"     % "0.1.0-internal.1"
+libraryDependencies += "com.tybera" %% "kyo-pdf-zio" % "0.1.0-internal.1" // optional
+```
+
+The original `zio-pdf` implementation remains in this repository while its
+decoded object graph, split/write operations, and layout support are ported.
+It is the compatibility/reference implementation, not a dependency of the
+Kyo core.
+
+## Kyo quick start
+
+```scala
+import com.tybera.kyopdf.*
+import kyo.*
+
+val report: ScanReport < Abort[PdfError] =
+  ByteLimit.mebibytes(20).map(limit => PdfParser.scan(bytes, limit))
+```
+
+From a ZIO application:
+
+```scala
+import com.tybera.kyopdf.zio.PdfZIO
+
+val report = PdfZIO.scanStream(upload, limit)
+```
+
+## Legacy ZIO implementation
 
 `zio-pdf` is a Scala 3 and ZIO 2 library for incremental PDF parsing, content-addressed ingestion, structural inspection, evidence extraction, and fail-closed rewriting. The same parser and hashing model runs on the JVM and Scala.js.
 
