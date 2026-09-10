@@ -105,6 +105,10 @@ val options = PdfEngine.Options(
 
 `maxInputBytes` is an optional whole-source admission ceiling and may remain unbounded for incremental paths. `maxMaterializedDocumentBytes` independently protects APIs that return a complete `Chunk` of decoded objects or elements. `maxMaterializedStreamBytes` bounds any one raw or decompressed stream that the high-level decoder must materialize. JVM and Scala.js Flate decoders stop when output crosses that bound. RunLength and LZW expansion are guarded by the same limit.
 
+ASCIIHex and ASCII85 enforce that output limit before appending decoded bytes. Cross-reference streams validate integer widths, ordered index ranges, exact payload length, and numeric bounds before building tables. Their independent entry-count ceiling is one million by default, including zero-width fields that consume no input. Direct callers can supply `XrefStream.Limits(maxEntries = ...)` through `XrefStream(dictionary, limits)(payload)`. This ceiling bounds entry count, not the total heap used by a decoded document.
+
+The generic `zio.pdf.arrow` graph types are shared across JVM and Scala.js. `arrow.IngestGraph` and `zio.pdf.tacit` currently require the JVM fused decoder and are JVM-only. The vendored Volga implementation is included in the library artifacts; consumers do not need a private resolver or separate unpublished module.
+
 Use the API that matches the ownership model:
 
 | Input and result | API | Memory behavior |

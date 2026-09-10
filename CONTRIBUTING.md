@@ -37,6 +37,7 @@ This GitHub repository is the public source and release project. Every change in
 - Bounded parser carry and content-stream payload handling are separate concerns. Document both.
 - Avoid `throw` in operational library paths. Constructors may reject impossible static configuration, but data failures belong in typed error channels.
 - Keep fused mmap internals behind `PdfEngine`.
+- Prefer property-based testing for most parser and byte-handling coverage. Generate valid inputs, mutate malformed variants, vary chunk boundaries, and check exact resource-limit boundaries. Keep a small set of named regression fixtures for reported failures, with private documents replaced by synthetic fixtures.
 
 ## Releases and Maven Central
 

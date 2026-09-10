@@ -30,12 +30,18 @@ jar tf "${JS_JAR_PATH}" > "${JS_JAR_LIST}"
 for entry in \
   'zio/pdf/PdfObjectScanner$.class' \
   'zio/pdf/StreamingDecode$.class' \
-  'zio/pdf/PdfEngine$.class'; do
+  'zio/pdf/PdfEngine$.class' \
+  'volga/free/FreeProp.class'; do
   if ! grep -Fqx "${entry}" "${JAR_LIST}"; then
     echo "Published JAR is missing ${entry}." >&2
     exit 1
   fi
 done
+
+if ! grep -Fqx 'volga/free/FreeProp.sjsir' "${JS_JAR_LIST}"; then
+  echo "Scala.js release JAR is missing its vendored graph implementation." >&2
+  exit 1
+fi
 
 for entry in \
   'zio/pdf/ByteLimit$.class' \
@@ -76,6 +82,10 @@ for pom in "${POM_PATH}" "${JS_POM_PATH}"; do
   grep -Fq 'https://github.com/AdrielC/zio-pdf' "${pom}"
   if grep -Eqi '<repositories>|<pluginRepositories>' "${pom}"; then
     echo "Release POM contains a repository override." >&2
+    exit 1
+  fi
+  if grep -Eq '<artifactId>volga-core(_[^<]+)?</artifactId>' "${pom}"; then
+    echo "Release POM depends on an unpublished vendored module." >&2
     exit 1
   fi
 done
