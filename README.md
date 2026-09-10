@@ -3,22 +3,22 @@
 [![CI](https://github.com/AdrielC/zio-pdf/actions/workflows/ci.yml/badge.svg)](https://github.com/AdrielC/zio-pdf/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-The canonical internal line is now Kyo-native. Its core parsing, validation,
-content grammar, schema, and thumbnail-object APIs live in `kyo-pdf-core` and
-do not depend on ZIO. Existing ZIO applications use the small `kyo-pdf-zio`
-adapter, which interprets Kyo effects with the official `kyo-zio` bridge.
+The canonical internal line is now Kyo-native. Its bounded decoded document
+graph, page selection/writer, structural parsing, content grammar, schema, and
+thumbnail-object APIs live in `kyo-pdf-core` and do not depend on ZIO. Existing
+ZIO applications use the small `kyo-pdf-zio` adapter, which interprets Kyo
+effects with the official `kyo-zio` bridge.
 
 Internal coordinates:
 
 ```scala
-libraryDependencies += "com.tybera" %% "kyo-pdf"     % "0.1.0-internal.3"
-libraryDependencies += "com.tybera" %% "kyo-pdf-zio" % "0.1.0-internal.3" // optional
+libraryDependencies += "com.tybera" %% "kyo-pdf"     % "0.2.0-internal.1"
+libraryDependencies += "com.tybera" %% "kyo-pdf-zio" % "0.2.0-internal.1" // optional
 ```
 
-The original `zio-pdf` implementation remains in this repository while its
-decoded object graph, split/write operations, and layout support are ported.
-It is the compatibility/reference implementation, not a dependency of the
-Kyo core.
+The original `zio-pdf` implementation remains in this repository as a parity
+reference and compatibility implementation. It is not a dependency of the Kyo
+core.
 
 ## Kyo quick start
 
@@ -28,6 +28,13 @@ import kyo.*
 
 val report: ScanReport < Abort[PdfError] =
   ByteLimit.mebibytes(20).map(limit => PdfParser.scan(bytes, limit))
+
+val selected: Vector[Byte] < (Abort[PdfError] & Sync) =
+  ByteLimit.mebibytes(20).map { limit =>
+    PdfDocument.decode(bytes, limit).map { document =>
+      PdfPages.select(document, first = 2, last = 4).map(PdfWriter.write)
+    }
+  }
 ```
 
 From a ZIO application:
@@ -35,7 +42,8 @@ From a ZIO application:
 ```scala
 import com.tybera.kyopdf.zio.PdfZIO
 
-val report = PdfZIO.scanStream(upload, limit)
+val document = PdfZIO.decodeStream(upload, limit)
+val selected = PdfZIO.selectPagesStream(upload, limit, first = 2, last = 4)
 ```
 
 ## Legacy ZIO implementation
