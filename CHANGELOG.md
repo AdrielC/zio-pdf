@@ -4,8 +4,20 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Internal `0.1.0-internal.3` artifacts accept a binary-marker comment directly
+  after the PDF version, matching zio-pdf writer output.
+- Internal `0.1.0-internal.2` artifacts create a fresh `kyo-parse` effect for
+  every scan, making repeated and ZIO-lifted parser runs independent.
+
 ### Added
 
+- Internal `com.tybera:kyo-pdf_3:0.1.0-internal.1` artifact with a ZIO-free
+  Kyo core using `Abort`, `kyo-parse`, and `kyo-schema`.
+- Optional `com.tybera:kyo-pdf-zio_3:0.1.0-internal.1` adapter using the
+  official `kyo-zio` interpreter for typed failures and cancellation.
+- Bounded classic-xref indirect lengths, Flate object streams, xref-stream
+  accounting, content tokens, encryption rejection, and thumbnail objects in
+  the Kyo core.
 - AcroForm field fill: `PdfAcroForm.applyFieldValues`, `PdfEngine.setFieldValues`, and prep op `SetFieldValues` set `/V` by qualified name (stripping widget `/AP` so flatten uses the new text).
 - Prep op `AttachThumbnail` wraps `PdfEngine.withThumbnailsBytes` with a serializable scope (`FirstPageOnly`, `AllPages`, `Off`).
 - Court workflow recipes in [`docs/court-workflows.md`](docs/court-workflows.md) and runnable example `CourtFilingPrep`.
