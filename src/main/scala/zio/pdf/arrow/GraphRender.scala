@@ -34,7 +34,10 @@ object GraphRender {
   /** Mermaid flowchart (GitHub-renderable). */
   def mermaid(title: String, wiring: Wiring): String = {
     val (_, edges) = wiring
-    val body       = edges.map { case (from, to) => s"  $from --> $to" }.mkString("\n")
+    def node(id: String): String =
+      if id.forall(c => c.isLetterOrDigit || c == '_' || c == '-') then id
+      else s"\"${id.replace("\"", "\\\"")}\""
+    val body = edges.map { case (from, to) => s"  ${node(from)} --> ${node(to)}" }.mkString("\n")
     s"""flowchart LR
        |%% $title
        |$body""".stripMargin
@@ -67,18 +70,28 @@ object ArrowSyntax {
   def prop(using U: SymmetricCat[Diag, PropOb]) =
     volga.syntax.smc.syntax[Diag, PropOb, Nat.Plus]
 
+  /**
+   * Render a constructed diagram — `I` / `J` inferred from the [[FreeProp]] type.
+   * Boundary labels are optional (`in`, `in1`, … when omitted).
+   */
   def render[I: Nat, J: Nat](
       title:  String,
       graph:  FreeProp[Label, I, J],
-      inputs: Nat.Vec[I, String]
+      labels: String*
   ): GraphFormats = {
-    val w = GraphRender.wiring(graph, inputs)
+    val w = GraphRender.wiring(graph, WiringBoundary.vec[I](labels*))
     GraphFormats(
       wiring   = w,
       plantUml = GraphRender.plantUml(title, w),
       mermaid  = GraphRender.mermaid(title, w),
       dot      = GraphRender.dot(title, w)
     )
+  }
+
+  extension [I: Nat, J: Nat](graph: FreeProp[Label, I, J]) {
+    /** Render after `prop.ofN { … }` — no upfront `Nat.`N`` at the call site. */
+    def render(title: String, labels: String*): GraphFormats =
+      ArrowSyntax.render(title, graph, labels*)
   }
 }
 

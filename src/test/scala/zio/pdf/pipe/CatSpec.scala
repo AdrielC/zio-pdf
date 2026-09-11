@@ -1,5 +1,6 @@
 package zio.pdf.pipe
 
+import volga.*
 import PipeArrow.*
 import PipeObjects.{Ob, U}
 import zio.test.*

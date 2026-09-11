@@ -36,15 +36,14 @@ object BiConst {
     ): BiConst[GraphSummary, A, Prod[B, C]] = {
       val lf = BiConst.getConst(f)
       val rg = BiConst.getConst(g)
-      val fork = lf.inputs.headOption.orElse(rg.inputs.headOption).getOrElse("fork")
-      BiConst(GraphSummary.fanout(lf, rg, fork))
+      BiConst(GraphSummary.fanout(lf, rg, fork = GraphSummary.InputPort))
     }
 
     def merge[A: Ob, B: Ob, C: Ob](
         f: BiConst[GraphSummary, A, C],
         g: BiConst[GraphSummary, B, C]
     ): BiConst[GraphSummary, Sum[A, B], C] =
-      BiConst(GraphSummary.par(BiConst.getConst(f), BiConst.getConst(g)))
+      BiConst(GraphSummary.fanin(BiConst.getConst(f), BiConst.getConst(g)))
 
     def choose[A: Ob, B: Ob, C: Ob, D: Ob](
         f: BiConst[GraphSummary, A, C],
