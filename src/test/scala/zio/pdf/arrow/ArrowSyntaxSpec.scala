@@ -50,7 +50,7 @@ object ArrowSyntaxSpec extends ZIOSpecDefault {
     },
     test("GraphRender produces mermaid and dot") {
       val exp     = wiringProp.of1((v: WiringV1) => wiringBNode(v))
-      val formats = ArrowSyntax.render("ingest", exp, Tuple1("bytes"))
+      val formats = ArrowSyntax.render("ingest", exp, "bytes")
       assertTrue(
         formats.mermaid.contains("bytes --> b"),
         formats.dot.contains("\"bytes\" -> \"b\""),

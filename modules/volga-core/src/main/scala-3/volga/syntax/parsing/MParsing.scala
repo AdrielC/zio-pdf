@@ -12,6 +12,8 @@ import volga.syntax.parsing.Pos.{Mid, End, Tupling}
 import volga.syntax.parsing.STerm
 import volga.syntax.parsing.App
 import volga.syntax.smc.SyApp
+import volga.syntax.smc.V
+import volga.free.Nat
 
 final class MParsing[q <: Quotes & Singleton](using val q: q):
     import q.reflect.*
@@ -19,6 +21,12 @@ final class MParsing[q <: Quotes & Singleton](using val q: q):
     val vars = Vars[q.type]()
 
     val SyAppRepr = TypeRepr.of[SyApp[?, ?]]
+
+    private type PMid      = STerm[Var[q.type], Tree] & Pos.Mid
+    private type PMidTup   = STerm[Var[q.type], Tree] & (Pos.Mid | Pos.Tupling)
+    private type PEnd      = STerm[Var[q.type], Tree] & Pos.End
+    private type PAnywhere = STerm[Var[q.type], Tree] & Pos.Mid & Pos.End
+    private type PApp      = App[Var[q.type], Tree]
 
     type Parsed = (Vector[Var[q.type]], Vector[PMid], PEnd)
 
@@ -39,18 +47,43 @@ final class MParsing[q <: Quotes & Singleton](using val q: q):
                     midTerms     <- VError.traverse(mids, asMidSTerm)(midTermErr)
                     detupledMids <- detuple(midTerms)
                     endTerm      <- VError.applyOr(res)(asEndTerm)(endTermErr(res))
-                yield (vs, detupledMids, endTerm)
+                    (mids2, end2) = desugarProducers(detupledMids, endTerm)
+                yield (vs, mids2, end2)
             case single           =>
                 for term <- VError.applyOr(single)(asEndTerm)(endTermErr(single))
-                yield (vs, Vector.empty, term)
+                yield
+                    val (mids2, end2) = desugarProducers(Vector.empty, term)
+                    (vs, mids2, end2)
         end match
     end parseWithVals
 
-    private type PMid      = STerm[Var[q], Tree] & Pos.Mid
-    private type PMidTup   = STerm[Var[q], Tree] & (Pos.Mid | Pos.Tupling)
-    private type PEnd      = STerm[Var[q], Tree] & Pos.End
-    private type PAnywhere = STerm[Var[q], Tree] & Pos.Mid & Pos.End
-    private type PApp      = App[Var[q], Tree]
+    /** 0-in wiring nodes (`node()`) — SyApp apply with no wire args. */
+    private def isSourceApp(app: PApp): Boolean = app.args.isEmpty
+
+    private var freshWireId = 0
+
+    private def assignmentForSource(app: PApp): STerm.Assignment[Var[q.type], Tree] =
+        freshWireId += 1
+        val wire = vars.varOf(
+            s"$$wire$$freshWireId",
+            TypeTree.of[V[Nat.`1`]],
+            Some(app.applied)
+        )
+        STerm.Assignment(Vector(wire), app)
+
+    /** Turn standalone `node()` into `val $wire = node(); $wire` so stages track the producer. */
+    private def desugarProducers(mids: Vector[PMid], last: PEnd): (Vector[PMid], PEnd) =
+        val mids2 = mids.map:
+            case app @ STerm.Application(app0) if isSourceApp(app0) => assignmentForSource(app0)
+            case other                                            => other
+        desugarLast(mids2, last)
+
+    private def desugarLast(mids: Vector[PMid], last: PEnd): (Vector[PMid], PEnd) =
+        last match
+            case app @ STerm.Application(app0) if isSourceApp(app0) =>
+                val assign = assignmentForSource(app0)
+                (mids :+ assign, STerm.Result(assign.receivers))
+            case other => (mids, other)
 
     val InlineTerm: Inlined =\> Term =
         case Inlined(_, _, t) => t
@@ -86,6 +119,7 @@ final class MParsing[q <: Quotes & Singleton](using val q: q):
 
     val asEndTerm: Tree =\> PEnd =
         case asAnywhereTerm(t)                           => t
+        case t if asApplication.isDefinedAt(t)           => STerm.Application(asApplication(t))
         case Typed(Ident(name), _)                       => STerm.Result(Vector(vars.varNamed(name)))
         case Ident(name)                                 => STerm.Result(Vector(vars.varNamed(name)))
         case Apply(TupleApp(()), ident.travector(names)) => STerm.Result(names.map(vars.varNamed))
@@ -101,7 +135,9 @@ final class MParsing[q <: Quotes & Singleton](using val q: q):
         case TypeApply(Select(Ident(s"Tuple$_"), "apply"), _) =>
 
     val asAnywhereTerm: Tree =\> PAnywhere =
-        case asApplication(app) => STerm.Application(app)
+        case t if asApplication.isDefinedAt(t) && asApplication(t).args.nonEmpty =>
+            STerm.Application(asApplication(t))
+
     object TupleRepr:
         @threadUnsafe lazy val ConsS = TypeRepr.of[? *: ?].classSymbol
         @threadUnsafe lazy val NilS  = TypeRepr.of[EmptyTuple].classSymbol
@@ -129,8 +165,8 @@ final class MParsing[q <: Quotes & Singleton](using val q: q):
 
     private def fullVector[A] = ({ case Some(a) => a }: Option[A] =\> A).travector
 
-    case class TuplingState(app: Option[PApp] = None, bindings: Vector[Option[Var[q]]] = Vector.empty, arity: Int = 0):
-        def addBinding(index: Int, binding: Var[q]) =
+    case class TuplingState(app: Option[PApp] = None, bindings: Vector[Option[Var[q.type]]] = Vector.empty, arity: Int = 0):
+        def addBinding(index: Int, binding: Var[q.type]) =
             val newBindings =
                 if bindings.size > index then bindings.updated(index, Some(binding))
                 else bindings ++ Vector.fill(index - bindings.size)(None) :+ Some(binding)
@@ -148,12 +184,12 @@ final class MParsing[q <: Quotes & Singleton](using val q: q):
     ):
         private def add(mid: PMid) = copy(result = result :+ mid)
 
-        private def updateTupling(v: Var[q])(f: TuplingState => TuplingState) =
+        private def updateTupling(v: Var[q.type])(f: TuplingState => TuplingState) =
             f(tuplings.getOrElse(v.name, TuplingState())) match
                 case CompleteTuplingState(mid) => add(mid).copy(tuplings = tuplings - v.name)
                 case tupling                   => copy(tuplings = tuplings.updated(v.name, tupling))
 
-        def push(cmd: STerm[Var[q], Tree] & (Pos.Mid | Pos.Tupling)): DetupleState = cmd match
+        def push(cmd: STerm[Var[q.type], Tree] & (Pos.Mid | Pos.Tupling)): DetupleState = cmd match
             case STerm.Tupled(receiver, arity, application) => updateTupling(receiver)(_.define(application, arity))
             case STerm.Untupling(src, tgt, index)           => updateTupling(src)(_.addBinding(index, tgt))
             case term: Pos.Mid                              => add(term)

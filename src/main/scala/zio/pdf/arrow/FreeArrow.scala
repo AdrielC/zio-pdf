@@ -79,7 +79,7 @@ object FreeArrow {
       G.compose(right.foldMap(fg), left.foldMap(fg))
   }
 
-  private final case class Par[Flow[_, _], A: Ob, B: Ob, C: Ob, D: Ob](
+  private final case class Par[Flow[_, _], A, B, C, D](
       left:  FreeArrow[Flow, A, B],
       right: FreeArrow[Flow, C, D]
   ) extends FreeArrow[Flow, (A, C), (B, D)] {
@@ -88,14 +88,50 @@ object FreeArrow {
       G.split(left.foldMap(fg), right.foldMap(fg))
   }
 
-  def fanout[Flow[_, _], A: Ob, B: Ob, C: Ob](
+  private final case class Fan[Flow[_, _], A, B, C](
       left:  FreeArrow[Flow, A, B],
       right: FreeArrow[Flow, A, C]
-  )(using F: Category[Flow]): FreeArrow[Flow, A, Prod[B, C]] =
-    sequential(
-      embed(F.fanout(F.id[A], F.id[A])),
-      parallel(left, right)
-    )
+  ) extends FreeArrow[Flow, A, Prod[B, C]] {
+    type Monoidal = ScanGraph.Empty.type
+    def foldMap[G[_, _]](fg: Flow ~~> G)(using G: Category[G]): G[A, Prod[B, C]] =
+      G.fanout(left.foldMap(fg), right.foldMap(fg))
+  }
+
+  private final case class Choose[Flow[_, _], A, B, C, D](
+      left:  FreeArrow[Flow, A, C],
+      right: FreeArrow[Flow, B, D]
+  ) extends FreeArrow[Flow, Sum[A, B], Sum[C, D]] {
+    type Monoidal = ScanGraph.Empty.type
+    def foldMap[G[_, _]](fg: Flow ~~> G)(using G: Category[G]): G[Sum[A, B], Sum[C, D]] =
+      G.choose(left.foldMap(fg), right.foldMap(fg))
+  }
+
+  private final case class Merge[Flow[_, _], A, B, C](
+      left:  FreeArrow[Flow, A, C],
+      right: FreeArrow[Flow, B, C]
+  ) extends FreeArrow[Flow, Sum[A, B], C] {
+    type Monoidal = ScanGraph.Empty.type
+    def foldMap[G[_, _]](fg: Flow ~~> G)(using G: Category[G]): G[Sum[A, B], C] =
+      G.merge(left.foldMap(fg), right.foldMap(fg))
+  }
+
+  def fanout[Flow[_, _], A, B, C](
+      left:  FreeArrow[Flow, A, B],
+      right: FreeArrow[Flow, A, C]
+  ): FreeArrow[Flow, A, Prod[B, C]] =
+    Fan(left, right)
+
+  def choose[Flow[_, _], A, B, C, D](
+      left:  FreeArrow[Flow, A, C],
+      right: FreeArrow[Flow, B, D]
+  ): FreeArrow[Flow, Sum[A, B], Sum[C, D]] =
+    Choose(left, right)
+
+  def merge[Flow[_, _], A, B, C](
+      left:  FreeArrow[Flow, A, C],
+      right: FreeArrow[Flow, B, C]
+  ): FreeArrow[Flow, Sum[A, B], C] =
+    Merge(left, right)
 
   extension [Flow[_, _], A, B](self: FreeArrow[Flow, A, B]) {
     infix def >>>[C](right: FreeArrow[Flow, B, C]): FreeArrow[Flow, A, C] =
@@ -104,8 +140,14 @@ object FreeArrow {
     infix def ***[C, D](right: FreeArrow[Flow, C, D]): FreeArrow[Flow, (A, C), (B, D)] =
       parallel(self, right)
 
-    infix def &&&[C](right: FreeArrow[Flow, A, C])(using F: Category[Flow]): FreeArrow[Flow, A, Prod[B, C]] =
+    infix def &&&[C](right: FreeArrow[Flow, A, C]): FreeArrow[Flow, A, Prod[B, C]] =
       fanout(self, right)
+
+    infix def |||[C](right: FreeArrow[Flow, C, B]): FreeArrow[Flow, Sum[A, C], B] =
+      merge(self, right)
+
+    infix def +++[C, D](right: FreeArrow[Flow, C, D]): FreeArrow[Flow, Sum[A, C], Sum[B, D]] =
+      choose(self, right)
   }
 
   extension [In, Out](self: FreeArrow[LabeledFnArrow, In, Out]) {
