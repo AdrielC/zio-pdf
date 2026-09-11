@@ -67,4 +67,17 @@ class SyntaxTest extends munit.FunSuite:
         assertEquals(res, Vector("x" -> "b", "y" -> "b"))
         assertEquals(out, Tuple1("a"))
 
+    test("produce consume chain"):
+        val exportNode = node("export", 1, 0)
+        val exp: DAG[2, 1] = prop.of2: (a: V1, b: V1) =>
+            bNode(a)
+            bNode(b)
+            val merge = aNode()
+            exportNode(merge)
+            aNode()
+
+        val (out, res) = exp.link[String, Label](("x", "y"))
+        assertEquals(res, Vector("x" -> "b", "y" -> "b", "a" -> "export"))
+        assertEquals(out, Tuple1("a"))
+
 end SyntaxTest

@@ -5,18 +5,18 @@ import volga.SymmetricCat
 import zio.pdf.pipe.{FreePipe, Pipe}
 
 /**
- * Unified pipeline graph — one spine for execution ([[Pipe]] / [[FnArrow]]),
- * analysis ([[ScanGraph]]), and volga wiring ([[ArrowSyntax.Diag]]).
+ * Unified pipeline graph — delegates to [[PipelineSpine]] for the single free-arrow
+ * AST; keeps volga SMC wiring helpers here for backward compatibility.
  */
 object PipelineGraph {
 
-  type Node[A, B] = LabeledFnArrow[A, B]
+  type Node[A, B] = PipelineSpine.Node[A, B]
 
   def node[A, B](name: String, inPorts: Int, outPorts: Int)(pipe: Pipe[A, B]): FreeArrow[Node, A, B] =
-    FreeArrow.embedLabeled(FnArrow.fromPipe(pipe).labeled(name, inPorts, outPorts))
+    PipelineSpine.node(name, inPorts, outPorts)(pipe)
 
   def nodeFn[A, B](name: String, inPorts: Int, outPorts: Int)(arrow: FnArrow[A, B]): FreeArrow[Node, A, B] =
-    FreeArrow.embedLabeled(arrow.labeled(name, inPorts, outPorts))
+    PipelineSpine.nodeFn(name, inPorts, outPorts)(arrow)
 
   def toFnArrow[A, B](graph: FreeArrow[FnArrow, A, B]): FnArrow[A, B] =
     graph.flatCompile.foldMap(BiFunctionK.id[FnArrow])(using FnArrowCat.fnCategory)
@@ -25,74 +25,36 @@ object PipelineGraph {
     Pipe(toFnArrow(graph).run)
 
   def run[A, B](graph: FreeArrow[Node, A, B]): Pipe[A, B] =
-    Pipe(foldNodes(graph).run)
+    PipelineSpine.run(graph)
 
   def foldNodes[A, B](graph: FreeArrow[Node, A, B]): FnArrow[A, B] =
-    graph.flatCompile.foldMap(nodeToFnArrow)(using FnArrowCat.fnCategory)
+    PipelineSpine.foldNodes(graph)
 
   def analyze[A, B](graph: FreeArrow[Node, A, B]): ScanGraph =
-    graph.analyze
+    PipelineSpine.analyze(graph)
 
-  /** Lift labeled nodes to plain [[FnArrow]] for execution. */
   def liftNodes[A, B](graph: FreeArrow[Node, A, B]): FreeArrow[FnArrow, A, B] =
-    FreeArrow.embed(foldNodes(graph))
+    PipelineSpine.liftExecution(graph)
 
-  private val nodeToFnArrow: BiFunctionK[Node, FnArrow] = new BiFunctionK[Node, FnArrow] {
-    def apply[A, B](node: Node[A, B]): FnArrow[A, B] = node.arrow
-  }
-
-  /** [[FreePipe]] → [[FreeArrow]] (fused leaf — structure lives in [[FreePipe]] until folded). */
-  def fromFreePipe[A, B](fp: FreePipe[A, B]): FreeArrow[FnArrow, A, B] =
-    FreeArrow.embed(FnArrow.fromPipe(FreePipe.fold(fp)))
+  /** [[FreePipe]] → labeled [[FreeArrow]] (structure preserved for analyze). */
+  def fromFreePipe[A, B](fp: FreePipe[A, B]): FreeArrow[Node, A, B] =
+    PipelineSpine.fromFreePipe(fp)
 
   def toFreePipe[A, B](graph: FreeArrow[FnArrow, A, B]): FreePipe[A, B] =
     FreePipe.Embed(toPipe(graph))
 
-  /** Render a volga wiring diagram built from SMC syntax. */
   def renderProp[I: Nat, J: Nat](
       title:  String,
       graph:  FreeProp[ArrowSyntax.Label, I, J],
       inputs: Nat.Vec[I, String]
   ): GraphFormats =
-    ArrowSyntax.render(title, graph, inputs)
+    ArrowSyntax.render(title, graph, inputs.toVector*)
 
-  /** Durable schema + diagram formats from a labeled free arrow. */
-  def renderGraph[A, B](title: String, graph: FreeArrow[Node, A, B], inputLabel: String): GraphFormats = {
-    val schema = analyze(graph)
-    val wiring = schemaToWiring(schema, inputLabel)
-    GraphFormats(
-      wiring   = wiring,
-      plantUml = GraphRender.plantUml(title, wiring),
-      mermaid  = GraphRender.mermaid(title, wiring),
-      dot      = GraphRender.dot(title, wiring)
-    )
-  }
+  def renderGraph[A, B](title: String, graph: FreeArrow[Node, A, B], inputLabel: String): GraphFormats =
+    PipelineSpine.render(title, graph, inputLabel)
 
-  /** Best-effort wiring view from an analyzed [[ScanGraph]]. */
-  def schemaToWiring(schema: ScanGraph, inputLabel: String): GraphRender.Wiring = {
-    val edges = collectEdges(schema).distinct
-    val outs  = (if edges.exists(_._1 == inputLabel) then Vector.empty else Vector(inputLabel)) ++
-      collectOutputs(schema, edges).distinct
-    (outs, edges)
-  }
-
-  private def collectEdges(schema: ScanGraph): Vector[(String, String)] = schema match {
-    case ScanGraph.Edge(from, to)                => Vector(from -> to)
-    case ScanGraph.Node(_, _, _, children)       => children.flatMap(collectEdges).toVector
-    case ScanGraph.Graph(nodes, edges)           => (nodes ++ edges).flatMap(collectEdges).toVector
-    case ScanGraph.Empty                         => Vector.empty
-  }
-
-  private def collectOutputs(schema: ScanGraph, edges: Vector[(String, String)]): Vector[String] = {
-    val targets = edges.map(_._2).toSet
-    def names(g: ScanGraph): List[String] = g match {
-      case ScanGraph.Node(name, _, out, _) if out > 0 => List(name)
-      case ScanGraph.Node(_, _, _, children)          => children.flatMap(names)
-      case ScanGraph.Graph(nodes, edges)              => (nodes ++ edges).flatMap(names)
-      case _                                          => Nil
-    }
-    names(schema).filterNot(targets.contains).toVector
-  }
+  def schemaToWiring(schema: ScanGraph, inputLabel: String): GraphRender.Wiring =
+    PipelineSpine.schemaToWiring(schema, inputLabel)
 
   given wiringCat: SymmetricCat[ArrowSyntax.Diag, PropOb] = FreeProp.propCat[ArrowSyntax.Label]
   val wiringProp: volga.syntax.smc.Syntax[ArrowSyntax.Diag, PropOb, Nat.Plus] =

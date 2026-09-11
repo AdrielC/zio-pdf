@@ -33,11 +33,17 @@ object PipelineFlowSpec extends ZIOSpecDefault {
       val both = PipelineFlow.andThen(inc, dbl)
       assertTrue(both.runLocal(3) == 8)
     },
-    test("zip runs parallel branches") {
+    test("zip runs parallel branches with honest fan-out graph") {
       val left  = PipelineFlow.init("l").input[Int]("x").pipe("a")(Pipe(_ + 1)).build
       val right = PipelineFlow.init("r").input[Int]("x").pipe("b")(Pipe(_ * 10)).build
       val both  = PipelineFlow.zip(left, right)
-      assertTrue(both.runLocal(2) == (3, 20))
+      val names = ScanGraph.nodeNames(both.schema)
+      assertTrue(
+        both.runLocal(2) == (3, 20),
+        names.contains("a"),
+        names.contains("b"),
+        !names.contains("zip:l+r")
+      )
     },
     test("dispatch first-match branch") {
       val flow = PipelineFlow
@@ -52,14 +58,29 @@ object PipelineFlowSpec extends ZIOSpecDefault {
         flow.runLocal(10) == "instant"
       )
     },
-    test("wiring block renders volga SMC graph") {
+    test("wiring discovers arity from of1 block (no upfront Nat)") {
       val fuse = ArrowSyntax.node("fuse", 1, 0)
-      val formats = PipelineFlow.wiring[Nat.`1`, Nat.`0`]("wiring-demo", Tuple1("bytes")) { prop =>
-        prop.of1((v: V1) => fuse(v))
+      val formats = PipelineFlow.wiring("wiring-demo", "bytes") {
+        PipelineFlow.prop.of1((v: V1) => fuse(v))
+      }
+      assertTrue(formats.mermaid.contains("bytes --> fuse"))
+    },
+    test("wiring of0 needs no boundary labels") {
+      val a = ArrowSyntax.node("a", 0, 1)
+      val c = ArrowSyntax.node("c", 1, 3)
+      val b = ArrowSyntax.node("b", 1, 0)
+      val formats = PipelineFlow.wiring("of0-demo") {
+        PipelineFlow.prop.of0 {
+          val x         = a()
+          val (u, v, w) = c(x)
+          b(v)
+          (w, u)
+        }
       }
       assertTrue(
-        formats.mermaid.contains("bytes --> fuse")
+        formats.mermaid.contains("a --> c"),
+        formats.mermaid.contains("c --> b")
       )
-    }
+    },
   )
 }

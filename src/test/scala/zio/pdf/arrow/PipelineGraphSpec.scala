@@ -27,7 +27,7 @@ object PipelineGraphSpec extends ZIOSpecDefault {
     test("FreePipe embeds into FreeArrow and folds to same behavior") {
       val fp  = FreePipe.arr[Int, Int](_ * 2)
       val fa  = PipelineGraph.fromFreePipe(fp)
-      val p   = PipelineGraph.toPipe(fa)
+      val p   = PipelineGraph.run(fa)
       assertTrue(p.run(5) == 10, FreePipe.fold(fp).run(5) == p.run(5))
     },
     test("FreeArrow flatCompile + analyze on labeled spine") {
