@@ -34,7 +34,9 @@ if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)*$ ]]; then
   exit 1
 fi
 
-sbt -batch ";set root / publishTo := Some(Resolver.file(\"consumer-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));root/publish"
+# Dirty snapshot versions include a timestamp; reapplying settings may otherwise
+# change the version between discovery, publication, and consumer resolution.
+sbt -batch ";set ThisBuild / version := \"${VERSION}\";set root / publishTo := Some(Resolver.file(\"consumer-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));root/publish"
 
 cd "${CONSUMER_ROOT}"
 sbt -batch -Dzio.pdf.local.repo="${PUBLISH_REPO}" -Dzio.pdf.version="${VERSION}" run

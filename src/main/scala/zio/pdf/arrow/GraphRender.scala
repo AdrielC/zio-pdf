@@ -33,8 +33,10 @@ object GraphRender {
 
   /** Mermaid flowchart (GitHub-renderable). */
   def mermaid(title: String, wiring: Wiring): String = {
-    val (_, edges) = wiring
-    val body       = edges.map { case (from, to) => s"  $from --> $to" }.mkString("\n")
+    val (outs, edges) = wiring
+    val connected = edges.iterator.flatMap { case (from, to) => Iterator(from, to) }.toSet
+    val isolated = outs.distinct.filterNot(connected.contains).map(name => s"  $name")
+    val body = (isolated ++ edges.map { case (from, to) => s"  $from --> $to" }).mkString("\n")
     s"""flowchart LR
        |%% $title
        |$body""".stripMargin
@@ -42,8 +44,10 @@ object GraphRender {
 
   /** Dot/graphviz digraph. */
   def dot(title: String, wiring: Wiring): String = {
-    val (_, edges) = wiring
-    val body       = edges.map { case (from, to) => s"""  "$from" -> "$to";""".stripMargin }.mkString("\n")
+    val (outs, edges) = wiring
+    val connected = edges.iterator.flatMap { case (from, to) => Iterator(from, to) }.toSet
+    val isolated = outs.distinct.filterNot(connected.contains).map(name => s"""  "$name";""")
+    val body = (isolated ++ edges.map { case (from, to) => s"""  "$from" -> "$to";""" }).mkString("\n")
     s"""digraph "${title.replace("\"", "\\\"")}" {
        |$body
        |}""".stripMargin

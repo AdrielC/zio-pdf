@@ -68,7 +68,7 @@ object Xref extends XrefCodec {
 
   def padZeroes[A: Numeric](max: Int)(number: A): String = {
     val numberString = number.toString
-    val padding      = new String(Array.fill(max - numberString.length)('0'))
+    val padding      = "0" * math.max(0, max - numberString.length)
     padding + numberString
   }
 

@@ -145,6 +145,20 @@ lazy val root = (project in file("."))
   .dependsOn(volgaCore)
   .settings(
     name := "zio-pdf",
+    // volga is vendored implementation, not a separately published dependency.
+    Compile / packageBin / mappings ++= (volgaCore / Compile / packageBin / mappings).value,
+    Compile / packageSrc / mappings ++= (volgaCore / Compile / packageSrc / mappings).value,
+    pomPostProcess := { pom =>
+      val removeVendor = new scala.xml.transform.RewriteRule {
+        override def transform(node: scala.xml.Node): scala.xml.NodeSeq = node match {
+          case dependency: scala.xml.Elem
+              if dependency.label == "dependency" && (dependency \ "artifactId").text == "volga-core_3" =>
+            scala.xml.NodeSeq.Empty
+          case other => other
+        }
+      }
+      new scala.xml.transform.RuleTransformer(removeVendor).transform(pom).head
+    },
     libraryDependencies ++= List(
       "dev.zio"   %% "zio"               % zioVersion,
       "dev.zio"   %% "zio-streams"       % zioVersion,
@@ -183,6 +197,11 @@ private val jsExcludedSourcePaths = Set(
   "zio/pdf/PdfHyperdrive.scala",
   "zio/pdf/Tiff.scala",
   "zio/pdf/io/PdfIO.scala",
+  // These facades call the JVM-only fused/mmap backend excluded below.
+  "zio/pdf/arrow/IngestGraph.scala",
+  "zio/pdf/tacit/PdfFlow.scala",
+  "zio/pdf/tacit/PdfPipeline.scala",
+  "zio/pdf/tacit/PdfPipes.scala",
   "zio/pdf/pipe/ByteDigest.scala",
   "zio/pdf/pipe/ByteFeed.scala",
   "zio/pdf/pipe/DecodePipeline.scala",
@@ -235,9 +254,24 @@ lazy val scalaJs = (project in file("js"))
     ),
     Compile / unmanagedSources := {
       val repo = (LocalRootProject / baseDirectory).value
-      jsSharedSources(repo) ++ ((baseDirectory.value / "src" / "main" / "scala") ** "*.scala").get()
+      jsSharedSources(repo) ++ ((baseDirectory.value / "src" / "main" / "scala") ** "*.scala").get() ++
+        ((repo / "modules" / "volga-core" / "src" / "main" / "scala-3") ** "*.scala").get()
     },
-    Test / unmanagedSources := ((baseDirectory.value / "src" / "test" / "scala") ** "*.scala").get(),
+    scalacOptions ++= Seq("-Xkind-projector:underscores", "-Wconf:src=.*modules/volga-core/.*:silent"),
+    Compile / packageSrc / mappings := {
+      val repo = (LocalRootProject / baseDirectory).value
+      val converter = fileConverter.value
+      val roots = Seq(repo / "src" / "main" / "scala", baseDirectory.value / "src" / "main" / "scala",
+        repo / "modules" / "volga-core" / "src" / "main" / "scala-3")
+      (Compile / unmanagedSources).value.map { source =>
+        converter.toVirtualFile(source.toPath) -> roots.iterator.flatMap(root => IO.relativize(root, source)).next()
+      }
+    },
+    Test / unmanagedSources := {
+      val shared = (LocalRootProject / baseDirectory).value / "src" / "test" / "scala" / "zio" / "pdf"
+      ((baseDirectory.value / "src" / "test" / "scala") ** "*.scala").get() ++
+        Seq(shared / "XrefStreamSpec.scala", shared / "AsciiFilterBoundsSpec.scala")
+    },
     Test / unmanagedResourceDirectories +=
       (LocalRootProject / Test / resourceDirectory).value,
     Test / fork := false,
