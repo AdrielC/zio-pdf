@@ -42,6 +42,19 @@ final case class PdfDocument(version: String, objects: Vector[PdfObject], traile
   def root: Option[ObjectRef] = trailer.get("Root").collect { case PdfValue.Ref(value) => value }
   def encrypted: Boolean = trailer.get("Encrypt").nonEmpty
 
+/** A full rewrite owns its byte layout and emits a new classic xref table. */
+private object PdfTrailer:
+  private val layoutFields = Set(
+    "Size", "Prev", "XRefStm", "Type", "W", "Index", "Length", "Filter", "DecodeParms",
+    "F", "FFilter", "FDecodeParms", "DL"
+  )
+
+  def forRewrite(trailer: PdfValue.Dict): PdfValue.Dict =
+    // Merged incremental trailers use last-entry semantics. Emit each retained
+    // key once and discard every occurrence of fields describing the old layout.
+    PdfValue.Dict(trailer.fields.reverseIterator.filterNot(field => layoutFields(field.name))
+      .toVector.distinctBy(_.name).reverse)
+
 /** Immutable bounded input accumulator for chunked Kyo ingestion.
   *
   * Chunks remain separate while input arrives. `finish` performs the only
@@ -156,7 +169,8 @@ object PdfPages:
     for
       originalRoot <- document.root.toRight(PdfError.InvalidPdf("PDF trailer has no Root reference"))
       catalog <- objects.get(originalRoot).flatMap(_.dictionary).toRight(PdfError.InvalidPdf("PDF catalog is unreadable"))
-      retained <- dependencyClosure(objects, catalog, selected)
+      trailer = PdfTrailer.forRewrite(document.trailer).removed("Root")
+      retained <- dependencyClosure(objects, catalog, selected, trailer)
       dependencies = retained.filterNot(selectedRefs.contains)
       mapping = (selectedRefs ++ dependencies).zipWithIndex.map { (ref, index) => ref -> ObjectRef(index + 3L) }.toMap
       selectedObjects <- selected.foldLeft[Either[PdfError, Vector[PdfObject]]](Right(Vector.empty)) { case (result, (ref, page)) =>
@@ -187,13 +201,15 @@ object PdfPages:
         "Type" -> Name("Pages"),
         "Kids" -> Array(kids),
         "Count" -> Number(BigDecimal(selected.length))))
+      rewrittenTrailer = (Dict(trailer.fields.map(field => field.copy(value = rewrite(field.value, mapping)))): Dict)
     yield PdfDocument(document.version, Vector(catalogObject, pagesObject) ++ selectedObjects ++ dependencyObjects,
-      dict("Root" -> Ref(ObjectRef(1)), "Size" -> Number(BigDecimal(mapping.size + 3))))
+      rewrittenTrailer.updated("Root", Ref(ObjectRef(1))).updated("Size", Number(BigDecimal(mapping.size + 3))))
 
   private def dependencyClosure(
     objects: Map[ObjectRef, PdfObject],
     catalog: Dict,
-    selected: Vector[(ObjectRef, Dict)]
+    selected: Vector[(ObjectRef, Dict)],
+    trailer: Dict
   ): Either[PdfError, Vector[ObjectRef]] =
     val retained = scala.collection.mutable.LinkedHashSet.empty[ObjectRef]
     def visit(ref: ObjectRef, replacement: Option[PdfValue] = None): Either[PdfError, Unit] =
@@ -208,6 +224,7 @@ object PdfPages:
         result.flatMap(_ => visit(ref, Some(page.removed("Parent"))))
       }
       _ <- refs(catalog.removed("Pages")).foldLeft[Either[PdfError, Unit]](Right(()))((result, ref) => result.flatMap(_ => visit(ref)))
+      _ <- refs(trailer).foldLeft[Either[PdfError, Unit]](Right(()))((result, ref) => result.flatMap(_ => visit(ref)))
     yield retained.toVector
 
   private def rewrite(value: PdfValue, mapping: Map[ObjectRef, ObjectRef]): PdfValue = value match
@@ -258,7 +275,7 @@ object PdfWriter:
         case Some((offset, generation)) => text(f"$offset%010d $generation%05d n \n")
         case None => text("0000000000 00000 f \n")
     }
-    val trailer = document.trailer.updated("Size", Number(BigDecimal(maximum + 1)))
+    val trailer = PdfTrailer.forRewrite(document.trailer).updated("Size", Number(BigDecimal(maximum + 1)))
     text(s"trailer\n${encode(trailer)}\nstartxref\n$xref\n%%EOF\n")
     out.toByteArray
 

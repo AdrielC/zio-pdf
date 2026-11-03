@@ -71,6 +71,40 @@ object PdfParserSpec extends ZIOSpecDefault:
       s"<< /Length ${second.length} >>\nstream\n$second\nendstream"
     ))
 
+  private def incrementalPdf: Array[Byte] =
+    val original = new String(twoPagePdf, ISO_8859_1)
+    val previous = original.substring(original.lastIndexOf("startxref") + 9).trim.takeWhile(_.isDigit)
+    val infoOffset = original.length
+    val info = "7 0 obj\n<< /Title (Synthetic revision) >>\nendobj\n"
+    val xref = infoOffset + info.length
+    (original + info + f"xref\n7 1\n$infoOffset%010d 00000 n \n" +
+      s"trailer\n<< /Size 8 /Root 1 0 R /Info 7 0 R /ID [<0102> <0304>] /Custom [7 0 R] /Prev $previous >>\nstartxref\n$xref\n%%EOF\n")
+      .getBytes(ISO_8859_1)
+
+  private def xrefStreamPdf: Array[Byte] =
+    val objects = List(
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>",
+      "<< /Title (Synthetic xref stream) >>"
+    )
+    val out = new StringBuilder("%PDF-1.7\n")
+    val offsets = objects.zipWithIndex.map { (obj, index) =>
+      val offset = out.length
+      out.append(s"${index + 1} 0 obj\n$obj\nendobj\n")
+      offset
+    }
+    val xref = out.length
+    val entries = Vector((0, 0, 65535)) ++ (offsets :+ xref).map(offset => (1, offset, 0))
+    val payload = entries.flatMap { (kind, offset, generation) =>
+      Vector(kind.toByte, (offset >>> 8).toByte, offset.toByte, (generation >>> 8).toByte, generation.toByte)
+    }
+    val compressed = deflate(new String(payload.toArray, ISO_8859_1))
+    out.append(s"5 0 obj\n<< /Type /XRef /Size 6 /Root 1 0 R /Info 4 0 R /ID [<0102> <0304>] " +
+      s"/W [1 2 2] /Index [0 6] /Length ${compressed.length} /Filter /FlateDecode /DecodeParms << /Predictor 1 >> >>\n" +
+      s"stream\n$compressed\nendstream\nendobj\nstartxref\n$xref\n%%EOF\n")
+    out.toString.getBytes(ISO_8859_1)
+
   private def signedFormPdf: Array[Byte] =
     val content = "BT (Signed form) Tj ET"
     assemble(List(
@@ -206,6 +240,51 @@ object PdfParserSpec extends ZIOSpecDefault:
       val unsupported = result(PdfContentParser.parse("BT (\\101) Tj ET".getBytes(ISO_8859_1)))
       assertTrue(valid.exists(_.exists(_ == ContentToken.Operator("TJ"))), unsupported.isLeft)
     },
+    test("content limits count every array and nested operand before parsing it") {
+      def parse(content: String, maxTokens: Int) =
+        result(PdfContentParser.parse(content.getBytes(ISO_8859_1), PdfContentParser.Limits(maxTokens = maxTokens)))
+      val nested = "[1 [2 3] []] TJ"
+      val exhausted = parse("[1 <<", 2)
+      val parsedStream = for
+        limit <- result(ByteLimit.mebibytes(1))
+        document <- result(PdfDocument.decode(pdf(nested), limit))
+        stream <- document.byRef.get(ObjectRef(4)).toRight(PdfError.InvalidPdf("missing content stream"))
+        bytes <- syncResult(PdfDocument.decodedStream(stream))
+      yield bytes.toArray
+      assertTrue(
+        parse(nested, 7).isRight,
+        parse(nested, 6).left.exists(_.message.contains("token count")),
+        parse("[1 2 3]", 3).left.exists(_.message.contains("token count")),
+        parse("1 2", 2).isRight,
+        parse("1 2 3", 2).left.exists(_.message.contains("token count")),
+        exhausted.left.exists(_.message.contains("token count")),
+        parsedStream.flatMap(bytes => result(PdfContentParser.parse(bytes, PdfContentParser.Limits(maxTokens = 6))))
+          .left.exists(_.message.contains("token count"))
+      )
+    },
+    test("content limits count empty arrays and literal parentheses at the depth boundary") {
+      def parse(content: String, maxDepth: Int) =
+        result(PdfContentParser.parse(content.getBytes(ISO_8859_1), PdfContentParser.Limits(maxDepth = maxDepth)))
+      assertTrue(
+        parse("1 /F1 Tf", 0).isRight,
+        parse("[]", 0).isLeft,
+        parse("()", 0).isLeft,
+        parse("[[]]", 1).isLeft,
+        parse("[[]]", 2).isRight,
+        parse("[(text)]", 1).isLeft,
+        parse("[(text)]", 2).isRight,
+        parse("((text))", 1).isLeft,
+        parse("((text))", 2).isRight
+      )
+    },
+    test("content limits admit the byte boundary and reject one byte over it") {
+      val bytes = "BT (PDF) Tj ET".getBytes(ISO_8859_1)
+      assertTrue(
+        result(PdfContentParser.parse(bytes, PdfContentParser.Limits(maxBytes = bytes.length))).isRight,
+        result(PdfContentParser.parse(bytes, PdfContentParser.Limits(maxBytes = bytes.length - 1))) ==
+          Left(PdfError.TooLarge(bytes.length.toLong - 1, bytes.length.toLong))
+      )
+    },
     test("decoded document graph preserves page and stream objects") {
       val decoded = result(ByteLimit.mebibytes(1).map(limit => PdfDocument.decode(twoPagePdf, limit)))
       val pages = decoded.flatMap(document => result(PdfPages.pageRefs(document)))
@@ -252,6 +331,82 @@ object PdfParserSpec extends ZIOSpecDefault:
         selected.exists(_._2.length == 1),
         selected.exists(_._1.root.contains(ObjectRef(1))),
         content.exists(bytes => new String(bytes.toArray, ISO_8859_1).contains("Second"))
+      )
+    },
+    test("rewritten trailers discard revision offsets and keep document metadata") {
+      val checked = for
+        limit <- result(ByteLimit.mebibytes(1))
+        _ <- qpdfCheck(incrementalPdf, "synthetic incremental input")
+        original <- result(PdfDocument.decode(incrementalPdf, limit))
+        written <- syncResult(PdfWriter.write(original))
+        _ <- qpdfCheck(written.toArray, "synthetic incremental rewrite")
+        decoded <- result(PdfDocument.decode(written.toArray, limit))
+      yield (original, decoded, new String(written.toArray, ISO_8859_1))
+      assertTrue(
+        checked.exists(_._1.trailer.get("Prev").nonEmpty),
+        checked.exists(_._2.trailer.fields.map(_.name).sorted == Vector("Custom", "ID", "Info", "Root", "Size")),
+        checked.exists(value => value._2.trailer.get("Info") == value._1.trailer.get("Info")),
+        checked.exists(value => value._2.trailer.get("ID") == value._1.trailer.get("ID")),
+        checked.exists(_._2.trailer.get("Size").contains(PdfValue.Number(8))),
+        checked.exists { (_, _, text) =>
+          val offset = text.substring(text.lastIndexOf("startxref") + 9).trim.takeWhile(_.isDigit).toInt
+          text.startsWith("xref\n0 8\n", offset)
+        }
+      )
+    },
+    test("rewritten trailers replace xref-stream fields with a classic xref size") {
+      val checked = for
+        limit <- result(ByteLimit.mebibytes(1))
+        _ <- qpdfCheck(xrefStreamPdf, "synthetic xref-stream input")
+        original <- result(PdfDocument.decode(xrefStreamPdf, limit))
+        written <- syncResult(PdfWriter.write(original))
+        _ <- qpdfCheck(written.toArray, "synthetic xref-stream rewrite")
+        decoded <- result(PdfDocument.decode(written.toArray, limit))
+      yield (original, decoded, new String(written.toArray, ISO_8859_1))
+      assertTrue(
+        checked.exists(_._1.trailer.get("Type").contains(PdfValue.Name("XRef"))),
+        checked.exists(_._2.trailer.fields.map(_.name).sorted == Vector("ID", "Info", "Root", "Size")),
+        checked.exists(value => value._2.trailer.get("Info") == value._1.trailer.get("Info")),
+        checked.exists(value => value._2.trailer.get("ID") == value._1.trailer.get("ID")),
+        checked.exists(_._2.trailer.get("Size").contains(PdfValue.Number(5))),
+        checked.exists(_._3.contains("xref\n0 5\n"))
+      )
+    },
+    test("rewritten trailers remove every occurrence of obsolete layout fields") {
+      val checked = for
+        limit <- result(ByteLimit.mebibytes(1))
+        original <- result(PdfDocument.decode(pdf(), limit))
+        stale = Vector("Prev", "XRefStm", "Type", "W", "Index", "Length", "Filter", "DecodeParms", "F", "FFilter", "FDecodeParms", "DL", "Size")
+        fields = stale.flatMap(name => Vector.fill(2)(PdfField(name, PdfValue.Number(999))))
+        written <- syncResult(PdfWriter.write(original.copy(trailer = PdfValue.Dict(original.trailer.fields ++ fields))))
+        _ <- qpdfCheck(written.toArray, "synthetic stale trailer fields")
+        decoded <- result(PdfDocument.decode(written.toArray, limit))
+      yield decoded.trailer
+      assertTrue(checked.exists(_.fields.map(_.name).sorted == Vector("Root", "Size")),
+        checked.exists(_.get("Size").contains(PdfValue.Number(5))))
+    },
+    test("rewritten trailers remap retained metadata references during page selection") {
+      val checked = for
+        limit <- result(ByteLimit.mebibytes(1))
+        original <- result(PdfDocument.decode(incrementalPdf, limit))
+        selected <- result(PdfPages.select(original, 2, 2))
+        written <- syncResult(PdfWriter.write(selected))
+        _ <- qpdfCheck(written.toArray, "synthetic selected revision")
+        decoded <- result(PdfDocument.decode(written.toArray, limit))
+        pages <- result(PdfPages.pageRefs(decoded))
+        info <- decoded.trailer.get("Info").collect { case PdfValue.Ref(ref) => ref }
+          .toRight(PdfError.InvalidPdf("missing rewritten Info reference"))
+        metadata <- decoded.byRef.get(info).toRight(PdfError.InvalidPdf("dangling rewritten Info reference"))
+      yield (original, selected, decoded, pages, info, metadata)
+      assertTrue(
+        checked.exists(_._4.length == 1),
+        checked.exists(_._5 != ObjectRef(7)),
+        checked.exists(value => value._3.trailer.get("Custom").contains(PdfValue.Array(Vector(PdfValue.Ref(value._5))))),
+        checked.exists(value => value._3.trailer.get("ID") == value._1.trailer.get("ID")),
+        checked.exists(_._6.dictionary.flatMap(_.get("Title")) ==
+          Some(PdfValue.Literal("Synthetic revision".getBytes(ISO_8859_1).toVector))),
+        checked.exists(_._2.trailer.get("Prev").isEmpty),
+        checked.exists(value => value._3.trailer.get("Size").contains(PdfValue.Number(value._3.objects.length + 1)))
       )
     },
     test("page selection materializes inherited page attributes") {

@@ -17,6 +17,9 @@ enum ContentToken derives Schema:
   * fail through `Abort[PdfError]`; the parser never guesses past them.
   */
 object PdfContentParser:
+  /** `maxTokens` includes arrays and all nested operands. `maxDepth` counts
+    * open arrays and literal-string parentheses; zero permits only scalars.
+    */
   final case class Limits(maxBytes: Int = 512 * 1024, maxTokens: Int = 50000, maxDepth: Int = 16) derives Schema
 
   def parse(bytes: Array[Byte], limits: Limits = Limits()): Vector[ContentToken] < Abort[PdfError] =
@@ -51,11 +54,16 @@ object PdfContentParser:
       at
 
     def token(start: Int, depth: Int): Either[(Int, String), (Int, ContentToken)] =
-      if depth > limits.maxDepth then Left((start, "PDF content nesting exceeds the configured limit"))
+      if count >= limits.maxTokens then Left((start, "PDF content token count exceeds the configured limit"))
+      else if depth > limits.maxDepth then Left((start, "PDF content nesting exceeds the configured limit"))
       else
+        // Reserve the node before parsing its payload or any array children.
+        count += 1
         val at = skip(start)
         if at >= input.length then Left((at, "Unexpected end of PDF content"))
         else input.charAt(at) match
+          case '(' | '[' if depth >= limits.maxDepth =>
+            Left((at, "PDF content nesting exceeds the configured limit"))
           case '(' =>
             var cursor = at + 1
             var nesting = 1
@@ -114,10 +122,9 @@ object PdfContentParser:
 
     var cursor = skip(0)
     while cursor < input.length do
-      if count >= limits.maxTokens then return Left((cursor, "PDF content token count exceeds the configured limit"))
       token(cursor, 0) match
         case Left(error) => return Left(error)
-        case Right((next, value)) => output += value; count += 1; cursor = skip(next)
+        case Right((next, value)) => output += value; cursor = skip(next)
     Right(output.result())
 
   private def whitespace(char: Char): Boolean = char.isWhitespace || char == 0
