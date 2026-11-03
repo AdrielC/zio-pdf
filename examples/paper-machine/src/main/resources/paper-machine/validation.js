@@ -25,16 +25,19 @@ function validationNotice(text = "", error = false) {
   $("validation-notice").textContent = text;
   $("validation-notice").classList.toggle("error", error);
 }
-function selectStudioTool(validate) {
+function selectStudioTool(tool) {
+  const mode = tool === true ? "validate" : tool === false ? "explore" : tool;
+  const validate = mode === "validate";
   validationState.active = validate;
-  $("validation-pane").hidden = !validate;
-  $("explore-pane").hidden = validate;
-  for (const [id, active] of [
-    ["validate-tab", validate],
-    ["explore-tab", !validate],
+  for (const [name, pane] of [
+    ["explore", "explore-pane"],
+    ["validate", "validation-pane"],
+    ["pipeline", "pipeline-pane"],
   ]) {
-    $(id).setAttribute("aria-selected", String(active));
-    $(id).tabIndex = active ? 0 : -1;
+    const active = name === mode;
+    $(pane).hidden = !active;
+    $(`${name}-tab`).setAttribute("aria-selected", String(active));
+    $(`${name}-tab`).tabIndex = active ? 0 : -1;
   }
   $("open-label").textContent = validate ? "Add PDFs" : "Open a PDF";
   $("open-limits").textContent = validate
@@ -43,9 +46,14 @@ function selectStudioTool(validate) {
   $("open").disabled = state.busy || (validate && validationState.running);
   document.querySelector(".skip-link").href = validate
     ? "#validation-pane"
-    : "#workspace";
-  history.replaceState(null, "", validate ? "#validate" : "#explore");
+    : mode === "pipeline"
+      ? "#pipeline-pane"
+      : "#workspace";
+  history.replaceState(null, "", `#${mode}`);
+  if (mode === "pipeline" && typeof enterPipelines === "function")
+    enterPipelines();
 }
+
 function updateValidationStatus() {
   if (!state.doc) return;
   const found = validationState.items.find(
@@ -438,17 +446,26 @@ function saveValidationReport(format) {
 }
 $("explore-tab").addEventListener("click", () => selectStudioTool(false));
 $("validate-tab").addEventListener("click", () => selectStudioTool(true));
-for (const [id, other] of [
-  ["explore-tab", "validate-tab"],
-  ["validate-tab", "explore-tab"],
-])
+for (const [index, id] of [
+  "explore-tab",
+  "validate-tab",
+  "pipeline-tab",
+].entries()) {
   $(id).addEventListener("keydown", (event) => {
-    if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
+    if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
       event.preventDefault();
-      selectStudioTool(other === "validate-tab");
-      $(other).focus();
+      const modes = ["explore", "validate", "pipeline"];
+      const target =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? 2
+            : (index + (event.key === "ArrowRight" ? 1 : 2)) % 3;
+      selectStudioTool(modes[target]);
+      $(`${modes[target]}-tab`).focus();
     }
   });
+}
 $("validation-add").addEventListener("click", () =>
   $("validation-files").click(),
 );
@@ -535,7 +552,9 @@ $("validate-current").addEventListener("click", async () => {
     notify(error.message, true);
   }
 });
-selectStudioTool(location.hash === "#validate");
+selectStudioTool(
+  location.hash === "#pipeline" ? "pipeline" : location.hash === "#validate",
+);
 drawValidationQueue();
 async function validateBuiltDocument(doc) {
   const response = await fetch(`/api/documents/${doc.id}/file`);

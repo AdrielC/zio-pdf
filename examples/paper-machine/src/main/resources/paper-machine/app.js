@@ -122,6 +122,7 @@ function activate(doc) {
   showPage(1);
   drawSequence();
   if (typeof updateValidationStatus === "function") updateValidationStatus();
+  document.dispatchEvent(new Event("pdf-activated"));
 }
 
 function drawGraph() {

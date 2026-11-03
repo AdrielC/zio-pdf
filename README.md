@@ -75,6 +75,13 @@ PDF/A-2b, and PDF/A-3u profiles together with veraPDF. Namespace-aware XMP
 identification remains separate from validation. Results include exact-file
 fingerprints, rule evidence, and downloadable JSON/CSV batch reports.
 
+The **Pipelines** tab composes named PDF operations into saved JSON recipes. Bind
+PDF inputs separately, edit connections, insert saved subpipelines, and run graphs
+with several output PDFs and validation branches. A typed Scala builder and Kyo
+runner live in [kyo-pdf-pipeline](kyo-pdf-pipeline/README.md); the example also compiles
+real Volga SMC wiring into the same data model. Shared steps execute once and
+validation receipts identify the exact written bytes.
+
 ### Kyo package migration
 
 The Kyo core now uses `io.github.adrielc.kyopdf` and its adapter uses

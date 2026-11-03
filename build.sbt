@@ -119,15 +119,29 @@ lazy val kyoPdfZio = (project in file("kyo-pdf-zio"))
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 
+/** Data-defined PDF graphs; interpreters supply artwork and validation services. */
+lazy val kyoPdfPipeline = (project in file("kyo-pdf-pipeline"))
+  .dependsOn(kyoPdf)
+  .settings(kyoPdfArtifactSettings)
+  .settings(
+    name := "kyo-pdf-pipeline",
+    libraryDependencies ++= List(
+      "dev.zio" %% "zio-test" % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt" % zioVersion % Test
+    ),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
 /** Loopback-only visual explorer; rendering stays outside the Kyo core. */
 lazy val paperMachine = (project in file("examples/paper-machine"))
-  .dependsOn(kyoPdf)
+  .dependsOn(kyoPdfPipeline, volgaCore)
   .settings(
     name := "paper-machine",
     publish / skip := true,
     libraryDependencies ++= List(
       "org.apache.pdfbox" % "pdfbox" % "3.0.4",
-      "org.verapdf" % "validation-model" % "1.30.3"
+      "org.verapdf" % "validation-model" % "1.30.3",
+      "com.google.code.gson" % "gson" % "2.13.1"
     ),
     Compile / mainClass := Some("io.github.adrielc.kyopdf.demo.PaperMachine")
   )

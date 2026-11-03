@@ -37,6 +37,8 @@ type TResults[U[_], X] <: Tuple = X match
 
 type Results[U[_], X] = X match
     case Nat.Zero             => Unit
+    // A single wire composes directly with the next unary operation.
+    case Nat.Succ[Nat.Zero]    => V[Nat.`1`]
     case Nat.Succ[n]          => V[Nat.`1`] *: TResults[U, n]
     case U[tags.Tensor[u, v]] => Results[U, u] *: TResults[U, v]
     case U[tags.One]          => Unit
@@ -44,6 +46,9 @@ type Results[U[_], X] = X match
 
 final abstract class SyApp[H[_, _], U[_]] extends Aliases[H, U]:
     extension [A, B](f: H[A, B]) def apply(v: V[A]): Results[U, B]
+    extension [B](f: H[Nat.`2`, B]) def apply(a: V[Nat.`1`], b: V[Nat.`1`]): Results[U, B]
+    extension [B](f: H[Nat.OfInt[3], B]) def apply(a: V[Nat.`1`], b: V[Nat.`1`], c: V[Nat.`1`]): Results[U, B]
+    extension [B](f: H[Nat.OfInt[4], B]) def apply(a: V[Nat.`1`], b: V[Nat.`1`], c: V[Nat.`1`], d: V[Nat.`1`]): Results[U, B]
     extension [B](f: H[I, B]) def apply(): V[B]
 
 trait TEq[A1 <: AnyKind, A2 <: AnyKind]

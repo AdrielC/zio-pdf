@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/style.css" />
     <script src="/app.js" defer></script>
     <script src="/validation.js" defer></script>
+    <script src="/pipelines.js" defer></script>
   </head>
   <body>
     <!--
@@ -80,6 +81,15 @@ all actions work with a keyboard. Motion respects reduced-motion preferences.
           tabindex="-1"
         >
           Validate PDFs <span class="tab-note">BATCH + MULTI-PROFILE</span>
+        </button>
+        <button
+          id="pipeline-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="pipeline-pane"
+          tabindex="-1"
+        >
+          Pipelines <span class="tab-note">SAVE + COMPOSE</span>
         </button>
       </nav>
       <div id="explore-pane" role="tabpanel" aria-labelledby="explore-tab">
@@ -476,6 +486,179 @@ The selected object's dictionary will appear here.</pre
           veraPDF parse · isolated validator with a 45-second limit. Failure
           details show up to 24 examples per profile; all checks still run.
           Files the validator cannot open or finish receive “Unable to check”.
+        </p>
+      </section>
+      <!-- PIPELINES: Extend the circuit analyzer. A selected operation energizes its
+      connections. Named PDF inputs, a focused operation editor, and a live graph
+      share one recipe. Save/load and fragment insertion preserve plain data.
+      FIRST VIEWPORT: recipe actions and one Run action above the editor and graph.
+      Narrow screens stack the editor above a scrollable graph; controls remain native. -->
+      <section
+        id="pipeline-pane"
+        role="tabpanel"
+        aria-labelledby="pipeline-tab"
+        hidden
+      >
+        <div class="pipeline-heading">
+          <div>
+            <h2>Wire it once. Run it again.</h2>
+            <p>
+              Compose a recipe from PDF operations. Save the data, swap the
+              inputs, and run the same graph.
+            </p>
+          </div>
+          <button class="text-button" id="pipeline-capture">
+            Capture current packet
+          </button>
+        </div>
+        <div class="pipeline-toolbar">
+          <label
+            >Recipe name<input
+              id="pipeline-name"
+              maxlength="80"
+              value="Marked packet"
+          /></label>
+          <button class="text-button" id="pipeline-save">Save recipe</button>
+          <button class="text-button" id="pipeline-load">Load recipe</button>
+          <button class="text-button" id="pipeline-insert">
+            Insert saved recipe
+          </button>
+          <input
+            type="file"
+            id="pipeline-file"
+            accept="application/json,.json"
+            hidden
+          />
+        </div>
+        <section class="pipeline-inputs" aria-labelledby="pipeline-input-title">
+          <h3 id="pipeline-input-title">Bind your PDFs</h3>
+          <p>
+            Recipes keep slot names and settings. Files are chosen separately
+            and stay on this machine.
+          </p>
+          <div id="pipeline-bindings"></div>
+        </section>
+        <section
+          id="pipeline-fragment"
+          class="pipeline-fragment"
+          aria-labelledby="fragment-title"
+          hidden
+        >
+          <h3 id="fragment-title">Connect the saved recipe</h3>
+          <p id="fragment-name"></p>
+          <div id="fragment-bindings"></div>
+          <button class="button primary" id="fragment-apply">
+            Insert connected recipe</button
+          ><button class="text-button" id="fragment-cancel">
+            Cancel insertion
+          </button>
+        </section>
+        <div class="pipeline-runbar">
+          <div>
+            <strong id="pipeline-status" role="status" aria-live="polite"
+              >Loading the recipe…</strong
+            ><span
+              >Shared steps run once. Validation checks the exact written
+              bytes.</span
+            >
+          </div>
+          <button class="text-button" id="pipeline-check">Check recipe</button
+          ><button class="button build" id="pipeline-run">
+            Run pipeline<svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 12h16m-6-6 6 6-6 6" />
+            </svg>
+          </button>
+        </div>
+        <div
+          id="pipeline-errors"
+          class="pipeline-errors"
+          role="alert"
+          hidden
+        ></div>
+        <div class="pipeline-layout">
+          <aside class="pipeline-editor" aria-label="Operation editor">
+            <label
+              >Selected operation<select id="pipeline-node"></select
+            ></label>
+            <div id="pipeline-settings"></div>
+            <div class="pipeline-add">
+              <label
+                >Insert an operation<select id="pipeline-operation">
+                  <option value="stamp">Stamp pages</option>
+                  <option value="number">Number pages</option>
+                  <option value="select">Select pages</option>
+                  <option value="assemble">Assemble PDFs</option>
+                  <option value="input">PDF input</option>
+                  <option value="write">Write PDF</option>
+                  <option value="validate">Validate PDF/A</option>
+                </select></label
+              ><button class="button primary" id="pipeline-add">
+                Add operation
+              </button>
+              <p>
+                Document operations are inserted after the selected document.
+                File and receipt outputs can branch.
+              </p>
+            </div>
+            <button class="text-button" id="pipeline-remove">
+              Remove selected operation
+            </button>
+          </aside>
+          <section class="pipeline-map" aria-labelledby="pipeline-map-title">
+            <div class="pipeline-map-heading">
+              <h3 id="pipeline-map-title">The executable recipe</h3>
+              <span id="pipeline-map-summary"></span>
+            </div>
+            <p>
+              Select an operation here or in the selector. Scroll horizontally
+              and vertically to follow every branch. Outputs are marked in
+              yellow.
+            </p>
+            <div
+              class="pipeline-graph-scroll"
+              tabindex="0"
+              aria-label="Scrollable pipeline graph"
+            >
+              <svg
+                id="pipeline-graph"
+                role="group"
+                aria-label="PDF pipeline operations and connections"
+              ></svg>
+            </div>
+          </section>
+        </div>
+        <section
+          id="pipeline-results"
+          class="pipeline-results"
+          aria-labelledby="pipeline-result-title"
+          hidden
+        >
+          <div class="section-heading">
+            <h3 id="pipeline-result-title">Pipeline complete</h3>
+            <button class="text-button" id="pipeline-report">
+              Download run report
+            </button>
+          </div>
+          <p id="pipeline-executed"></p>
+          <div id="pipeline-output-list"></div>
+        </section>
+        <details class="pipeline-json">
+          <summary>Recipe JSON</summary>
+          <p>
+            Edit or paste version 1 recipe data. Apply checks every field and
+            connection before replacing the graph.
+          </p>
+          <label class="sr-only" for="pipeline-json">Recipe JSON data</label
+          ><textarea id="pipeline-json" spellcheck="false" rows="16"></textarea
+          ><button class="button primary" id="pipeline-apply">
+            Apply JSON
+          </button>
+        </details>
+        <p class="pipeline-footnote">
+          Up to 24 operations, four named PDF inputs and three output PDFs. Each
+          PDF stays within 64 pages and 12 MiB. The runner executes sequentially
+          with bounded retention; each output hash shares one validator pass
+          across requested profiles.
         </p>
       </section>
       <footer>

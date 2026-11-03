@@ -41,6 +41,16 @@ The confirmed workflow is code-first: build the working interface directly.
 - The studio is an example, not an editor for text, forms, signatures, or encryption.
   Rewriting does not preserve digital signature validity.
 
+- Pipelines are version 1 data graphs with named PDF inputs, typed ports, selection,
+  assembly, stamps, numbering, PDF writes and PDF/A receipts. The editor can save,
+  load, capture packets and insert reusable saved recipes. Scala and Volga authoring
+  compile to the same model. Graph execution is sequential; shared reachable steps
+  run once, and identical output hashes share one validator pass across profiles.
+- Recipe inputs retain at most four PDFs separately. Recipes allow 24 nodes, three
+  writes and eight outputs. JSON is capped at 32 KiB/depth 16; live counted payload
+  and objects are bounded independently of the JVM heap. Files are rebound per
+  session; saved recipes contain settings and slot names, without document bytes.
+
 ## Success
 
 A first-time visitor can inspect a page's underlying dictionary, reorder the sample,

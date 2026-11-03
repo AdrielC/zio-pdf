@@ -29,17 +29,21 @@ object PacketBuild:
       require(options.start >= 1 && options.start <= 999999, "Start numbering from 1 to 999999")
     }.map { _ => PdfPages.select(body, order).map { selected =>
       PdfAssembly.concatenate(head.toVector ++ Vector(selected) ++ tail.toVector, head.size).map { assembled =>
-        PdfPages.pageRefs(assembled).map { pages =>
-          if pages.length > 64 || assembled.objects.length > 8000 then Abort.fail(PdfError.RetentionExceeded("A packet may contain at most 64 pages and 8000 objects"))
-          else if options.stamp.isEmpty && !options.numbered then PdfWriter.write(assembled)
-          else checked(artwork(assembled, pages, options)).map { bytes =>
-            ByteLimit.fromBytes(4 * 1024 * 1024).map { limit => PdfDocument.decode(bytes, limit).map { art =>
-              PdfAssembly.overlay(assembled, art).map(PdfWriter.write)
-            }}
-          }
-        }
+        finish(assembled, options).map(PdfWriter.write)
       }
     }}
+
+  /** Artwork interpreter shared by fixed packets and data-defined recipes. */
+  def finish(assembled: PdfDocument, options: PacketOptions): PdfDocument < (Abort[PdfError] & Sync) =
+    PdfPages.pageRefs(assembled).map { pages =>
+      if pages.length > 64 || assembled.objects.length > 8000 then Abort.fail(PdfError.RetentionExceeded("A packet may contain at most 64 pages and 8000 objects"))
+      else if options.stamp.isEmpty && !options.numbered then assembled
+      else checked(artwork(assembled, pages, options)).map { bytes =>
+        ByteLimit.fromBytes(4 * 1024 * 1024).map { limit => PdfDocument.decode(bytes, limit).map { art =>
+          PdfAssembly.overlay(assembled, art)
+        }}
+      }
+    }
 
   private def artwork(document: PdfDocument, pages: Vector[ObjectRef], options: PacketOptions): scala.Array[Byte] =
     def resolve(value: PdfValue, depth: Int = 0): PdfValue = value match

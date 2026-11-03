@@ -93,6 +93,7 @@ spacing:
   control-gap: "6px"
   item-gap: "8px"
   compact: "12px"
+  comfortable: "16px"
   panel-compact: "20px"
   panel: "24px"
 components:
@@ -141,6 +142,26 @@ components:
     textColor: "{colors.ink}"
     width: "100px"
     height: "48px"
+  pipeline-field:
+    backgroundColor: "{colors.white}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.square}"
+    padding: "10px 12px"
+  pipeline-binding:
+    textColor: "{colors.ink}"
+    rounded: "{rounded.square}"
+    padding: "12px 16px"
+  pipeline-runbar:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.white}"
+    rounded: "{rounded.square}"
+    padding: "18px 24px"
+  pipeline-operation-selected:
+    backgroundColor: "{colors.signal}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.square}"
+    width: "180px"
+    height: "54px"
 ---
 
 # Design System: Paper Machine
@@ -151,7 +172,7 @@ components:
 
 Paper Machine treats PDF structure as something a person can probe. A navy measurement field, electric-yellow signals and a cool paper bench give the studio the character of a working instrument. The visual language belongs to this example; it does not define the PDF library's identity.
 
-Sturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork. Packet finishing and batch validation extend the same instrument through plain fields, contiguous rows and evidence attached to each file.
+Sturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork. Packet finishing, batch validation and reusable pipelines extend the same instrument through plain fields, contiguous rows and evidence attached to each file. Pipeline selection energizes the operation and its connected traces while native controls keep wiring and settings accessible.
 
 **Key Characteristics:**
 
@@ -166,7 +187,7 @@ The palette pairs a dark instrument with cool neutral surfaces and a single elec
 
 ### Primary
 
-- **Electric Signal** (`signal`): selected objects, connected traces, the build action and add-page markers.
+- **Electric Signal** (`signal`): selected objects and pipeline operations, connected traces, build/run actions, output markers and add-page markers. Selected pipeline labels switch to Instrument Navy, with Syntax Ink for their secondary readout.
 
 ### Neutral
 
@@ -205,12 +226,12 @@ The hierarchy is compact and sturdy: a heavy, tightly spaced display line, stron
 - **Display:** The frontmatter records the wide-screen ramp. At compact widths it becomes a fixed size (40px); below the stacking breakpoint it uses `clamp(33px, 8.3vw, 48px)`.
 - **Title:** Section headings use the frontmatter role, reducing to (19px) below the stacking breakpoint.
 - **Body:** The frontmatter role establishes the default. Supporting descriptions use smaller sizes (11–15px) according to context.
-- **Validation headline:** A subordinate heavy headline (30px, reducing to 27px when stacked). The queue empty-state title uses (22px); packet legends use the frontmatter packet-title role.
+- **Validation headline:** A subordinate heavy headline (30px, reducing to 27px when stacked). Pipelines reuse the same wide-screen size and tight spacing, reducing to (26px) at their narrow breakpoint. The queue empty-state title uses (22px); packet legends and pipeline input headings use the frontmatter packet-title role.
 - **Controls and labels:** Actions use the control role; compact actions and queue filenames use (13px). Labels and evidence use (12px), file metadata and receipts use the annotation role, and verdict badges reduce from (11px) to (10px) when stacked.
 - **Small annotations:** Graph keys, profile captions and supporting technical notes use (9–11px); the live marker reduces to (8px) on narrow screens. These are supporting readouts, not heading sizes.
-- **Mono:** The syntax well uses the frontmatter role. Graph addresses, references, fingerprints and page addresses use smaller monospace annotations (10–11px). Source PDF artwork retains its own real type; do not simulate it with a bitmap font.
+- **Mono:** The syntax well uses the frontmatter role. Graph addresses, references, fingerprints, pipeline operation identifiers and page addresses use smaller monospace annotations (10–11px). The editable recipe data uses (12px) and a line height (1.6). Source PDF artwork retains its own real type; do not simulate it with a bitmap font.
 
-**The Literal Readout Rule.** Reserve monospace for PDF syntax and addresses; use Chivo for names, instructions and actions.
+**The Literal Readout Rule.** Reserve monospace for PDF syntax, recipe data, identifiers and addresses; use Chivo for names, instructions and actions.
 
 ## Layout
 
@@ -219,6 +240,10 @@ Work areas share straight seams rather than floating as independent cards. The c
 Density adjusts at (1050px); work areas stack at (760px). Long page sequences, source thumbnails and dense object maps scroll inside their own regions. Small graphs fit their viewport vertically; taller graphs retain their natural height. The narrow-screen map preserves a readable minimum width (650px) and scrolls horizontally. Packet bookends and finishing operations use two equal columns with a gap (24px), stacking into one column with a gap (8px) at (760px). Each revealed field group keeps two shrinkable columns with a gap (12px); text inputs and selects are at least (44px) high.
 
 The validation controls, navy run bar and file queue share one continuous width. Queue rows use padding (23px 24px), becoming (20px 18px) when stacked. Outcome groups wrap; the identification claim takes a full row on small screens while profile verdicts retain a readable minimum width (93px). Filenames and hashes wrap anywhere. Receipts use a narrow label column (110px, reducing to 75px) beside a shrinkable value column. Progress is a thin rule (5px) with a maximum width (440px); the narrow run bar wraps progress above its actions. The interface is reviewed at wide (1440px) and narrow (390px and 535px) CSS widths. First-surface composition and workflow strategy remain in `.impeccable/surface.md`.
+
+Pipelines reuse the same seams, gutters and spacing scale. Their recipe toolbar and named-input bindings precede the full-width run bar; the editor/graph workbench and completed outputs follow. A comfortable step (16px) recurs in binding gaps, graph guidance, compact editor padding and narrow run-bar padding. The recipe toolbar wraps; its name field grows within an observed range (220–400px). Bound-input rows flex from a preferred basis (280px), allowing several PDFs to share a line. The workbench pairs a fixed editor (300px) with a shrinkable navy graph; the editor narrows (240px) at (850px), then stacks above the graph at (620px). At that narrow breakpoint, each binding's slot and filename take a full row with actions below, the name field spans its row, the run bar wraps its status above actions, file-result actions move below metadata, and tabs may wrap.
+
+The pipeline graph keeps its natural topology and scrolls locally in both axes. Its viewport is capped at (620px) high, reducing to (500px) at (620px); the drawn graph is at least (500px) wide and grows for parallel branches. Visible instructions above the scroll region name both directions, and the native operation selector remains available above it when stacked. Final pipeline captures at (1440px), (390px) and (262px) show document width equal to viewport width; the graph's own horizontal overflow stays inside its region.
 
 ## Elevation & Depth
 
@@ -254,7 +279,7 @@ Nodes pair a readable kind with a monospace address. Pages use a lighter navy fi
 
 ### Studio tabs
 
-Two text tabs sit on a shared seam; the active tab gains a navy underline (3px) and darker text. The desktop gap (26px) becomes (20px) when stacked and the small batch note disappears. Tab state, associated panels and focus order are explicit; Left and Right arrows activate and focus the other tab. The open-file action and skip-link destination follow the active tool.
+Three text tabs sit on a shared seam; the active tab gains a navy underline (3px) and darker text. The desktop gap (26px) becomes (20px) when stacked and the small tool notes disappear. Tabs wrap at the pipeline narrow breakpoint (620px). Tab state, associated panels and focus order are explicit; Left and Right arrows cycle through the tools, while Home and End select the first and last. The open-file action and skip-link destination follow the active tool.
 
 ### Packet finishing
 
@@ -265,6 +290,24 @@ A ruled fieldset belongs to the assembly area. Front/back slots expose filename 
 A white control area holds native profile checkboxes with (44px) label targets, then Add PDFs and Clear queue. The navy run bar carries live progress, a stop-after-current-file action and the signal-filled run action. Queue rows identify each file before showing its XMP claim and separate profile outcomes: Queued, Checking, Verified, Failed or Unable to check. Inspect PDF returns to the explorer; the removal icon has a filename-specific accessible name. Row actions and profile changes are disabled during a run.
 
 Evidence stays behind a native disclosure. Its receipt shows engine, checked time, fingerprint and readability; each profile's failures carry clause/test, message and literal context. Completed keyed rows remain mounted while other files advance, preserving open disclosures, text selection and keyboard focus. Profile changes clear earlier verdicts until rechecked. JSON and CSV exports become available for completed files. Never substitute a metadata declaration for a verified result, or label an interrupted/unreadable check as passed or failed.
+
+### Pipeline recipe controls and bindings
+
+Recipe actions use the existing text-button language beside a square name field. Capture current packet, Save recipe, Load recipe and Insert saved recipe stay explicit. Bound-input rows identify a slot before its filename and page count, or a literal unbound state. Use current PDF and Choose PDF are contextual text actions with targets at least (44px) high. Long slot names and filenames wrap anywhere; on narrow screens their information retains the full available width above the actions. These rows reuse Panel Seam and Quiet Slate without adding a new color family.
+
+The operation editor uses labeled native selects, text fields, number fields and checkboxes. Fields reuse Bench White, Instrument Navy and square borders, with padding from the pipeline-field token. A native Selected operation control reaches every operation independently of the scrollable graph. Typed connection selectors and operation-specific settings share this column; Add operation is navy and Remove selected operation is a text action. Saved-fragment insertion reveals a pale assembly-ground panel with explicit input connection selectors and Insert/Cancel actions. Recipe JSON remains behind a native disclosure; Apply JSON validates the edited data before replacing the graph.
+
+### Pipeline graph
+
+The executable recipe is a navy field with a title, operation/output count and visible scrolling guidance. Square operations show a Chivo name above a smaller monospace identifier and port kind. Idle operations reuse Structure Navy and Structure Stroke; hover uses Object Hover Navy. The selected operation uses a solid Electric Signal fill, Instrument Navy title and Syntax Ink secondary text. Connected orthogonal traces become yellow and thicken; pipeline traces stay static. A small yellow circle identifies each requested output.
+
+Graph nodes expose button semantics and work with Enter or Space. Keyboard selection returns focus to the native operation selector. Nodes use a white focus outline (3px, offset 4px), while the scroll region itself uses an inset signal outline (3px). Keep the visible horizontal/vertical guidance and the native selector alongside this internally scrollable topology.
+
+### Pipeline run state and results
+
+The navy run bar reuses the signal-filled build button for Run pipeline and a white text action for Check recipe. Its status is announced politely. A checked recipe names its reachable-operation count; edits announce that the recipe changed and hide prior outputs. Running announces PDF writing and selected-profile checking, disables the pane's buttons and fields, and hides stale results. Errors reuse the established failed field, text and border, with an alert and path-specific issue list; controls become available again. Completion announces that outputs and receipts are ready and reveals contiguous result rows below the workbench.
+
+File rows place filename, pages, size and source operation before Inspect output and Download PDF. Receipt rows pair explicitly labeled profile verdicts with the exact SHA-256 and a native evidence disclosure. The run report is a text action beside the results title. A completed pipeline is distinct from a passing PDF/A check: the receipt's labeled verdict retains its own status color. Run-bar focus uses Electric Signal for contrast. This extension adds component geometry and the comfortable spacing step; its palette, type families, square shape, status colors and action variants are reused.
 
 ### Feedback
 
@@ -281,6 +324,8 @@ Loading and errors occupy a bordered status strip with live announcements. Succe
 - **Do** keep queue outcomes labeled, receipts tied to exact bytes and completed disclosures stable while a batch advances.
 - **Do** reveal finishing fields progressively and clear enabled finishing choices after a successful build.
 - **Do** use real PDF renders for every preview; no generated raster artwork ships with the studio.
+- **Do** keep pipeline binding information full-width above its actions on narrow screens, and preserve the native selector and visible two-axis scrolling guidance beside the graph.
+- **Do** distinguish pipeline completion from PDF/A verification, and hide prior pipeline results when recipe settings change.
 
 ### Don't:
 
@@ -290,3 +335,4 @@ Loading and errors occupy a bordered status strip with live announcements. Succe
 - **Don't** turn sample artwork colors or tiny technical annotations into a general palette or heading scale.
 - **Don't** apply verified styling to an XMP claim, stale fingerprint or unfinished check.
 - **Don't** use a low-contrast focus outline on the navy run bar.
+- **Don't** compress pipeline operation text to make a branching graph fit the document width; keep that overflow local to the graph.

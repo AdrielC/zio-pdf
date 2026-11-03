@@ -64,6 +64,39 @@ other inputs' document-level outlines, names and metadata are not merged. New ma
 are page content, not editable annotation stamps or redactions. Finishing options
 reset after a build so another click does not accidentally stamp the result again.
 
+## Compose saved pipelines
+
+Open **Pipelines**. The initial recipe is authored with the vendored Volga SMC
+syntax and compiled into plain version 1 data. It selects, stamps, numbers, writes,
+and validates the synthetic sample. The sample is an ordinary PDF, so its PDF/A
+checks correctly fail; a declaration or rewrite alone is not conformance.
+
+- Select an operation in the graph or the operation selector, then change its
+  settings or input connections. Add document operations after a selected document;
+  file outputs and validation receipts can branch from shared steps.
+- Bind named inputs to the current PDF or choose separate PDFs. Recipes save slot
+  names and settings; they contain no document bytes, local paths, or session IDs.
+- **Capture current packet** converts the explorer's page order, front/back PDFs,
+  stamp, numbering and selected validation profiles into a recipe.
+- **Save recipe** and **Load recipe** round-trip JSON. **Recipe JSON** also supports
+  direct data editing, with field, port, reference and cycle diagnostics.
+- **Insert saved recipe** connects another recipe's named document inputs to
+  existing document nodes. Its operation IDs are namespaced and its outputs added;
+  shared source steps still execute once.
+- **Run pipeline** writes up to three PDFs and produces receipts. Inspect or download
+  each output and download the complete execution report. Validation of identical
+  output bytes shares one isolated veraPDF pass across the requested profiles.
+
+The [pipeline module](../../kyo-pdf-pipeline/README.md) also offers typed Scala
+authoring and a Kyo interpreter. The example's `PipelineWiring.scala` demonstrates
+actual Volga authoring compiled to the same data. Graphs execute sequentially;
+unreachable nodes are skipped and dead intermediates released. The editor supports
+24 operations, four separately retained input PDFs and eight file/receipt outputs.
+Each PDF is limited to 64 pages and 12 MiB. Counted live payload is capped at 64 MiB
+and 32,000 objects; these are retention budgets, not total JVM heap limits.
+Recipe JSON is capped at 32 KiB, depth 16 and 4,096 values. Unknown fields, duplicate
+JSON keys, unsupported versions and invalid port connections are rejected.
+
 ## What runs where
 
 - Kyo PDF decodes the object graph, resolves the page tree, selects pages in the
@@ -119,3 +152,9 @@ PDF/A tests cover valid attached specimens, false claims, multiple profiles and
 files, unsafe/stale/conflicting XMP, exact-byte revalidation, upload bounds, worker
 backpressure, timeout, and temporary-file cleanup. The slow test suspends its own
 validation worker to exercise the real 45-second deadline.
+
+Pipeline regressions use only synthetic PDFs:
+
+```sh
+python3 examples/paper-machine/test_pipelines.py http://127.0.0.1:8087
+```

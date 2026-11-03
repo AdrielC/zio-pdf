@@ -2,6 +2,8 @@ package io.github.adrielc.kyopdf.demo
 
 import io.github.adrielc.kyopdf.*
 import kyo.*
+import io.github.adrielc.kyopdf.pipeline.PdfPipeline
+import scala.jdk.CollectionConverters.*
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.io.ByteArrayOutputStream
 import java.net.{InetSocketAddress, URLDecoder}
@@ -20,7 +22,9 @@ object PaperMachine:
   private val MaxPages = 64
   private final case class Document(id: String, name: String, bytes: Array[Byte], value: PdfDocument, pages: Vector[ObjectRef], identification: PdfAIdentification, sha256: String)
   private final case class Reply(bytes: Array[Byte], mime: String = "application/json", status: Int = 200)
+  private val pipelineSlots = new java.util.concurrent.Semaphore(1)
   private val documents = mutable.LinkedHashMap.empty[String, Document]
+  private val pipelineInputs = mutable.LinkedHashMap.empty[String, Document]
   private val bookends = mutable.Map.empty[String, Document]
   private val previews = mutable.LinkedHashMap.empty[String, Array[Byte]]
 
@@ -145,12 +149,54 @@ object PaperMachine:
     if Option(exchange.getRequestHeaders.getFirst("Host")).exists(_ != origin.stripPrefix("http://")) ||
         Option(exchange.getRequestHeaders.getFirst("Origin")).exists(_ != origin) then
       error("Open the studio from its loopback URL.", 403)
-    else if method == "GET" && Set("/", "/app.js", "/validation.js", "/style.css", "/chivo.ttf")(path) then
+    else if method == "GET" && Set("/", "/app.js", "/validation.js", "/pipelines.js", "/style.css", "/chivo.ttf")(path) then
       val asset = if path == "/" then "index.html" else path.drop(1)
       val mime = if asset.endsWith(".js") then "text/javascript" else if asset.endsWith(".css") then "text/css" else if asset.endsWith(".ttf") then "font/ttf" else "text/html"
       Using.resource(getClass.getResourceAsStream(s"/paper-machine/$asset")) { stream =>
         Reply(stream.readNBytes(256 * 1024), mime)
       }
+    else if path.startsWith("/api/pipeline-inputs/") && method == "POST" then
+      val slot = path.stripPrefix("/api/pipeline-inputs/")
+      if !slot.matches("[A-Za-z][A-Za-z0-9_-]{0,47}") then error("Choose a valid input slot")
+      else
+        val existing = Option(exchange.getRequestURI.getRawQuery).filter(_.startsWith("document=")).map(_.stripPrefix("document="))
+        val source = existing match
+          case Some(id) => documents.synchronized(documents.get(id))
+            .orElse(bookends.synchronized(bookends.values.find(_.id == id)))
+            .orElse(pipelineInputs.synchronized(pipelineInputs.values.find(_.id == id)))
+            .toRight("The current PDF expired. Open it again.")
+          case None =>
+            val name = Option(exchange.getRequestHeaders.getFirst("X-File-Name")).map(value => URLDecoder.decode(value, UTF_8)).getOrElse("Recipe input.pdf")
+            admit(read(exchange, MaxInput), name, retain = false)
+        source.fold(error(_), doc =>
+          pipelineInputs.synchronized {
+            pipelineInputs(slot) = doc
+            while pipelineInputs.size > 4 do
+              val _ = pipelineInputs.remove(pipelineInputs.head._1)
+          }
+          json(report(doc)))
+    else if path == "/api/pipelines/example" && method == "GET" then json(PipelineJson.encode(PipelineWiring.example))
+    else if Set("/api/pipelines/check", "/api/pipelines/run")(path) && method == "POST" then
+      val parsed = PipelineJson.parse(read(exchange, PipelineJson.MaxBytes))
+      val envelope = parsed.flatMap { value =>
+        if path.endsWith("/check") then Right((value, Map.empty[String, String]))
+        else if !value.isJsonObject then Left(Vector(PdfPipeline.Issue("request", PdfPipeline.Code.Structure, "Send a recipe and input bindings")))
+        else
+          val obj = value.getAsJsonObject
+          if obj.keySet().asScala.toSet != Set("recipe", "bindings") || !obj.get("bindings").isJsonObject then
+            Left(Vector(PdfPipeline.Issue("bindings", PdfPipeline.Code.Binding, "Send a recipe and a bindings object")))
+          else
+            val entries = obj.getAsJsonObject("bindings").entrySet().asScala.toVector
+            if entries.length > 4 || !entries.forall(entry => entry.getValue.isJsonPrimitive && entry.getValue.getAsJsonPrimitive.isString) then
+              Left(Vector(PdfPipeline.Issue("bindings", PdfPipeline.Code.Binding, "Bind at most four named inputs to document IDs")))
+            else Right((obj.get("recipe"), entries.map(entry => entry.getKey -> entry.getValue.getAsString).toMap))
+      }
+      val checked = envelope.flatMap { (value, bindings) => PipelineJson.decode(value).flatMap(PdfPipeline.check).map(plan => (plan, bindings)) }
+      checked.fold(issues => json(s"{\"error\":\"Check the recipe fields and connections\",\"issues\":${PipelineJson.issues(issues)}}", 400),
+        (plan, bindings) =>
+          if path.endsWith("/check") then
+            json(s"{\"recipe\":${PipelineJson.encode(plan.recipe)},\"order\":${plan.order.map(n => quote(n.id)).mkString("[", ",", "]")}}")
+          else runPipeline(plan, bindings))
     else if path == "/api/validate" && method == "POST" then
       val profiles = Option(exchange.getRequestURI.getRawQuery).getOrElse("").stripPrefix("profiles=").split(',').toVector
       if profiles.isEmpty || profiles.distinct != profiles || !profiles.forall(PdfValidation.Profiles.contains) then
@@ -225,6 +271,36 @@ object PaperMachine:
                     .flatMap(bytes => admit(bytes.toArray, doc.name.stripSuffix(".pdf") + " - packet.pdf"))
                 }.fold(error(_), result => json(report(result)))
           case _ => error("Not found", 404)
+
+  private def runPipeline(plan: PdfPipeline.Checked, bindings: Map[String, String]): Reply =
+    import PdfPipeline.*
+    val slots = plan.order.collect { case Node(_, Op.Input(slot), _) => slot }.toSet
+    val snapshot = documents.synchronized(documents.toMap) ++ bookends.synchronized(bookends.values.map(doc => doc.id -> doc).toMap) ++ pipelineInputs.synchronized(pipelineInputs.values.map(doc => doc.id -> doc).toMap)
+    if bindings.keySet != slots || !bindings.values.forall(snapshot.contains) then
+      error("Bind every named input to a current PDF. Reopen any expired files.")
+    else if !pipelineSlots.tryAcquire() then error("Another pipeline is running. Wait for it to finish.", 429)
+    else Using.resource(new AutoCloseable { def close(): Unit = pipelineSlots.release() }) { _ =>
+      val profiles = plan.order.flatMap { node => node.op match
+        case Op.Validate(profiles) => profiles
+        case _ => Vector.empty
+      }.distinct
+      if profiles.nonEmpty && !PdfValidation.slots.tryAcquire() then error("Another validation is running. Wait for it to finish.", 429)
+      else Using.resource(new AutoCloseable { def close(): Unit = if profiles.nonEmpty then PdfValidation.slots.release() }) { _ =>
+        val services = new PipelineServices(profiles)
+        evaluate(PdfPipeline.run(plan, bindings.map((slot, id) => slot -> snapshot(id).value), services))
+          .flatMap { run =>
+            val outputs = run.outputs.foldLeft[Either[String, Vector[String]]](Right(Vector.empty)) { case (acc, (id, value)) => acc.flatMap { found => value match
+              case Value.File(bytes) =>
+                val name = plan.recipe.name.replaceAll("[^A-Za-z0-9 _-]", "").trim.take(70)
+                admit(bytes.toArray, s"${if name.nonEmpty then name else "Pipeline"} - $id.pdf")
+                  .map(doc => found :+ s"{\"node\":${quote(id)},\"kind\":\"file\",\"document\":${report(doc)}}")
+              case Value.Receipt(receipt) => Right(found :+ s"{\"node\":${quote(id)},\"kind\":\"receipt\",\"report\":$receipt}")
+              case _ => Left("A pipeline output must be a PDF file or validation receipt")
+            }}
+            outputs.map(values => s"{\"validatorPasses\":${services.validationPasses},\"recipe\":${PipelineJson.encode(plan.recipe)},\"executed\":${run.executed.map(quote).mkString("[", ",", "]")},\"outputs\":${values.mkString("[", ",", "]")}}")
+          }.fold(error(_), json(_))
+      }
+    }
 
   def main(args: Array[String]): Unit =
     val port = args.headOption.flatMap(_.toIntOption).getOrElse(0)

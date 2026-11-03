@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-03T16:51:00.623792Z",
+  "generatedAt": "2026-11-03T17:34:30.727459Z",
   "title": "Design System: Paper Machine",
   "extensions": {
     "colorMeta": {
@@ -482,15 +482,15 @@
       },
       "mono": {
         "displayName": "Literal syntax",
-        "purpose": "PDF dictionaries; smaller related sizes identify references and addresses."
+        "purpose": "PDF dictionaries and editable recipe JSON; smaller related sizes identify references, pipeline operation IDs and hashes."
       },
       "validation-headline": {
         "displayName": "Validation headline",
-        "purpose": "Subordinate queue headline, reducing to 27px when stacked."
+        "purpose": "Subordinate validation and pipeline headlines; the pipeline headline reduces to 26px at 620px."
       },
       "packet-title": {
         "displayName": "Packet title",
-        "purpose": "Ruled legend for optional packet finishing."
+        "purpose": "Packet finishing legends and pipeline PDF-input headings."
       },
       "control": {
         "displayName": "Control",
@@ -548,8 +548,16 @@
         "value": "1050px"
       },
       {
+        "name": "pipeline-compact-max",
+        "value": "850px"
+      },
+      {
         "name": "stack-max",
         "value": "760px"
+      },
+      {
+        "name": "pipeline-stack-max",
+        "value": "620px"
       },
       {
         "name": "narrow-max",
@@ -570,7 +578,7 @@
       "name": "Build action",
       "kind": "button",
       "refersTo": "button-build",
-      "description": "Signal-filled build or validation action; the navy run bar uses a signal-colored keyboard outline.",
+      "description": "Signal-filled build, validation or pipeline action; navy run bars use a signal-colored keyboard outline.",
       "html": "<div class=\"ds-run\"><button class=\"ds-build\">Build PDF<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m-6-6 6 6-6 6\"/></svg></button></div>",
       "css": ".ds-build{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:46px;padding:12px 20px;border:0;border-radius:0;font-weight:600;font-size:14px;line-height:1.5;cursor:pointer;font-family:Chivo,Arial,sans-serif;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1)),color .2s var(--ease,cubic-bezier(.16,1,.3,1));min-height:42px;padding:10px 16px;background:var(--signal,#e2ed6b);color:var(--ink,#142d3d);white-space:nowrap}.ds-build:hover{background:#d0df42}.ds-build:active{transform:translateY(1px)}.ds-build:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-build:disabled{cursor:not-allowed;opacity:.5}.ds-build svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}@media(max-width:760px){.ds-build{font-size:13px;min-height:44px;padding:11px 16px}}@media(prefers-reduced-motion:reduce){.ds-build{transition:none}}.ds-run{padding:18px 24px;background:var(--field,#142d3d)}.ds-run .ds-build:focus-visible{outline-color:var(--signal,#e2ed6b)}"
     },
@@ -603,7 +611,7 @@
       "kind": "card",
       "refersTo": "inspector",
       "description": "A white inspector, ordinary object selector and scrollable syntax well.",
-      "html": "<section class=\"ds-inspector\"><div class=\"ds-inspector-heading\"><h2>Inside the object</h2><select aria-label=\"Choose an object\"><option>3 0 R \u00b7 Page</option><option>7 0 R \u00b7 Stream</option><option>Document trailer</option></select></div><pre tabindex=\"0\" aria-label=\"PDF dictionary syntax\">&lt;&lt;\n  /Type /Page\n  /MediaBox [ 0 0 595 420 ]\n  /Resources &lt;&lt; /Font &lt;&lt; /F1 6 0 R &gt;&gt; &gt;&gt;\n  /Contents 7 0 R\n&gt;&gt;</pre></section>",
+      "html": "<section class=\"ds-inspector\"><div class=\"ds-inspector-heading\"><h2>Inside the object</h2><select aria-label=\"Choose an object\"><option>3 0 R · Page</option><option>7 0 R · Stream</option><option>Document trailer</option></select></div><pre tabindex=\"0\" aria-label=\"PDF dictionary syntax\">&lt;&lt;\n  /Type /Page\n  /MediaBox [ 0 0 595 420 ]\n  /Resources &lt;&lt; /Font &lt;&lt; /F1 6 0 R &gt;&gt; &gt;&gt;\n  /Contents 7 0 R\n&gt;&gt;</pre></section>",
       "css": ".ds-inspector{background:var(--white,#fff);color:var(--ink,#142d3d);padding:24px;max-width:520px;border:1px solid var(--line,#cbd4da);font-family:Chivo,Arial,sans-serif;}.ds-inspector-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.ds-inspector h2{font-size:20px;font-weight:700;letter-spacing:-.025em;line-height:1.25;margin:0}.ds-inspector select{min-width:0;max-width:180px;background:var(--paper,#f3f5f6);border:1px solid var(--line,#cbd4da);padding:6px 25px 6px 9px;font-size:11px;border-radius:0;color:var(--ink,#142d3d);font-family:Chivo,Arial,sans-serif;}.ds-inspector pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.7;overflow:auto;height:139px;background:var(--paper,#f3f5f6);padding:12px 15px;margin:10px 0 13px;white-space:pre;tab-size:2;color:#26475d;scrollbar-width:thin}.ds-inspector select:focus-visible,.ds-inspector pre:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}@media(max-width:1050px){.ds-inspector{padding:20px}.ds-inspector select{max-width:140px}}@media(max-width:760px){.ds-inspector h2{font-size:19px}.ds-inspector select{max-width:160px}}@media(max-width:380px){.ds-inspector select{max-width:132px}}"
     },
     {
@@ -617,9 +625,9 @@
     {
       "name": "Studio tabs",
       "kind": "nav",
-      "description": "Shared-seam tool navigation with an explicit active underline; keyboard switching belongs to the live app.",
-      "html": "<nav class=\"ds-tabs\" role=\"tablist\" aria-label=\"Studio tools\"><button role=\"tab\" aria-selected=\"true\">Explore &amp; remix</button><button role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Validate PDFs<span>BATCH + MULTI-PROFILE</span></button></nav>",
-      "css": ".ds-tabs{display:flex;gap:26px;border-bottom:1px solid var(--line,#cbd4da);font-family:Chivo,Arial,sans-serif}.ds-tabs>button{position:relative;border:0;background:none;padding:12px 0 14px;min-height:46px;font-size:14px;font-weight:600;color:var(--muted,#566571);cursor:pointer}.ds-tabs>button[aria-selected=\"true\"]{color:var(--ink,#142d3d);border-bottom:3px solid var(--ink,#142d3d);padding-bottom:11px}.ds-tabs>button:hover{color:var(--ink,#142d3d)}.ds-tabs>button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-tabs span{font-size:9px;font-weight:500;letter-spacing:.025em;margin-left:9px;color:var(--muted,#566571)}@media(max-width:760px){.ds-tabs{gap:20px}.ds-tabs>button{font-size:12px}.ds-tabs span{display:none}}"
+      "description": "Three shared-seam tool tabs with an explicit active underline and wrapping at 620px; arrow, Home and End switching belongs to the live app.",
+      "html": "<nav class=\"ds-tabs\" role=\"tablist\" aria-label=\"Studio tools\"><button role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Explore &amp; remix</button><button role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Validate PDFs<span>BATCH + MULTI-PROFILE</span></button><button role=\"tab\" aria-selected=\"true\">Pipelines<span>SAVE + COMPOSE</span></button></nav>",
+      "css": ".ds-tabs{display:flex;gap:26px;border-bottom:1px solid var(--line,#cbd4da);font-family:Chivo,Arial,sans-serif}.ds-tabs>button{position:relative;border:0;background:none;padding:12px 0 14px;min-height:46px;font-size:14px;font-weight:600;color:var(--muted,#566571);cursor:pointer}.ds-tabs>button[aria-selected=\"true\"]{color:var(--ink,#142d3d);border-bottom:3px solid var(--ink,#142d3d);padding-bottom:11px}.ds-tabs>button:hover{color:var(--ink,#142d3d)}.ds-tabs>button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-tabs span{font-size:9px;font-weight:500;letter-spacing:.025em;margin-left:9px;color:var(--muted,#566571)}@media(max-width:760px){.ds-tabs{gap:20px}.ds-tabs>button{font-size:12px}.ds-tabs span{display:none}}@media(max-width:620px){.ds-tabs{flex-wrap:wrap}}"
     },
     {
       "name": "Packet field",
@@ -634,13 +642,37 @@
       "kind": "card",
       "refersTo": "validation-file",
       "description": "Per-file claim, explicit profile verdicts and native evidence disclosure; completed rows remain mounted during the batch.",
-      "html": "<article class=\"ds-validation\"><strong>synthetic-3b-with-attachment.pdf</strong><span class=\"ds-filemeta\">1.3 KiB \u00b7 synthetic specimen</span><div class=\"ds-outcomes\"><div class=\"ds-claim\"><span>XMP identification</span><strong>Declares PDF/A-3b</strong></div><div><span>PDF/A-3b</span><b class=\"ds-badge ds-passed\">Verified</b></div><div><span>PDF/A-2b</span><b class=\"ds-badge ds-failed\">Failed</b></div><div><span>PDF/A-3u</span><b class=\"ds-badge ds-unable\">Unable to check</b></div></div><details class=\"ds-details\"><summary>Evidence &amp; failure details</summary><dl><dt>Engine</dt><dd>veraPDF</dd><dt>SHA-256</dt><dd class=\"ds-fingerprint\">5adf0b03b3a861ea4e2561a4a31eac3999304c5f0f011607af3c4b1c229ff008</dd></dl><p>Receipts belong to the exact file bytes and requested profile.</p></details></article>",
+      "html": "<article class=\"ds-validation\"><strong>synthetic-3b-with-attachment.pdf</strong><span class=\"ds-filemeta\">1.3 KiB · synthetic specimen</span><div class=\"ds-outcomes\"><div class=\"ds-claim\"><span>XMP identification</span><strong>Declares PDF/A-3b</strong></div><div><span>PDF/A-3b</span><b class=\"ds-badge ds-passed\">Verified</b></div><div><span>PDF/A-2b</span><b class=\"ds-badge ds-failed\">Failed</b></div><div><span>PDF/A-3u</span><b class=\"ds-badge ds-unable\">Unable to check</b></div></div><details class=\"ds-details\"><summary>Evidence &amp; failure details</summary><dl><dt>Engine</dt><dd>veraPDF</dd><dt>SHA-256</dt><dd class=\"ds-fingerprint\">5adf0b03b3a861ea4e2561a4a31eac3999304c5f0f011607af3c4b1c229ff008</dd></dl><p>Receipts belong to the exact file bytes and requested profile.</p></details></article>",
       "css": ".ds-validation{padding:23px 24px;background:var(--white,#fff);color:var(--ink,#142d3d);border:1px solid var(--line,#cbd4da);font:14px/1.5 Chivo,Arial,sans-serif}.ds-validation>strong{display:block;font-weight:600;overflow-wrap:anywhere}.ds-filemeta{display:block;font-size:11px;color:var(--muted,#566571);margin-top:4px}.ds-outcomes{display:flex;gap:18px 30px;flex-wrap:wrap;margin-top:20px}.ds-outcomes>div{min-width:110px}.ds-outcomes>.ds-claim{flex:1;min-width:200px}.ds-outcomes>div>span{display:block;color:var(--muted,#566571);font-size:10px;margin-bottom:7px}.ds-claim strong{font-size:12px;font-weight:500}.ds-badge{display:inline-block;padding:5px 9px;font-size:11px;font-weight:600;background:#e8edf1;color:#465b69}.ds-passed{background:#e7f0e7;color:#27542d}.ds-failed{background:#fbe9e2;color:#8c301c}.ds-unable{background:#f6ecd8;color:#6e4e1d}.ds-details{margin-top:20px;border-top:1px solid var(--line,#cbd4da);padding-top:12px}.ds-details summary{width:fit-content;cursor:pointer;font-size:12px;font-weight:500;padding:5px 0}.ds-details summary:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-details dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:7px 18px;font-size:11px;margin:18px 0 24px}.ds-details dt{color:var(--muted,#566571)}.ds-details dd{margin:0;overflow-wrap:anywhere}.ds-fingerprint{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.ds-details p{font-size:12px;max-width:75ch}@media(max-width:760px){.ds-validation{padding:20px 18px}.ds-validation>strong{font-size:13px}.ds-outcomes{gap:18px 22px;margin-top:14px}.ds-outcomes>.ds-claim{flex:1 0 100%;min-width:0}.ds-outcomes>div{min-width:93px}.ds-badge{font-size:10px}.ds-details dl{grid-template-columns:75px minmax(0,1fr);gap:9px 12px}}"
+    },
+    {
+      "name": "Pipeline PDF binding",
+      "kind": "custom",
+      "refersTo": "pipeline-binding",
+      "description": "A named input slot and bound PDF stay readable above their contextual actions at 620px and below; an unbound slot keeps its literal empty state.",
+      "html": "<div class=\"ds-pipeline-binding\"><div><strong>body</strong><span>Field notes.pdf · 4 pages</span></div><button>Use current PDF</button><button>Choose PDF</button></div>",
+      "css": ".ds-pipeline-binding{display:flex;align-items:center;gap:12px;min-width:0;padding:12px 16px;border:1px solid var(--line,#cbd4da);border-radius:0;color:var(--ink,#142d3d);font:14px/1.5 Chivo,Arial,sans-serif}.ds-pipeline-binding>div{flex:1;min-width:0}.ds-pipeline-binding strong,.ds-pipeline-binding span{display:block;overflow-wrap:anywhere}.ds-pipeline-binding span{font-size:12px;color:var(--muted,#566571)}.ds-pipeline-binding button{display:inline-flex;align-items:center;gap:6px;padding:5px 0;min-height:44px;border:0;background:none;color:var(--ink,#142d3d);font:600 12px/1.5 Chivo,Arial,sans-serif;white-space:nowrap;cursor:pointer}.ds-pipeline-binding button:hover{text-decoration:underline;text-underline-offset:4px}.ds-pipeline-binding button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-pipeline-binding button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:620px){.ds-pipeline-binding{flex-wrap:wrap;align-items:flex-start;padding:12px;gap:8px}.ds-pipeline-binding>div{flex-basis:100%}}"
+    },
+    {
+      "name": "Pipeline run bar",
+      "kind": "custom",
+      "refersTo": "pipeline-runbar",
+      "description": "Ready, changed, running, attention and completed states use literal live status. Running disables editing; errors use the existing failed field, and completion reveals exact-byte outputs and receipts.",
+      "html": "<div class=\"ds-pipeline-run\"><div><strong role=\"status\" aria-live=\"polite\">Recipe ready · 5 reachable operations</strong><span>Shared steps run once. Validation checks the exact written bytes.</span></div><button class=\"ds-pipeline-check\">Check recipe</button><button class=\"ds-pipeline-execute\">Run pipeline<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m-6-6 6 6-6 6\"/></svg></button></div>",
+      "css": ".ds-pipeline-run{display:flex;align-items:center;gap:24px;padding:18px 24px;background:var(--ink,#142d3d);color:var(--white,#fff);font:14px/1.5 Chivo,Arial,sans-serif}.ds-pipeline-run>div{flex:1;min-width:0}.ds-pipeline-run strong,.ds-pipeline-run span{display:block}.ds-pipeline-run span{margin-top:4px;font-size:12px;color:var(--field-muted,#b4c9d5)}.ds-pipeline-run button{font:600 14px/1.5 Chivo,Arial,sans-serif;cursor:pointer;border:0;border-radius:0}.ds-pipeline-check{min-height:44px;padding:5px 0;background:none;color:var(--white,#fff);white-space:nowrap}.ds-pipeline-check:hover{text-decoration:underline;text-underline-offset:4px}.ds-pipeline-execute{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:42px;padding:10px 16px;background:var(--signal,#e2ed6b);color:var(--ink,#142d3d);white-space:nowrap;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1))}.ds-pipeline-execute:hover{background:#d0df42}.ds-pipeline-execute:active{transform:translateY(1px)}.ds-pipeline-execute svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.ds-pipeline-run button:focus-visible{outline:3px solid var(--signal,#e2ed6b);outline-offset:4px}.ds-pipeline-run button:disabled{opacity:.4;cursor:not-allowed}.ds-pipeline-run .ds-pipeline-execute:disabled{opacity:.5}@media(max-width:760px){.ds-pipeline-run button{font-size:13px}.ds-pipeline-execute{min-height:44px;padding:11px 16px}}@media(max-width:620px){.ds-pipeline-run{flex-wrap:wrap;gap:12px;padding:16px}.ds-pipeline-run>div{flex-basis:100%}.ds-pipeline-execute{margin-left:auto}}@media(prefers-reduced-motion:reduce){.ds-pipeline-execute{transition:none}}"
+    },
+    {
+      "name": "Pipeline selection and scrollable graph",
+      "kind": "custom",
+      "refersTo": "pipeline-operation-selected",
+      "description": "The native operation selector is an alternative to the locally scrollable topology. Selection uses a solid signal field with navy labels and connected static traces; yellow dots mark outputs.",
+      "html": "<div class=\"ds-pipeline-sample\"><label class=\"ds-pipeline-selector\">Selected operation<select><option>cut · Select pages</option><option>pdf · Write PDF</option></select></label><section class=\"ds-pipeline-map\"><div class=\"ds-pipeline-map-title\"><h3>The executable recipe</h3><span>2 operations · 1 output</span></div><p>Select an operation here or in the selector. Scroll horizontally and vertically to follow every branch. Outputs are marked in yellow.</p><div class=\"ds-pipeline-scroll\" tabindex=\"0\" aria-label=\"Scrollable pipeline graph\"><svg viewBox=\"0 0 500 250\" role=\"group\" aria-label=\"PDF pipeline operations and connections\"><path class=\"ds-pipeline-wire ds-pipeline-active\" d=\"M250 74V110H250V140\"/><g class=\"ds-pipeline-node ds-pipeline-selected\" transform=\"translate(160,20)\" role=\"button\" tabindex=\"0\" aria-label=\"cut: Select pages\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">Select pages</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">cut · document</text></g><g class=\"ds-pipeline-node\" transform=\"translate(160,140)\" role=\"button\" tabindex=\"0\" aria-label=\"pdf: Write PDF, output\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">Write PDF</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">pdf · file</text><circle cx=\"169\" cy=\"12\" r=\"3\"/></g></svg></div></section></div>",
+      "css": ".ds-pipeline-sample{font:14px/1.5 Chivo,Arial,sans-serif;color:var(--ink,#142d3d);min-width:0}.ds-pipeline-selector{display:flex;flex-direction:column;gap:6px;font-weight:600;max-width:300px;margin-bottom:20px}.ds-pipeline-selector select{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line,#cbd4da);border-radius:0;background:var(--white,#fff);color:var(--ink,#142d3d);font:inherit}.ds-pipeline-selector select:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-pipeline-map{min-width:0;background:var(--ink,#142d3d);color:var(--white,#fff)}.ds-pipeline-map-title{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 24px;border-bottom:1px solid #486170}.ds-pipeline-map-title h3{font-size:16px;margin:0}.ds-pipeline-map-title span,.ds-pipeline-map>p{color:var(--field-muted,#b4c9d5);font-size:12px}.ds-pipeline-map>p{margin:0;padding:16px 24px}.ds-pipeline-scroll{overflow:auto;max-height:620px;scrollbar-color:#7691a1 var(--ink,#142d3d)}.ds-pipeline-scroll:focus-visible{outline:3px solid var(--signal,#e2ed6b);outline-offset:-3px}.ds-pipeline-scroll>svg{display:block;width:500px;min-width:450px;margin:0 auto}.ds-pipeline-wire{fill:none;stroke:#7290a3;stroke-width:1.5}.ds-pipeline-active{stroke:var(--signal,#e2ed6b);stroke-width:2}.ds-pipeline-node{cursor:pointer}.ds-pipeline-node rect{fill:#1c394b;stroke:#6d8899;stroke-width:1}.ds-pipeline-node:hover rect{fill:#395972}.ds-pipeline-node text{fill:var(--white,#fff);font:600 13px Chivo,Arial,sans-serif;pointer-events:none}.ds-pipeline-node .ds-pipeline-id{fill:var(--field-muted,#b4c9d5);font:400 10px ui-monospace,monospace}.ds-pipeline-node circle{fill:var(--signal,#e2ed6b)}.ds-pipeline-node.ds-pipeline-selected rect{fill:var(--signal,#e2ed6b);stroke:var(--signal,#e2ed6b);stroke-width:2}.ds-pipeline-selected text{fill:var(--ink,#142d3d)}.ds-pipeline-selected .ds-pipeline-id{fill:#26475d}.ds-pipeline-node:focus-visible{outline:3px solid var(--white,#fff);outline-offset:4px}@media(max-width:620px){.ds-pipeline-map-title{padding:16px}.ds-pipeline-map-title span{text-align:right}.ds-pipeline-map>p{padding:16px}.ds-pipeline-scroll{max-height:500px}}"
     }
   ],
   "narrative": {
     "northStar": "Circuit Network Analyzer",
-    "overview": "Paper Machine treats PDF structure as something a person can probe. A navy measurement field, electric-yellow signals and a cool paper bench give the studio the character of a working instrument. The visual language belongs to this example; it does not define the PDF library's identity.\n\nSturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork. Packet finishing and batch validation extend the same instrument through plain fields, contiguous rows and evidence attached to each file.",
+    "overview": "Paper Machine treats PDF structure as something a person can probe. A navy measurement field, electric-yellow signals and a cool paper bench give the studio the character of a working instrument. The visual language belongs to this example; it does not define the PDF library's identity.\n\nSturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork. Packet finishing, batch validation and reusable pipelines extend the same instrument through plain fields, contiguous rows and evidence attached to each file. Pipeline selection energizes the operation and its connected traces while native controls keep wiring and settings accessible.",
     "keyCharacteristics": [
       "Square controls and contiguous, bordered work areas.",
       "Solid selected objects, outlined related objects and orthogonal reference traces.",
@@ -660,7 +692,7 @@
       },
       {
         "name": "The Literal Readout Rule",
-        "body": "Reserve monospace for PDF syntax and addresses; use Chivo for names, instructions and actions.",
+        "body": "Reserve monospace for PDF syntax, recipe data, identifiers and addresses; use Chivo for names, instructions and actions.",
         "section": "typography"
       },
       {
@@ -676,7 +708,9 @@
       "**Do** use the larger narrow-screen assembly controls with their established spacing.",
       "**Do** keep queue outcomes labeled, receipts tied to exact bytes and completed disclosures stable while a batch advances.",
       "**Do** reveal finishing fields progressively and clear enabled finishing choices after a successful build.",
-      "**Do** use real PDF renders for every preview; no generated raster artwork ships with the studio."
+      "**Do** use real PDF renders for every preview; no generated raster artwork ships with the studio.",
+      "**Do** keep pipeline binding information full-width above its actions on narrow screens, and preserve the native selector and visible two-axis scrolling guidance beside the graph.",
+      "**Do** distinguish pipeline completion from PDF/A verification, and hide prior pipeline results when recipe settings change."
     ],
     "donts": [
       "**Don't** introduce rounded card shells around the contiguous instrument panels.",
@@ -684,7 +718,8 @@
       "**Don't** add ambient shadows to ordinary controls or panel seams.",
       "**Don't** turn sample artwork colors or tiny technical annotations into a general palette or heading scale.",
       "**Don't** apply verified styling to an XMP claim, stale fingerprint or unfinished check.",
-      "**Don't** use a low-contrast focus outline on the navy run bar."
+      "**Don't** use a low-contrast focus outline on the navy run bar.",
+      "**Don't** compress pipeline operation text to make a branching graph fit the document width; keep that overflow local to the graph."
     ]
   }
 }
