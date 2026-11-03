@@ -4,6 +4,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# Isolate proof builds from native-client servers retained by earlier CI steps.
+PROOF_SBT=(sbt --server -J-Xms256m -J-Xmx2g -Dsbt.server.autostart=false)
+
 ARTIFACT_ROOT="$(mktemp -d)"
 PUBLISH_REPO="${ARTIFACT_ROOT}/repo"
 JAR_LIST="$(mktemp)"
@@ -13,7 +16,7 @@ CLASS_STRINGS="$(mktemp)"
 JS_CLASS_STRINGS="$(mktemp)"
 trap 'rm -rf "${ARTIFACT_ROOT}"; rm -f "${JAR_LIST}" "${JS_JAR_LIST}" "${JS_SOURCE_LIST}" "${CLASS_STRINGS}" "${JS_CLASS_STRINGS}"' EXIT
 
-sbt -batch ";set root / publishTo := Some(Resolver.file(\"artifact-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));set scalaJs / publishTo := Some(Resolver.file(\"artifact-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));root/publish;scalaJs/publish"
+"${PROOF_SBT[@]}" -batch ";set root / publishTo := Some(Resolver.file(\"artifact-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));set scalaJs / publishTo := Some(Resolver.file(\"artifact-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));root/publish;scalaJs/publish"
 
 JAR_PATH="$(find "${ARTIFACT_ROOT}" -type f -name 'zio-pdf_3*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort | tail -n 1)"
 POM_PATH="$(find "${ARTIFACT_ROOT}" -type f -name 'zio-pdf_3*.pom' | sort | tail -n 1)"
