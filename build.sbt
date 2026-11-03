@@ -150,9 +150,13 @@ lazy val paperMachine = (project in file("examples/paper-machine"))
   )
 
 lazy val root = (project in file("."))
-  .dependsOn(volgaCore)
+  .dependsOn(volgaCore % "compile-internal,runtime-internal,test-internal")
   .settings(
     name := "zio-pdf",
+    // Keep macros in a separate compilation unit, then ship their existing
+    // classes and sources with the JVM API instead of an unpublished dependency.
+    Compile / packageBin / mappings ++= (volgaCore / Compile / packageBin / mappings).value,
+    Compile / packageSrc / mappings ++= (volgaCore / Compile / packageSrc / mappings).value,
     libraryDependencies ++= List(
       "dev.zio"   %% "zio"               % zioVersion,
       "dev.zio"   %% "zio-streams"       % zioVersion,
@@ -190,6 +194,22 @@ private val jsExcludedSourcePaths = Set(
   "zio/pdf/PdfEngine.scala",
   "zio/pdf/PdfHyperdrive.scala",
   "zio/pdf/Tiff.scala",
+  // JVM Volga wiring and ingest adapters depend on compiler macros and the
+  // JVM-only decode/digest pipelines excluded below.
+  "zio/pdf/arrow/ArrowObjects.scala",
+  "zio/pdf/arrow/BiConst.scala",
+  "zio/pdf/arrow/BiFunctionK.scala",
+  "zio/pdf/arrow/Category.scala",
+  "zio/pdf/arrow/FnArrow.scala",
+  "zio/pdf/arrow/FnArrowCat.scala",
+  "zio/pdf/arrow/FreeArrow.scala",
+  "zio/pdf/arrow/GraphRender.scala",
+  "zio/pdf/arrow/GraphSummary.scala",
+  "zio/pdf/arrow/IngestGraph.scala",
+  "zio/pdf/arrow/LabeledFnArrowCat.scala",
+  "zio/pdf/arrow/PipelineFlow.scala",
+  "zio/pdf/arrow/PipelineGraph.scala",
+  "zio/pdf/arrow/ScanGraph.scala",
   "zio/pdf/io/PdfIO.scala",
   "zio/pdf/pipe/ByteDigest.scala",
   "zio/pdf/pipe/ByteFeed.scala",
@@ -198,6 +218,9 @@ private val jsExcludedSourcePaths = Set(
   "zio/pdf/pipe/FusedElements.scala",
   "zio/pdf/pipe/HyperFuse.scala",
   "zio/pdf/pipe/IngestPipeline.scala",
+  "zio/pdf/tacit/PdfFlow.scala",
+  "zio/pdf/tacit/PdfPipeline.scala",
+  "zio/pdf/tacit/PdfPipes.scala",
   "zio/scan/BlocksPureByteScan.scala",
   "zio/scan/BytePipeline.scala",
   "zio/scan/InlineByteScan.scala",
