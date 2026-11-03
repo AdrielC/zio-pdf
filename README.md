@@ -50,6 +50,41 @@ val document = PdfZIO.decodeStream(upload, limit)
 val selected = PdfZIO.selectPagesStream(upload, limit, first = 2, last = 4)
 ```
 
+### Paper Machine visual studio
+
+Explore a PDF's live object graph, inspect dictionaries, preview pages, and download
+a new PDF with pages selected in your own order:
+
+```sh
+sbt 'paperMachine/run'
+```
+
+Open the printed loopback URL. The studio starts with synthetic vector artwork and
+also accepts local PDFs up to 12 MiB and 64 pages. Kyo PDF handles parsing and
+rewriting; PDFBox renders previews. See the [studio guide](examples/paper-machine/README.md)
+for limits and checks. Ordered selection is also available directly through
+`PdfPages.select(document, Vector(4, 1, 3))`.
+
+The assembly bench can prepend/append PDFs, stamp pages, add ordinary or Bates
+numbers, and validate the finished PDF in the same build run. Source pages retain
+their PDF objects; embedded-font artwork is composed with `PdfAssembly.overlay`,
+and `PdfAssembly.concatenate` combines documents in the chosen order.
+
+The **Validate PDFs** tab queues multiple files and checks selected PDF/A-3b,
+PDF/A-2b, and PDF/A-3u profiles together with veraPDF. Namespace-aware XMP
+identification remains separate from validation. Results include exact-file
+fingerprints, rule evidence, and downloadable JSON/CSV batch reports.
+
+The **Pipelines** tab composes named PDF operations into saved JSON recipes. Bind
+PDF inputs separately, edit connections, insert saved subpipelines, and run graphs
+with several output PDFs and validation branches. Typed PDF arrows and a Kyo
+runner live in [kyo-pdf-pipeline](kyo-pdf-pipeline/README.md); the example also compiles
+the actual Volga SMC syntax over those arrows into the same data model. Nested conditionals route by page
+count, metadata claims or completed validation verdicts, with separate unknown
+paths and explicit stop reasons. Shared steps execute once, unselected branches
+are skipped, and decision traces explain the path through the graph. Validation
+receipts identify the exact written bytes.
+
 ### Kyo package migration
 
 The Kyo core now uses `io.github.adrielc.kyopdf` and its adapter uses

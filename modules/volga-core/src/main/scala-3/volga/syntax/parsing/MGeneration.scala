@@ -192,13 +192,13 @@ final class MGeneration[H[_, _]: Type, U[_]: Type, q <: Quotes & Singleton](sym:
                                 val obB = summonOb[b]
                                 val obC = summonOb[c]
                                 side match
-                                    case R =>
+                                    case L =>
                                         TypedHomC(
                                           hom = '{ $sym.assocLeft[a, b, c](using $obA, $obB, $obC) },
                                           obI = '{ $sym.tensorOb(using $obA, $sym.tensorOb(using $obB, $obC)) },
                                           obO = '{ $sym.tensorOb(using $sym.tensorOb(using $obA, $obB), $obC) }
                                         )
-                                    case L =>
+                                    case R =>
                                         TypedHomC(
                                           hom = '{ $sym.assocRight[a, b, c](using $obA, $obB, $obC) },
                                           obI = '{ $sym.tensorOb(using $sym.tensorOb(using $obA, $obB), $obC) },

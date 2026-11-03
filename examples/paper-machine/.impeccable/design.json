@@ -1,0 +1,753 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T18:38:52Z",
+  "title": "Design System: Paper Machine",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Instrument Navy",
+        "tonalRamp": [
+          "#142d3d",
+          "#1c394b",
+          "#31566f",
+          "#395972",
+          "#3e6585",
+          "#7290a3",
+          "#b4c9d5",
+          "#e8edf1"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Cool Paper",
+        "tonalRamp": [
+          "oklch(15% 0.0025 228.8)",
+          "oklch(26% 0.0025 228.8)",
+          "oklch(38% 0.0025 228.8)",
+          "oklch(49% 0.0025 228.8)",
+          "oklch(61% 0.0025 228.8)",
+          "oklch(72% 0.0025 228.8)",
+          "oklch(84% 0.0025 228.8)",
+          "oklch(95% 0.0025 228.8)"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "Bench White",
+        "tonalRamp": [
+          "oklch(15% 0.0000 0.0)",
+          "oklch(26% 0.0000 0.0)",
+          "oklch(38% 0.0000 0.0)",
+          "oklch(49% 0.0000 0.0)",
+          "oklch(61% 0.0000 0.0)",
+          "oklch(72% 0.0000 0.0)",
+          "oklch(84% 0.0000 0.0)",
+          "oklch(95% 0.0000 0.0)"
+        ]
+      },
+      "signal": {
+        "role": "primary",
+        "displayName": "Electric Signal",
+        "tonalRamp": [
+          "oklch(15% 0.1538 113.5)",
+          "oklch(26% 0.1538 113.5)",
+          "oklch(38% 0.1538 113.5)",
+          "oklch(49% 0.1538 113.5)",
+          "oklch(61% 0.1538 113.5)",
+          "oklch(72% 0.1538 113.5)",
+          "oklch(84% 0.1538 113.5)",
+          "oklch(95% 0.1538 113.5)"
+        ]
+      },
+      "blue": {
+        "role": "neutral",
+        "displayName": "Slate Blue",
+        "tonalRamp": [
+          "oklch(15% 0.0680 244.6)",
+          "oklch(26% 0.0680 244.6)",
+          "oklch(38% 0.0680 244.6)",
+          "oklch(49% 0.0680 244.6)",
+          "oklch(61% 0.0680 244.6)",
+          "oklch(72% 0.0680 244.6)",
+          "oklch(84% 0.0680 244.6)",
+          "oklch(95% 0.0680 244.6)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Quiet Slate",
+        "tonalRamp": [
+          "oklch(15% 0.0265 242.3)",
+          "oklch(26% 0.0265 242.3)",
+          "oklch(38% 0.0265 242.3)",
+          "oklch(49% 0.0265 242.3)",
+          "oklch(61% 0.0265 242.3)",
+          "oklch(72% 0.0265 242.3)",
+          "oklch(84% 0.0265 242.3)",
+          "oklch(95% 0.0265 242.3)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Panel Seam",
+        "tonalRamp": [
+          "oklch(15% 0.0129 236.7)",
+          "oklch(26% 0.0129 236.7)",
+          "oklch(38% 0.0129 236.7)",
+          "oklch(49% 0.0129 236.7)",
+          "oklch(61% 0.0129 236.7)",
+          "oklch(72% 0.0129 236.7)",
+          "oklch(84% 0.0129 236.7)",
+          "oklch(95% 0.0129 236.7)"
+        ]
+      },
+      "field-muted": {
+        "role": "neutral",
+        "displayName": "Field Readout",
+        "tonalRamp": [
+          "oklch(15% 0.0284 232.8)",
+          "oklch(26% 0.0284 232.8)",
+          "oklch(38% 0.0284 232.8)",
+          "oklch(49% 0.0284 232.8)",
+          "oklch(61% 0.0284 232.8)",
+          "oklch(72% 0.0284 232.8)",
+          "oklch(84% 0.0284 232.8)",
+          "oklch(95% 0.0284 232.8)"
+        ]
+      },
+      "trace": {
+        "role": "neutral",
+        "displayName": "Idle Trace",
+        "tonalRamp": [
+          "oklch(15% 0.0443 236.2)",
+          "oklch(26% 0.0443 236.2)",
+          "oklch(38% 0.0443 236.2)",
+          "oklch(49% 0.0443 236.2)",
+          "oklch(61% 0.0443 236.2)",
+          "oklch(72% 0.0443 236.2)",
+          "oklch(84% 0.0443 236.2)",
+          "oklch(95% 0.0443 236.2)"
+        ]
+      },
+      "action-hover": {
+        "role": "neutral",
+        "displayName": "Action Hover Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0552 239.5)",
+          "oklch(26% 0.0552 239.5)",
+          "oklch(38% 0.0552 239.5)",
+          "oklch(49% 0.0552 239.5)",
+          "oklch(61% 0.0552 239.5)",
+          "oklch(72% 0.0552 239.5)",
+          "oklch(84% 0.0552 239.5)",
+          "oklch(95% 0.0552 239.5)"
+        ]
+      },
+      "signal-hover": {
+        "role": "neutral",
+        "displayName": "Signal Hover",
+        "tonalRamp": [
+          "oklch(15% 0.1737 114.8)",
+          "oklch(26% 0.1737 114.8)",
+          "oklch(38% 0.1737 114.8)",
+          "oklch(49% 0.1737 114.8)",
+          "oklch(61% 0.1737 114.8)",
+          "oklch(72% 0.1737 114.8)",
+          "oklch(84% 0.1737 114.8)",
+          "oklch(95% 0.1737 114.8)"
+        ]
+      },
+      "node": {
+        "role": "neutral",
+        "displayName": "Structure Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0474 237.8)",
+          "oklch(26% 0.0474 237.8)",
+          "oklch(38% 0.0474 237.8)",
+          "oklch(49% 0.0474 237.8)",
+          "oklch(61% 0.0474 237.8)",
+          "oklch(72% 0.0474 237.8)",
+          "oklch(84% 0.0474 237.8)",
+          "oklch(95% 0.0474 237.8)"
+        ]
+      },
+      "node-page": {
+        "role": "neutral",
+        "displayName": "Page Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0594 239.6)",
+          "oklch(26% 0.0594 239.6)",
+          "oklch(38% 0.0594 239.6)",
+          "oklch(49% 0.0594 239.6)",
+          "oklch(61% 0.0594 239.6)",
+          "oklch(72% 0.0594 239.6)",
+          "oklch(84% 0.0594 239.6)",
+          "oklch(95% 0.0594 239.6)"
+        ]
+      },
+      "node-hover": {
+        "role": "neutral",
+        "displayName": "Object Hover Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0558 243.0)",
+          "oklch(26% 0.0558 243.0)",
+          "oklch(38% 0.0558 243.0)",
+          "oklch(49% 0.0558 243.0)",
+          "oklch(61% 0.0558 243.0)",
+          "oklch(72% 0.0558 243.0)",
+          "oklch(84% 0.0558 243.0)",
+          "oklch(95% 0.0558 243.0)"
+        ]
+      },
+      "node-line": {
+        "role": "neutral",
+        "displayName": "Structure Stroke",
+        "tonalRamp": [
+          "oklch(15% 0.0402 236.0)",
+          "oklch(26% 0.0402 236.0)",
+          "oklch(38% 0.0402 236.0)",
+          "oklch(49% 0.0402 236.0)",
+          "oklch(61% 0.0402 236.0)",
+          "oklch(72% 0.0402 236.0)",
+          "oklch(84% 0.0402 236.0)",
+          "oklch(95% 0.0402 236.0)"
+        ]
+      },
+      "node-page-line": {
+        "role": "neutral",
+        "displayName": "Page Stroke",
+        "tonalRamp": [
+          "oklch(15% 0.0390 234.7)",
+          "oklch(26% 0.0390 234.7)",
+          "oklch(38% 0.0390 234.7)",
+          "oklch(49% 0.0390 234.7)",
+          "oklch(61% 0.0390 234.7)",
+          "oklch(72% 0.0390 234.7)",
+          "oklch(84% 0.0390 234.7)",
+          "oklch(95% 0.0390 234.7)"
+        ]
+      },
+      "bench": {
+        "role": "neutral",
+        "displayName": "Page Bench",
+        "tonalRamp": [
+          "oklch(15% 0.0076 241.7)",
+          "oklch(26% 0.0076 241.7)",
+          "oklch(38% 0.0076 241.7)",
+          "oklch(49% 0.0076 241.7)",
+          "oklch(61% 0.0076 241.7)",
+          "oklch(72% 0.0076 241.7)",
+          "oklch(84% 0.0076 241.7)",
+          "oklch(95% 0.0076 241.7)"
+        ]
+      },
+      "assembly": {
+        "role": "neutral",
+        "displayName": "Assembly Ground",
+        "tonalRamp": [
+          "oklch(15% 0.0147 115.0)",
+          "oklch(26% 0.0147 115.0)",
+          "oklch(38% 0.0147 115.0)",
+          "oklch(49% 0.0147 115.0)",
+          "oklch(61% 0.0147 115.0)",
+          "oklch(72% 0.0147 115.0)",
+          "oklch(84% 0.0147 115.0)",
+          "oklch(95% 0.0147 115.0)"
+        ]
+      },
+      "assembly-line": {
+        "role": "neutral",
+        "displayName": "Assembly Seam",
+        "tonalRamp": [
+          "oklch(15% 0.0253 122.0)",
+          "oklch(26% 0.0253 122.0)",
+          "oklch(38% 0.0253 122.0)",
+          "oklch(49% 0.0253 122.0)",
+          "oklch(61% 0.0253 122.0)",
+          "oklch(72% 0.0253 122.0)",
+          "oklch(84% 0.0253 122.0)",
+          "oklch(95% 0.0253 122.0)"
+        ]
+      },
+      "assembly-hover": {
+        "role": "neutral",
+        "displayName": "Assembly Hover",
+        "tonalRamp": [
+          "oklch(15% 0.0340 118.1)",
+          "oklch(26% 0.0340 118.1)",
+          "oklch(38% 0.0340 118.1)",
+          "oklch(49% 0.0340 118.1)",
+          "oklch(61% 0.0340 118.1)",
+          "oklch(72% 0.0340 118.1)",
+          "oklch(84% 0.0340 118.1)",
+          "oklch(95% 0.0340 118.1)"
+        ]
+      },
+      "syntax": {
+        "role": "neutral",
+        "displayName": "Syntax Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0541 239.5)",
+          "oklch(26% 0.0541 239.5)",
+          "oklch(38% 0.0541 239.5)",
+          "oklch(49% 0.0541 239.5)",
+          "oklch(61% 0.0541 239.5)",
+          "oklch(72% 0.0541 239.5)",
+          "oklch(84% 0.0541 239.5)",
+          "oklch(95% 0.0541 239.5)"
+        ]
+      },
+      "notice": {
+        "role": "neutral",
+        "displayName": "Information Strip",
+        "tonalRamp": [
+          "oklch(15% 0.0104 247.9)",
+          "oklch(26% 0.0104 247.9)",
+          "oklch(38% 0.0104 247.9)",
+          "oklch(49% 0.0104 247.9)",
+          "oklch(61% 0.0104 247.9)",
+          "oklch(72% 0.0104 247.9)",
+          "oklch(84% 0.0104 247.9)",
+          "oklch(95% 0.0104 247.9)"
+        ]
+      },
+      "checking": {
+        "role": "neutral",
+        "displayName": "Active File Wash",
+        "tonalRamp": [
+          "oklch(15% 0.0199 112.9)",
+          "oklch(26% 0.0199 112.9)",
+          "oklch(38% 0.0199 112.9)",
+          "oklch(49% 0.0199 112.9)",
+          "oklch(61% 0.0199 112.9)",
+          "oklch(72% 0.0199 112.9)",
+          "oklch(84% 0.0199 112.9)",
+          "oklch(95% 0.0199 112.9)"
+        ]
+      },
+      "progress-track": {
+        "role": "neutral",
+        "displayName": "Progress Track",
+        "tonalRamp": [
+          "oklch(15% 0.0385 235.0)",
+          "oklch(26% 0.0385 235.0)",
+          "oklch(38% 0.0385 235.0)",
+          "oklch(49% 0.0385 235.0)",
+          "oklch(61% 0.0385 235.0)",
+          "oklch(72% 0.0385 235.0)",
+          "oklch(84% 0.0385 235.0)",
+          "oklch(95% 0.0385 235.0)"
+        ]
+      },
+      "queued-text": {
+        "role": "neutral",
+        "displayName": "Queued Readout",
+        "tonalRamp": [
+          "oklch(15% 0.0343 237.7)",
+          "oklch(26% 0.0343 237.7)",
+          "oklch(38% 0.0343 237.7)",
+          "oklch(49% 0.0343 237.7)",
+          "oklch(61% 0.0343 237.7)",
+          "oklch(72% 0.0343 237.7)",
+          "oklch(84% 0.0343 237.7)",
+          "oklch(95% 0.0343 237.7)"
+        ]
+      },
+      "passed-bg": {
+        "role": "neutral",
+        "displayName": "Verified Field",
+        "tonalRamp": [
+          "oklch(15% 0.0153 145.5)",
+          "oklch(26% 0.0153 145.5)",
+          "oklch(38% 0.0153 145.5)",
+          "oklch(49% 0.0153 145.5)",
+          "oklch(61% 0.0153 145.5)",
+          "oklch(72% 0.0153 145.5)",
+          "oklch(84% 0.0153 145.5)",
+          "oklch(95% 0.0153 145.5)"
+        ]
+      },
+      "passed-text": {
+        "role": "neutral",
+        "displayName": "Verified Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0814 146.7)",
+          "oklch(26% 0.0814 146.7)",
+          "oklch(38% 0.0814 146.7)",
+          "oklch(49% 0.0814 146.7)",
+          "oklch(61% 0.0814 146.7)",
+          "oklch(72% 0.0814 146.7)",
+          "oklch(84% 0.0814 146.7)",
+          "oklch(95% 0.0814 146.7)"
+        ]
+      },
+      "passed-line": {
+        "role": "neutral",
+        "displayName": "Verified Stroke",
+        "tonalRamp": [
+          "oklch(15% 0.0413 142.9)",
+          "oklch(26% 0.0413 142.9)",
+          "oklch(38% 0.0413 142.9)",
+          "oklch(49% 0.0413 142.9)",
+          "oklch(61% 0.0413 142.9)",
+          "oklch(72% 0.0413 142.9)",
+          "oklch(84% 0.0413 142.9)",
+          "oklch(95% 0.0413 142.9)"
+        ]
+      },
+      "failed-bg": {
+        "role": "neutral",
+        "displayName": "Failed Field",
+        "tonalRamp": [
+          "oklch(15% 0.0219 42.6)",
+          "oklch(26% 0.0219 42.6)",
+          "oklch(38% 0.0219 42.6)",
+          "oklch(49% 0.0219 42.6)",
+          "oklch(61% 0.0219 42.6)",
+          "oklch(72% 0.0219 42.6)",
+          "oklch(84% 0.0219 42.6)",
+          "oklch(95% 0.0219 42.6)"
+        ]
+      },
+      "failed-text": {
+        "role": "neutral",
+        "displayName": "Failed Ink",
+        "tonalRamp": [
+          "oklch(15% 0.1294 33.9)",
+          "oklch(26% 0.1294 33.9)",
+          "oklch(38% 0.1294 33.9)",
+          "oklch(49% 0.1294 33.9)",
+          "oklch(61% 0.1294 33.9)",
+          "oklch(72% 0.1294 33.9)",
+          "oklch(84% 0.1294 33.9)",
+          "oklch(95% 0.1294 33.9)"
+        ]
+      },
+      "failed-line": {
+        "role": "neutral",
+        "displayName": "Failed Stroke",
+        "tonalRamp": [
+          "oklch(15% 0.1312 37.1)",
+          "oklch(26% 0.1312 37.1)",
+          "oklch(38% 0.1312 37.1)",
+          "oklch(49% 0.1312 37.1)",
+          "oklch(61% 0.1312 37.1)",
+          "oklch(72% 0.1312 37.1)",
+          "oklch(84% 0.1312 37.1)",
+          "oklch(95% 0.1312 37.1)"
+        ]
+      },
+      "unable-bg": {
+        "role": "neutral",
+        "displayName": "Unable Field",
+        "tonalRamp": [
+          "oklch(15% 0.0286 84.6)",
+          "oklch(26% 0.0286 84.6)",
+          "oklch(38% 0.0286 84.6)",
+          "oklch(49% 0.0286 84.6)",
+          "oklch(61% 0.0286 84.6)",
+          "oklch(72% 0.0286 84.6)",
+          "oklch(84% 0.0286 84.6)",
+          "oklch(95% 0.0286 84.6)"
+        ]
+      },
+      "unable-text": {
+        "role": "neutral",
+        "displayName": "Unable Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0775 74.8)",
+          "oklch(26% 0.0775 74.8)",
+          "oklch(38% 0.0775 74.8)",
+          "oklch(49% 0.0775 74.8)",
+          "oklch(61% 0.0775 74.8)",
+          "oklch(72% 0.0775 74.8)",
+          "oklch(84% 0.0775 74.8)",
+          "oklch(95% 0.0775 74.8)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Heavy, tight Chivo headline; responsive size is documented in DESIGN.md."
+      },
+      "title": {
+        "displayName": "Section title",
+        "purpose": "Compact, sturdy names for work areas."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default instructions and interface copy."
+      },
+      "mono": {
+        "displayName": "Literal syntax",
+        "purpose": "PDF dictionaries and editable recipe JSON; smaller related sizes identify references, pipeline operation IDs and hashes."
+      },
+      "validation-headline": {
+        "displayName": "Validation headline",
+        "purpose": "Subordinate validation and pipeline headlines; the pipeline headline reduces to 26px at 620px."
+      },
+      "packet-title": {
+        "displayName": "Packet title",
+        "purpose": "Packet finishing legends and pipeline PDF-input headings."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Plain Chivo action labels and queue filenames."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field legends, evidence and compact actions."
+      },
+      "annotation": {
+        "displayName": "Annotation",
+        "purpose": "Supporting file metadata and receipts."
+      },
+      "small-annotation": {
+        "displayName": "Small annotation",
+        "purpose": "Profile captions, technical notes and narrow verdict labels."
+      }
+    },
+    "shadows": [
+      {
+        "name": "rendered-sheet",
+        "value": "0 8px 20px #142d3d22",
+        "purpose": "Separate the rendered PDF page from its bench."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Button and node transitions, plus the assembly reveal."
+      },
+      {
+        "name": "control-state",
+        "value": "0.2s",
+        "purpose": "Button background/color and node fill/stroke transitions."
+      },
+      {
+        "name": "current",
+        "value": "1.2s linear infinite",
+        "purpose": "Active trace dash offset moves to -26; disabled with reduced motion."
+      },
+      {
+        "name": "assemble",
+        "value": "0.55s",
+        "purpose": "Result clip-path reveals from inset(0 100% 0 0) to inset(0 0 0 0); disabled with reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide-min",
+        "value": "1600px"
+      },
+      {
+        "name": "compact-max",
+        "value": "1050px"
+      },
+      {
+        "name": "pipeline-compact-max",
+        "value": "850px"
+      },
+      {
+        "name": "stack-max",
+        "value": "760px"
+      },
+      {
+        "name": "pipeline-stack-max",
+        "value": "620px"
+      },
+      {
+        "name": "narrow-max",
+        "value": "380px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Navy action for opening or downloading a PDF.",
+      "html": "<button class=\"ds-primary\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 16V4m-5 5 5-5 5 5M4 15v5h16v-5\"/></svg>Open a PDF</button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:46px;padding:12px 20px;border:0;border-radius:0;font-weight:600;font-size:14px;line-height:1.5;cursor:pointer;font-family:Chivo,Arial,sans-serif;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1)),color .2s var(--ease,cubic-bezier(.16,1,.3,1));background:var(--ink,#142d3d);color:var(--white,#fff)}.ds-primary:hover{background:#31536a}.ds-primary:active{transform:translateY(1px)}.ds-primary:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-primary:disabled{cursor:not-allowed;opacity:.4}.ds-primary svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}@media(max-width:760px){.ds-primary{font-size:13px;min-height:44px;padding:11px 16px}}@media(prefers-reduced-motion:reduce){.ds-primary{transition:none}}"
+    },
+    {
+      "name": "Build action",
+      "kind": "button",
+      "refersTo": "button-build",
+      "description": "Signal-filled build, validation or pipeline action; navy run bars use a signal-colored keyboard outline.",
+      "html": "<div class=\"ds-run\"><button class=\"ds-build\">Build PDF<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m-6-6 6 6-6 6\"/></svg></button></div>",
+      "css": ".ds-build{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:46px;padding:12px 20px;border:0;border-radius:0;font-weight:600;font-size:14px;line-height:1.5;cursor:pointer;font-family:Chivo,Arial,sans-serif;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1)),color .2s var(--ease,cubic-bezier(.16,1,.3,1));min-height:42px;padding:10px 16px;background:var(--signal,#e2ed6b);color:var(--ink,#142d3d);white-space:nowrap}.ds-build:hover{background:#d0df42}.ds-build:active{transform:translateY(1px)}.ds-build:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-build:disabled{cursor:not-allowed;opacity:.5}.ds-build svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}@media(max-width:760px){.ds-build{font-size:13px;min-height:44px;padding:11px 16px}}@media(prefers-reduced-motion:reduce){.ds-build{transition:none}}.ds-run{padding:18px 24px;background:var(--field,#142d3d)}.ds-run .ds-build:focus-visible{outline-color:var(--signal,#e2ed6b)}"
+    },
+    {
+      "name": "Text action",
+      "kind": "button",
+      "refersTo": "button-text",
+      "description": "Quiet contextual action with an underline on hover.",
+      "html": "<button class=\"ds-text\">Inspect this page<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 18 18 6M6 6h12v12\"/></svg></button>",
+      "css": ".ds-text{display:inline-flex;align-items:center;gap:6px;border:0;padding:5px 0;background:none;color:var(--ink,#142d3d);font-size:12px;font-weight:600;line-height:1.5;white-space:nowrap;cursor:pointer;font-family:Chivo,Arial,sans-serif;}.ds-text:hover{text-decoration:underline;text-underline-offset:4px}.ds-text:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-text:disabled{cursor:not-allowed;opacity:.4}.ds-text svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}"
+    },
+    {
+      "name": "Page navigation",
+      "kind": "nav",
+      "refersTo": "page-navigation",
+      "description": "Outline arrows and a tabular page counter; the first boundary is disabled.",
+      "html": "<nav class=\"ds-page-nav\" aria-label=\"Page navigation\"><button disabled aria-label=\"Previous page\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m14 6-6 6 6 6\"/></svg></button><span>1 / 4</span><button aria-label=\"Next page\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m10 6 6 6-6 6\"/></svg></button></nav>",
+      "css": ".ds-page-nav{display:flex;align-items:center;gap:8px;color:var(--ink,#142d3d);font-family:Chivo,Arial,sans-serif;}.ds-page-nav span{font-size:11px;min-width:42px;text-align:center;font-variant-numeric:tabular-nums}.ds-page-nav button{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--line,#cbd4da);background:transparent;color:inherit;padding:2px;cursor:pointer}.ds-page-nav button:hover{background:var(--white,#fff)}.ds-page-nav button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-page-nav button:disabled{cursor:not-allowed;opacity:.4}.ds-page-nav svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}"
+    },
+    {
+      "name": "Reference chips",
+      "kind": "chip",
+      "refersTo": "reference-button",
+      "description": "Literal indirect references; unavailable graph targets remain visible and disabled.",
+      "html": "<div class=\"ds-references\"><button>6 0 R</button><button>7 0 R</button><button disabled title=\"Outside the displayed graph\">181 0 R</button></div>",
+      "css": ".ds-references{display:flex;flex-wrap:wrap;gap:6px}.ds-references button{border:1px solid var(--line,#cbd4da);background:var(--white,#fff);color:var(--ink,#142d3d);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10px;line-height:1.5;padding:4px 8px;border-radius:0;cursor:pointer}.ds-references button:hover{background:var(--signal,#e2ed6b);border-color:var(--signal,#e2ed6b)}.ds-references button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-references button:disabled{cursor:not-allowed;opacity:.4}"
+    },
+    {
+      "name": "Inspector and native selector",
+      "kind": "card",
+      "refersTo": "inspector",
+      "description": "A white inspector, ordinary object selector and scrollable syntax well.",
+      "html": "<section class=\"ds-inspector\"><div class=\"ds-inspector-heading\"><h2>Inside the object</h2><select aria-label=\"Choose an object\"><option>3 0 R · Page</option><option>7 0 R · Stream</option><option>Document trailer</option></select></div><pre tabindex=\"0\" aria-label=\"PDF dictionary syntax\">&lt;&lt;\n  /Type /Page\n  /MediaBox [ 0 0 595 420 ]\n  /Resources &lt;&lt; /Font &lt;&lt; /F1 6 0 R &gt;&gt; &gt;&gt;\n  /Contents 7 0 R\n&gt;&gt;</pre></section>",
+      "css": ".ds-inspector{background:var(--white,#fff);color:var(--ink,#142d3d);padding:24px;max-width:520px;border:1px solid var(--line,#cbd4da);font-family:Chivo,Arial,sans-serif;}.ds-inspector-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.ds-inspector h2{font-size:20px;font-weight:700;letter-spacing:-.025em;line-height:1.25;margin:0}.ds-inspector select{min-width:0;max-width:180px;background:var(--paper,#f3f5f6);border:1px solid var(--line,#cbd4da);padding:6px 25px 6px 9px;font-size:11px;border-radius:0;color:var(--ink,#142d3d);font-family:Chivo,Arial,sans-serif;}.ds-inspector pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.7;overflow:auto;height:139px;background:var(--paper,#f3f5f6);padding:12px 15px;margin:10px 0 13px;white-space:pre;tab-size:2;color:#26475d;scrollbar-width:thin}.ds-inspector select:focus-visible,.ds-inspector pre:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}@media(max-width:1050px){.ds-inspector{padding:20px}.ds-inspector select{max-width:140px}}@media(max-width:760px){.ds-inspector h2{font-size:19px}.ds-inspector select{max-width:160px}}@media(max-width:380px){.ds-inspector select{max-width:132px}}"
+    },
+    {
+      "name": "Energized object pair",
+      "kind": "custom",
+      "refersTo": "object-selected",
+      "description": "A selected page and a related stream joined by a real reference-shaped orthogonal trace.",
+      "html": "<div class=\"ds-field\"><svg viewBox=\"0 0 280 100\" aria-label=\"Selected page and related stream\"><path class=\"ds-trace\" d=\"M110 34H140V54H170\"/><g class=\"ds-node ds-selected\" transform=\"translate(10,10)\" role=\"button\" tabindex=\"0\" aria-pressed=\"true\" aria-label=\"Page, object 3 0 R\"><rect width=\"100\" height=\"48\"/><text class=\"ds-node-title\" x=\"11\" y=\"19\">Page</text><text class=\"ds-node-address\" x=\"11\" y=\"36\">3 0 R</text><circle class=\"ds-port\" cx=\"100\" cy=\"24\" r=\"2.5\"/></g><g class=\"ds-node ds-stream ds-related\" transform=\"translate(170,30)\" role=\"button\" tabindex=\"0\" aria-pressed=\"false\" aria-label=\"Stream, object 7 0 R\"><rect width=\"100\" height=\"48\"/><text class=\"ds-node-title\" x=\"11\" y=\"19\">Stream</text><text class=\"ds-node-address\" x=\"11\" y=\"36\">7 0 R</text><circle class=\"ds-port\" cx=\"0\" cy=\"24\" r=\"2.5\"/></g></svg></div>",
+      "css": ".ds-field{background:var(--field,#142d3d);padding:16px;font-family:Chivo,Arial,sans-serif;}.ds-field svg{display:block;width:100%;max-width:420px}.ds-trace{fill:none;stroke:var(--signal,#e2ed6b);stroke-width:2;stroke-dasharray:8 5;animation:ds-current 1.2s linear infinite}.ds-node{cursor:pointer;outline:none}.ds-node rect{fill:#1c394b;stroke:#6d8899;stroke-width:1;transition:fill .2s var(--ease,cubic-bezier(.16,1,.3,1)),stroke .2s var(--ease,cubic-bezier(.16,1,.3,1))}.ds-port{fill:#8da7b6}.ds-node-title{fill:var(--white,#fff);font-size:13px;font-weight:600}.ds-node-address{fill:var(--field-muted,#b4c9d5);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}.ds-stream rect{stroke-dasharray:4 3}.ds-related rect{stroke:var(--signal,#e2ed6b)}.ds-node:hover rect,.ds-node:focus-visible rect{fill:#395972;stroke:white;stroke-width:2}.ds-selected rect{fill:var(--signal,#e2ed6b);stroke:var(--signal,#e2ed6b)}.ds-selected .ds-node-title,.ds-selected .ds-node-address,.ds-selected .ds-port{fill:var(--ink,#142d3d)}.ds-node:focus-visible rect{stroke-width:3}.ds-node text{pointer-events:none;user-select:none}@keyframes ds-current{to{stroke-dashoffset:-26}}@media(prefers-reduced-motion:reduce){.ds-trace{animation:none}.ds-node rect{transition:none}}"
+    },
+    {
+      "name": "Studio tabs",
+      "kind": "nav",
+      "description": "Three shared-seam tool tabs with an explicit active underline and wrapping at 620px; arrow, Home and End switching belongs to the live app.",
+      "html": "<nav class=\"ds-tabs\" role=\"tablist\" aria-label=\"Studio tools\"><button role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Explore &amp; remix</button><button role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Validate PDFs<span>BATCH + MULTI-PROFILE</span></button><button role=\"tab\" aria-selected=\"true\">Pipelines<span>SAVE + COMPOSE</span></button></nav>",
+      "css": ".ds-tabs{display:flex;gap:26px;border-bottom:1px solid var(--line,#cbd4da);font-family:Chivo,Arial,sans-serif}.ds-tabs>button{position:relative;border:0;background:none;padding:12px 0 14px;min-height:46px;font-size:14px;font-weight:600;color:var(--muted,#566571);cursor:pointer}.ds-tabs>button[aria-selected=\"true\"]{color:var(--ink,#142d3d);border-bottom:3px solid var(--ink,#142d3d);padding-bottom:11px}.ds-tabs>button:hover{color:var(--ink,#142d3d)}.ds-tabs>button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-tabs span{font-size:9px;font-weight:500;letter-spacing:.025em;margin-left:9px;color:var(--muted,#566571)}@media(max-width:760px){.ds-tabs{gap:20px}.ds-tabs>button{font-size:12px}.ds-tabs span{display:none}}@media(max-width:620px){.ds-tabs{flex-wrap:wrap}}"
+    },
+    {
+      "name": "Packet field",
+      "kind": "input",
+      "refersTo": "packet-field",
+      "description": "Square, labeled native fields exposed by enabled finishing operations; minimum height 44px.",
+      "html": "<div class=\"ds-packet\"><label>Stamp text<input value=\"DRAFT\" maxlength=\"80\"></label><label>Placement<select><option>Top right</option><option>Center</option></select></label></div>",
+      "css": ".ds-packet{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:8px 0 16px;background:#f1f3e8;font-family:Chivo,Arial,sans-serif}.ds-packet label{display:flex;flex-direction:column;gap:6px;color:var(--muted,#566571);font-size:12px}.ds-packet input,.ds-packet select{width:100%;min-width:0;min-height:44px;padding:8px;border:1px solid var(--line,#cbd4da);border-radius:0;background:var(--white,#fff);color:var(--ink,#142d3d);font:inherit}.ds-packet input:focus-visible,.ds-packet select:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}"
+    },
+    {
+      "name": "Validation outcomes and receipt",
+      "kind": "card",
+      "refersTo": "validation-file",
+      "description": "Per-file claim, explicit profile verdicts and native evidence disclosure; completed rows remain mounted during the batch.",
+      "html": "<article class=\"ds-validation\"><strong>synthetic-3b-with-attachment.pdf</strong><span class=\"ds-filemeta\">1.3 KiB · synthetic specimen</span><div class=\"ds-outcomes\"><div class=\"ds-claim\"><span>XMP identification</span><strong>Declares PDF/A-3b</strong></div><div><span>PDF/A-3b</span><b class=\"ds-badge ds-passed\">Verified</b></div><div><span>PDF/A-2b</span><b class=\"ds-badge ds-failed\">Failed</b></div><div><span>PDF/A-3u</span><b class=\"ds-badge ds-unable\">Unable to check</b></div></div><details class=\"ds-details\"><summary>Evidence &amp; failure details</summary><dl><dt>Engine</dt><dd>veraPDF</dd><dt>SHA-256</dt><dd class=\"ds-fingerprint\">5adf0b03b3a861ea4e2561a4a31eac3999304c5f0f011607af3c4b1c229ff008</dd></dl><p>Receipts belong to the exact file bytes and requested profile.</p></details></article>",
+      "css": ".ds-validation{padding:23px 24px;background:var(--white,#fff);color:var(--ink,#142d3d);border:1px solid var(--line,#cbd4da);font:14px/1.5 Chivo,Arial,sans-serif}.ds-validation>strong{display:block;font-weight:600;overflow-wrap:anywhere}.ds-filemeta{display:block;font-size:11px;color:var(--muted,#566571);margin-top:4px}.ds-outcomes{display:flex;gap:18px 30px;flex-wrap:wrap;margin-top:20px}.ds-outcomes>div{min-width:110px}.ds-outcomes>.ds-claim{flex:1;min-width:200px}.ds-outcomes>div>span{display:block;color:var(--muted,#566571);font-size:10px;margin-bottom:7px}.ds-claim strong{font-size:12px;font-weight:500}.ds-badge{display:inline-block;padding:5px 9px;font-size:11px;font-weight:600;background:#e8edf1;color:#465b69}.ds-passed{background:#e7f0e7;color:#27542d}.ds-failed{background:#fbe9e2;color:#8c301c}.ds-unable{background:#f6ecd8;color:#6e4e1d}.ds-details{margin-top:20px;border-top:1px solid var(--line,#cbd4da);padding-top:12px}.ds-details summary{width:fit-content;cursor:pointer;font-size:12px;font-weight:500;padding:5px 0}.ds-details summary:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-details dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:7px 18px;font-size:11px;margin:18px 0 24px}.ds-details dt{color:var(--muted,#566571)}.ds-details dd{margin:0;overflow-wrap:anywhere}.ds-fingerprint{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.ds-details p{font-size:12px;max-width:75ch}@media(max-width:760px){.ds-validation{padding:20px 18px}.ds-validation>strong{font-size:13px}.ds-outcomes{gap:18px 22px;margin-top:14px}.ds-outcomes>.ds-claim{flex:1 0 100%;min-width:0}.ds-outcomes>div{min-width:93px}.ds-badge{font-size:10px}.ds-details dl{grid-template-columns:75px minmax(0,1fr);gap:9px 12px}}"
+    },
+    {
+      "name": "Pipeline PDF binding",
+      "kind": "custom",
+      "refersTo": "pipeline-binding",
+      "description": "A named input slot and bound PDF stay readable above contextual actions at 620px and below. Guidance explains that only inputs reached by the selected path are required; saved recipes keep slot names and settings.",
+      "html": "<div class=\"ds-pipeline-binding\"><div><strong>body</strong><span>Field notes.pdf · 4 pages</span></div><button>Use current PDF</button><button>Choose PDF</button></div>",
+      "css": ".ds-pipeline-binding{display:flex;align-items:center;gap:12px;min-width:0;padding:12px 16px;border:1px solid var(--line,#cbd4da);border-radius:0;color:var(--ink,#142d3d);font:14px/1.5 Chivo,Arial,sans-serif}.ds-pipeline-binding>div{flex:1;min-width:0}.ds-pipeline-binding strong,.ds-pipeline-binding span{display:block;overflow-wrap:anywhere}.ds-pipeline-binding span{font-size:12px;color:var(--muted,#566571)}.ds-pipeline-binding button{display:inline-flex;align-items:center;gap:6px;padding:5px 0;min-height:44px;border:0;background:none;color:var(--ink,#142d3d);font:600 12px/1.5 Chivo,Arial,sans-serif;white-space:nowrap;cursor:pointer}.ds-pipeline-binding button:hover{text-decoration:underline;text-underline-offset:4px}.ds-pipeline-binding button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-pipeline-binding button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:620px){.ds-pipeline-binding{flex-wrap:wrap;align-items:flex-start;padding:12px;gap:8px}.ds-pipeline-binding>div{flex-basis:100%}}"
+    },
+    {
+      "name": "Pipeline run bar",
+      "kind": "custom",
+      "refersTo": "pipeline-runbar",
+      "description": "Ready, changed, running, attention and completed states use literal live status. Running disables editing; completion reveals routing decisions, execution trace and exact-byte outputs and receipts. Completion remains distinct from a verified PDF/A verdict.",
+      "html": "<div class=\"ds-pipeline-run\"><div><strong role=\"status\" aria-live=\"polite\">Recipe ready · 5 reachable operations</strong><span>Shared steps run once. Validation checks the exact written bytes.</span></div><button class=\"ds-pipeline-check\">Check recipe</button><button class=\"ds-pipeline-execute\">Run pipeline<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m-6-6 6 6-6 6\"/></svg></button></div>",
+      "css": ".ds-pipeline-run{display:flex;align-items:center;gap:24px;padding:18px 24px;background:var(--ink,#142d3d);color:var(--white,#fff);font:14px/1.5 Chivo,Arial,sans-serif}.ds-pipeline-run>div{flex:1;min-width:0}.ds-pipeline-run strong,.ds-pipeline-run span{display:block}.ds-pipeline-run span{margin-top:4px;font-size:12px;color:var(--field-muted,#b4c9d5)}.ds-pipeline-run button{font:600 14px/1.5 Chivo,Arial,sans-serif;cursor:pointer;border:0;border-radius:0}.ds-pipeline-check{min-height:44px;padding:5px 0;background:none;color:var(--white,#fff);white-space:nowrap}.ds-pipeline-check:hover{text-decoration:underline;text-underline-offset:4px}.ds-pipeline-execute{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:42px;padding:10px 16px;background:var(--signal,#e2ed6b);color:var(--ink,#142d3d);white-space:nowrap;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1))}.ds-pipeline-execute:hover{background:#d0df42}.ds-pipeline-execute:active{transform:translateY(1px)}.ds-pipeline-execute svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.ds-pipeline-run button:focus-visible{outline:3px solid var(--signal,#e2ed6b);outline-offset:4px}.ds-pipeline-run button:disabled{opacity:.4;cursor:not-allowed}.ds-pipeline-run .ds-pipeline-execute:disabled{opacity:.5}@media(max-width:760px){.ds-pipeline-run button{font-size:13px}.ds-pipeline-execute{min-height:44px;padding:11px 16px}}@media(max-width:620px){.ds-pipeline-run{flex-wrap:wrap;gap:12px;padding:16px}.ds-pipeline-run>div{flex-basis:100%}.ds-pipeline-execute{margin-left:auto}}@media(prefers-reduced-motion:reduce){.ds-pipeline-execute{transition:none}}"
+    },
+    {
+      "name": "Pipeline selection and scrollable graph",
+      "kind": "custom",
+      "refersTo": "pipeline-operation-selected",
+      "description": "The native selector accompanies the locally scrollable topology. Choice ports read test/yes/no/? on navy backing. Chosen and selection traces use yellow; skipped nodes and wires stay dashed and labeled. Long edges use external gutters with 110px layer pitch and 12px lane spacing. Selection, redraw and graph-container resize center the selected operation only within this region; users can pan between those events without document scrolling.",
+      "html": "<div class=\"ds-pipeline-sample\"><label class=\"ds-pipeline-selector\">Selected operation<select><option>route · Choose a path</option><option>unknown · Stop with reason</option><option>pdf · Write PDF</option></select></label><section class=\"ds-pipeline-map\"><div class=\"ds-pipeline-map-title\"><h3>The executable recipe</h3><span>7 operations · 2 outputs</span></div><p>Select an operation here or in the selector. Scroll horizontally and vertically to follow every branch. After a run, dashed operations were skipped. Shared steps run once; outputs are marked in yellow.</p><div class=\"ds-pipeline-scroll\" tabindex=\"0\" aria-label=\"Scrollable pipeline graph\"><svg viewBox=\"0 0 580 600\" role=\"group\" aria-label=\"PDF pipeline operations and connections\"><path class=\"ds-pipeline-wire\" d=\"M186 78V106H186V130M186 78V106H394V130M290 408V436H290V460\"/><path class=\"ds-pipeline-wire ds-pipeline-active\" d=\"M186 78V90H20V216H224V240M290 298V326H290V350\"/><path class=\"ds-pipeline-wire ds-pipeline-active ds-pipeline-skipped-wire\" d=\"M186 188V216H268V240M394 78V90H560V216H356V240\"/><path class=\"ds-pipeline-wire ds-pipeline-taken\" d=\"M394 188V216H312V240\"/><g class=\"ds-pipeline-ports\"><rect x=\"207\" y=\"222\" width=\"34\" height=\"14\"/><rect x=\"251\" y=\"222\" width=\"34\" height=\"14\"/><rect x=\"295\" y=\"222\" width=\"34\" height=\"14\"/><rect x=\"339\" y=\"222\" width=\"34\" height=\"14\"/><text x=\"224\" y=\"233\">test</text><text x=\"268\" y=\"233\">yes</text><text x=\"312\" y=\"233\">no</text><text x=\"356\" y=\"233\">?</text></g><g class=\"ds-pipeline-node\" transform=\"translate(96,24)\" role=\"button\" tabindex=\"0\" aria-label=\"body: PDF input, ran\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">PDF input</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">body · ran</text></g><g class=\"ds-pipeline-node ds-pipeline-skipped\" transform=\"translate(304,24)\" role=\"button\" tabindex=\"0\" aria-label=\"unknown: Stop with reason, skipped\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">Stop with reason</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">unknown · skipped</text></g><g class=\"ds-pipeline-node ds-pipeline-skipped\" transform=\"translate(96,134)\" role=\"button\" tabindex=\"0\" aria-label=\"short: Stamp pages, skipped\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">Stamp pages</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">short · skipped</text></g><g class=\"ds-pipeline-node\" transform=\"translate(304,134)\" role=\"button\" tabindex=\"0\" aria-label=\"long: Stamp pages, ran\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">Stamp pages</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">long · ran</text></g><g class=\"ds-pipeline-node ds-pipeline-selected\" transform=\"translate(200,244)\" role=\"button\" tabindex=\"0\" aria-label=\"route: Choose a path, ran\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">Choose a path</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">route · ran</text></g><g class=\"ds-pipeline-node\" transform=\"translate(200,354)\" role=\"button\" tabindex=\"0\" aria-label=\"pdf: Write PDF, output, ran\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">Write PDF</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">pdf · ran</text><circle cx=\"169\" cy=\"12\" r=\"3\"/></g><g class=\"ds-pipeline-node\" transform=\"translate(200,464)\" role=\"button\" tabindex=\"0\" aria-label=\"checks: Validate PDF/A, output, ran\"><rect width=\"180\" height=\"54\"/><text x=\"12\" y=\"22\">Validate PDF/A</text><text class=\"ds-pipeline-id\" x=\"12\" y=\"40\">checks · ran</text><circle cx=\"169\" cy=\"12\" r=\"3\"/></g></svg></div></section></div>",
+      "css": ".ds-pipeline-sample{font:14px/1.5 Chivo,Arial,sans-serif;color:var(--ink,#142d3d);min-width:0}.ds-pipeline-selector{display:flex;flex-direction:column;gap:6px;font-weight:600;max-width:300px;margin-bottom:20px}.ds-pipeline-selector select{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line,#cbd4da);border-radius:0;background:var(--white,#fff);color:var(--ink,#142d3d);font:inherit}.ds-pipeline-selector select:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-pipeline-map{min-width:0;background:var(--ink,#142d3d);color:var(--white,#fff)}.ds-pipeline-map-title{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 24px;border-bottom:1px solid #486170}.ds-pipeline-map-title h3{font-size:16px;margin:0}.ds-pipeline-map-title span,.ds-pipeline-map>p{color:var(--field-muted,#b4c9d5);font-size:12px}.ds-pipeline-map>p{margin:0;padding:16px 24px}.ds-pipeline-scroll{overflow:auto;max-height:620px;scrollbar-color:#7691a1 var(--ink,#142d3d)}.ds-pipeline-scroll:focus-visible{outline:3px solid var(--signal,#e2ed6b);outline-offset:-3px}.ds-pipeline-scroll>svg{display:block;width:580px;min-width:450px;margin:0 auto}.ds-pipeline-wire{fill:none;stroke:#7290a3;stroke-width:1.5}.ds-pipeline-active{stroke:var(--signal,#e2ed6b);stroke-width:2}.ds-pipeline-node{cursor:pointer}.ds-pipeline-node rect{fill:#1c394b;stroke:#6d8899;stroke-width:1}.ds-pipeline-node:hover rect{fill:#395972}.ds-pipeline-node text{fill:var(--white,#fff);font:600 13px Chivo,Arial,sans-serif;pointer-events:none}.ds-pipeline-node .ds-pipeline-id{fill:var(--field-muted,#b4c9d5);font:400 10px ui-monospace,monospace}.ds-pipeline-node circle{fill:var(--signal,#e2ed6b)}.ds-pipeline-node.ds-pipeline-selected rect{fill:var(--signal,#e2ed6b);stroke:var(--signal,#e2ed6b);stroke-width:2}.ds-pipeline-selected text{fill:var(--ink,#142d3d)}.ds-pipeline-selected .ds-pipeline-id{fill:#26475d}.ds-pipeline-node:focus-visible{outline:3px solid var(--white,#fff);outline-offset:4px}@media(max-width:620px){.ds-pipeline-map-title{padding:16px}.ds-pipeline-map-title span{text-align:right}.ds-pipeline-map>p{padding:16px}.ds-pipeline-scroll{max-height:500px}}.ds-pipeline-skipped rect,.ds-pipeline-skipped-wire{stroke-dasharray:5 4}.ds-pipeline-skipped text{fill:var(--field-muted,#b4c9d5)}.ds-pipeline-selected.ds-pipeline-skipped rect{stroke:var(--ink,#142d3d)}.ds-pipeline-selected.ds-pipeline-skipped text{fill:var(--ink,#142d3d)}.ds-pipeline-taken{stroke:var(--signal,#e2ed6b);stroke-width:2}.ds-pipeline-ports rect{fill:var(--ink,#142d3d)}.ds-pipeline-ports text{fill:var(--field-muted,#b4c9d5);font:10px ui-monospace,monospace;text-anchor:middle}"
+    },
+    {
+      "name": "Three-way condition editor",
+      "kind": "input",
+      "refersTo": "pipeline-field",
+      "description": "Typed connection fields keep matched, not-matched and unknown routes separate. The condition selects page counts, an XMP claim or completed validation; the live editor reveals page-range or profile settings accordingly. Stop with reason separately exposes its message and output kind.",
+      "html": "<div class=\"ds-conditional-editor\"><label>Document to inspect<select><option>body · PDF input</option></select></label><label>When matched<select><option>short · Stamp pages</option></select></label><label>When not matched<select><option>long · Stamp pages</option></select></label><label>When unknown<select><option>unknown · Stop with reason</option></select></label><label>Branch output kind<select><option>Document</option><option>PDF bytes</option><option>Validation receipt</option></select></label><label>Condition<select><option>Page count</option><option>Declares PDF/A-3b (XMP claim)</option><option>Completed validation result</option></select></label><label>Minimum pages<input type=\"number\" value=\"1\"></label><label>Maximum pages<input type=\"number\" value=\"3\"></label><p>Only the selected branch runs. Unknown is a separate route; a missing or unfinished check is never a failed verdict.</p></div>",
+      "css": ".ds-conditional-editor{display:grid;gap:14px;padding:24px;color:var(--ink,#142d3d);font:14px/1.5 Chivo,Arial,sans-serif;max-width:300px}.ds-conditional-editor label{display:flex;flex-direction:column;gap:6px;font-weight:600}.ds-conditional-editor input,.ds-conditional-editor select{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line,#cbd4da);border-radius:0;background:var(--white,#fff);color:var(--ink,#142d3d);font:inherit}.ds-conditional-editor select:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-conditional-editor input:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:3px}.ds-conditional-editor p{margin:14px 0}"
+    },
+    {
+      "name": "Routing decisions and execution trace",
+      "kind": "custom",
+      "description": "Contiguous result rows spell out the selected route and its reason, then disclose execution order, skipped operations and checked profiles/hashes. A completed run does not imply a passing PDF/A verdict.",
+      "html": "<div class=\"ds-route-results\"><section class=\"ds-route-decisions\"><h4>Routing decisions</h4><ol><li><strong>route: not matched → long</strong><p>4 pages; expected 1 to 3 inclusive</p></li></ol></section><details class=\"ds-route-trace\" open><summary>Execution trace · 5 ran · 2 skipped</summary><p>Ran: body → long → route → pdf → checks</p><p>Validation pass 1: PDF/A-3b · SHA-256 cd0a6a55b7ddd9db20eac0c77e9f4c68cc82f39ee2c5fa8066b37171b3e7d853</p><p>Skipped: short, unknown</p></details></div>",
+      "css": ".ds-route-results{color:var(--ink,#142d3d);font:14px/1.5 Chivo,Arial,sans-serif}.ds-route-decisions,.ds-route-trace{padding:16px 0;border-bottom:1px solid var(--line,#cbd4da)}.ds-route-decisions h4{font-size:18px;margin:0 0 12px}.ds-route-decisions ol{margin:0;padding-left:20px}.ds-route-decisions li+li{margin-top:12px}.ds-route-decisions p{margin:4px 0 0;color:var(--muted,#566571)}.ds-route-trace summary{font-weight:600;cursor:pointer;min-height:44px}.ds-route-trace summary:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-route-trace p{overflow-wrap:anywhere}"
+    },
+    {
+      "name": "Keep and stop-after-input editors",
+      "kind": "input",
+      "refersTo": "pipeline-field",
+      "description": "Typed input positions use the incumbent native fields. Keep retains the chosen value after all connected inputs run; Stop after inputs evaluates them before stopping. An unselected stop stays skipped.",
+      "html": "<div class=\"ds-evaluation-editors\"><section><h3>Keep a value</h3><label>Input 1 · document<select><option>body · PDF input</option></select></label><label>Input 2 · file<select><option>original · Write PDF</option></select></label><label>Input 3 · receipt<select><option>before · Validate PDF/A</option></select></label><label>Value to keep<select><option>Input 1 · document</option><option>Input 2 · file</option><option selected>Input 3 · receipt</option></select></label><p>Evaluates every connected input, then keeps the selected value. Earlier operations still run.</p></section><section><h3>Stop after inputs</h3><label>Input 1 · receipt<select><option>before · Validate PDF/A</option></select></label><label>Reason to stop<input type=\"text\" value=\"A completed check is required\" maxlength=\"160\"></label><label>Branch output kind<select><option>Document</option><option>PDF bytes</option><option>Validation receipt</option></select></label><p>Evaluates every connected input before stopping with this reason. Unselected stops stay skipped.</p></section></div>",
+      "css": ".ds-evaluation-editors{display:grid;gap:24px;max-width:300px;padding:24px;color:var(--ink,#142d3d);font:14px/1.5 Chivo,Arial,sans-serif}.ds-evaluation-editors section{display:grid;gap:14px;min-width:0}.ds-evaluation-editors section+section{border-top:1px solid var(--line,#cbd4da);padding-top:24px}.ds-evaluation-editors h3{font-size:18px;margin:0}.ds-evaluation-editors label{display:flex;flex-direction:column;gap:6px;font-weight:600}.ds-evaluation-editors input,.ds-evaluation-editors select{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line,#cbd4da);border-radius:0;background:var(--white,#fff);color:var(--ink,#142d3d);font:inherit}.ds-evaluation-editors select:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-evaluation-editors input:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:3px}.ds-evaluation-editors p{margin:14px 0}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Circuit Network Analyzer",
+    "overview": "Paper Machine treats PDF structure as something a person can probe. A navy measurement field, electric-yellow signals and a cool paper bench give the studio the character of a working instrument. The visual language belongs to this example; it does not define the PDF library's identity.\n\nSturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork. Packet finishing, batch validation and reusable pipelines extend the same instrument through plain fields, contiguous rows and evidence attached to each file. Pipeline selection energizes the operation and its connected traces while native controls keep wiring and settings accessible. Three-way routing leaves skipped operations visible and pairs the chosen path with a written reason and execution trace. Typed input readouts make evaluation before keeping a value or stopping explicit.",
+    "keyCharacteristics": [
+      "Square controls and contiguous, bordered work areas.",
+      "Solid selected objects, outlined related objects and orthogonal reference traces.",
+      "Restrained depth, reserved for the rendered sheet.",
+      "Motion attached to a live connection or a completed assembly.",
+      "Literal routing outcomes, visible skipped paths and evidence tied to completed checks."
+    ],
+    "rules": [
+      {
+        "name": "The Verdict Evidence Rule",
+        "body": "A metadata claim never receives verified styling by itself. Pair every status color with a literal outcome label; verification belongs to completed checks of the exact bytes.",
+        "section": "colors"
+      },
+      {
+        "name": "The Energized State Rule",
+        "body": "Yellow identifies an actionable or connected state. A selected object takes a solid yellow field; related objects retain their field and gain a yellow outline. In a pipeline, connected selection traces and the chosen branch trace use yellow; dashed boundaries and literal status text keep skipped operations distinct.",
+        "section": "colors"
+      },
+      {
+        "name": "The Literal Readout Rule",
+        "body": "Reserve monospace for PDF syntax, recipe data, identifiers and addresses; use Chivo for names, instructions and actions.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sheet Depth Rule",
+        "body": "Keep instrument chrome flat; reserve ambient elevation for the rendered page.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** keep actual PDF previews and literal object addresses attached to their controls.",
+      "**Do** distinguish a solid selected node from outlined related nodes.",
+      "**Do** preserve local scrolling, keyboard focus and reduced-motion behavior when extending a work area.",
+      "**Do** use the larger narrow-screen assembly controls with their established spacing.",
+      "**Do** keep queue outcomes labeled, receipts tied to exact bytes and completed disclosures stable while a batch advances.",
+      "**Do** reveal finishing fields progressively and clear enabled finishing choices after a successful build.",
+      "**Do** use real PDF renders for every preview; no generated raster artwork ships with the studio.",
+      "**Do** keep pipeline binding information full-width above its actions on narrow screens, and preserve the native selector and visible two-axis scrolling guidance beside the graph.",
+      "**Do** distinguish pipeline completion from PDF/A verification, and hide prior pipeline results when recipe settings change.",
+      "**Do** preserve the separate unknown route, typed connections and plain explanation of which path requires each PDF input.",
+      "**Do** explain that Keep a value and Stop after inputs evaluate every connected input before retaining a value or stopping.",
+      "**Do** pair chosen and skipped graph states with literal routing reasons and ran/skipped text; keep long edges in their external gutters."
+    ],
+    "donts": [
+      "**Don't** introduce rounded card shells around the contiguous instrument panels.",
+      "**Don't** use monospace for display headlines or action labels.",
+      "**Don't** add ambient shadows to ordinary controls or panel seams.",
+      "**Don't** turn sample artwork colors or tiny technical annotations into a general palette or heading scale.",
+      "**Don't** apply verified styling to an XMP claim, stale fingerprint or unfinished check.",
+      "**Don't** use a low-contrast focus outline on the navy run bar.",
+      "**Don't** compress pipeline operation text to make a branching graph fit the document width; keep that overflow local to the graph.",
+      "**Don't** turn an XMP claim or an unknown condition into a failed or verified PDF/A verdict."
+    ]
+  }
+}
