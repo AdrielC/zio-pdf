@@ -2,6 +2,10 @@
 
 Vendored copy of [tofu-tf/volga](https://github.com/tofu-tf/volga) `modules/core`, maintained in-tree for zio-pdf.
 
+The helper remains a separate compilation unit for macros. Its classes and sources
+are bundled into the JVM `zio-pdf` artifact; no separately published helper is
+required. JVM graph and ingest adapters are excluded from the Scala.js parser.
+
 ## Why in-tree
 
 - **Scala 3.8 SMC fixes** in `volga.syntax.parsing` (`Var.scala`, `MParsing.scala`) — tuple destructuring and `NoType` RHS inference
