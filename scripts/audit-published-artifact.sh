@@ -50,6 +50,11 @@ done
 unzip -p "${JAR_PATH}" | strings > "${CLASS_STRINGS}"
 unzip -p "${JS_JAR_PATH}" | strings > "${JS_CLASS_STRINGS}"
 
+if grep -Eq 'file:/|/Users/|/home/runner/' "${JS_CLASS_STRINGS}"; then
+  echo "Scala.js release JAR contains local source paths." >&2
+  exit 1
+fi
+
 for artifact_listing in "${JAR_LIST}" "${JS_JAR_LIST}"; do
   if grep -Eq '(^|/)(PublishSettings|target|\.git)(/|\.|$)' "${artifact_listing}"; then
     echo "Release JAR contains build or repository internals." >&2

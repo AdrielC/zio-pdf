@@ -234,6 +234,10 @@ private def jsSharedSources(base: File): Seq[File] = {
   }
 }
 
+private def publicScalaJsSourceSettings = Seq(
+  scalacOptions += s"-scalajs-mapSourceURI:${(LocalRootProject / baseDirectory).value.toURI}->https://raw.githubusercontent.com/AdrielC/zio-pdf/main/"
+)
+
 /**
  * Browser / Node.js artifact. Shared parser code continues to live in the
  * primary source tree; JVM-only I/O, mmap, and crypto implementations are
@@ -241,6 +245,7 @@ private def jsSharedSources(base: File): Seq[File] = {
  */
 lazy val scalaJs = (project in file("js"))
   .enablePlugins(ScalaJSPlugin)
+  .settings(publicScalaJsSourceSettings)
   .settings(
     name := "zio-pdf",
     libraryDependencies ++= List(
@@ -280,6 +285,7 @@ lazy val scalaJs = (project in file("js"))
 lazy val scalaJsFrontend = (project in file("examples-js"))
   .enablePlugins(ScalaJSPlugin)
   .dependsOn(scalaJs)
+  .settings(publicScalaJsSourceSettings)
   .settings(
     name := "zio-pdf-scalajs-frontend",
     publish / skip := true,
