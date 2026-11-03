@@ -26,7 +26,10 @@ object Consumer:
     given SymmetricCat[ConsumerDiag, PropOb] = FreeProp.propCat[ConsumerLabel]
     val syntax = smc.syntax[ConsumerDiag, PropOb, Nat.Plus]
     val mark = ArrowSyntax.node("mark", 1, 1)
-    val graph = syntax.of1((input: V[Nat.`1`]) => mark(input))
+    val graph = syntax.of1((input: V[Nat.`1`]) => {
+      val marked = mark(input)
+      marked
+    })
     val (outputs, edges) = GraphRender.wiring(graph, Tuple1("source"))
     assert(outputs == Vector("mark"))
     assert(edges == Vector("source" -> "mark"))
