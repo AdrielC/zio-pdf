@@ -37,6 +37,161 @@ class PipelineTest(unittest.TestCase):
     def run_recipe(self, recipe=None, bindings=None):
         return request('/api/pipelines/run', {'recipe': recipe or self.recipe, 'bindings': bindings or {'body': self.doc['id']}})
 
+    def example(self, kind):
+        status, data = request('/api/pipelines/example?' + kind)
+        self.assertEqual(status, 200, data)
+        return json.loads(data)
+
+    def output_text(self, document):
+        status, pdf = request('/api/documents/' + document['id'] + '/file')
+        self.assertEqual(status, 200)
+        self.assertEqual(hashlib.sha256(pdf).hexdigest(), document['sha256'])
+        if not shutil.which('pdftotext'):
+            return None
+        with tempfile.TemporaryDirectory(prefix='conditional-pdf-') as folder:
+            path = Path(folder) / 'output.pdf'
+            path.write_bytes(pdf)
+            if shutil.which('qpdf'):
+                result = subprocess.run(['qpdf', '--check', str(path)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return subprocess.check_output(['pdftotext', str(path), '-'], text=True)
+
+    def test_page_count_example_runs_only_the_selected_stamp(self):
+        recipe = self.example('pages')
+        self.assertEqual(recipe['version'], 2)
+        status, checked = request('/api/pipelines/check', recipe)
+        self.assertEqual(status, 200, checked)
+        self.assertEqual(json.loads(checked)['recipe'], recipe)
+        status, data = self.run_recipe(recipe)
+        self.assertEqual(status, 200, data)
+        result = json.loads(data)
+        self.assertEqual(result['decisions'][0]['outcome'], 'no')
+        self.assertEqual(result['decisions'][0]['selected'], 'long')
+        self.assertIn('short', result['skipped'])
+        self.assertIn('unknown', result['skipped'])
+        text = self.output_text(result['outputs'][0]['document'])
+        if text is not None:
+            self.assertIn('LONG PACKET', text)
+            self.assertNotIn('SHORT PACKET', text)
+        status, data = request('/api/documents/' + self.doc['id'] + '/remix', raw=b'1,2')
+        self.assertEqual(status, 200, data)
+        small = json.loads(data)
+        status, data = self.run_recipe(recipe, {'body': small['id']})
+        self.assertEqual(status, 200, data)
+        result = json.loads(data)
+        self.assertEqual(result['decisions'][0]['selected'], 'short')
+        self.assertIn('long', result['skipped'])
+
+    def test_validation_choice_reuses_passed_bytes_and_marks_failed_documents(self):
+        recipe = self.example('validation')
+        status, valid = request('/api/validation-samples/valid')
+        self.assertEqual(status, 200)
+        status, data = request('/api/pipeline-inputs/conditional-archive', raw=valid)
+        self.assertEqual(status, 200, data)
+        valid_doc = json.loads(data)
+        status, data = self.run_recipe(recipe, {'body': valid_doc['id']})
+        self.assertEqual(status, 200, data)
+        result = json.loads(data)
+        self.assertEqual(result['decisions'][0]['outcome'], 'yes')
+        self.assertEqual(result['validatorPasses'], 1)
+        self.assertEqual(set(result['skipped']), {'review', 'review-pdf', 'unable'})
+        output, before, after = result['outputs']
+        self.assertEqual(output['document']['sha256'], before['report']['sha256'])
+        self.assertEqual(before['report']['checkedAt'], after['report']['checkedAt'])
+        self.assertEqual(after['report']['validation']['results'][0]['status'], 'passed')
+        status, data = self.run_recipe(recipe)
+        self.assertEqual(status, 200, data)
+        result = json.loads(data)
+        self.assertEqual(result['decisions'][0]['outcome'], 'no')
+        self.assertEqual(result['decisions'][0]['selected'], 'review-pdf')
+        self.assertEqual(result['validatorPasses'], 2)
+        self.assertEqual(len(result['executed']), len(set(result['executed'])))
+        output, before, after = result['outputs']
+        self.assertNotEqual(before['report']['sha256'], after['report']['sha256'])
+        self.assertEqual(after['report']['sha256'], output['document']['sha256'])
+        text = self.output_text(output['document'])
+        if text is not None:
+            self.assertIn('REVIEW REQUIRED', text)
+
+    def test_missing_validation_evidence_routes_to_unknown_stop(self):
+        recipe = self.example('validation')
+        route = next(n for n in recipe['nodes'] if n['id'] == 'route')
+        route['test']['profile'] = '2b'
+        next(n for n in recipe['nodes'] if n['id'] == 'unable')['message'] = 'No completed verdict for requested profile'
+        status, data = self.run_recipe(recipe)
+        self.assertEqual(status, 400, data)
+        self.assertIn('No completed verdict', json.loads(data)['error'])
+        self.assertEqual(request('/api/documents/' + self.doc['id'] + '/file')[0], 200)
+
+    def test_conditional_validation_pass_budget_and_combined_profiles(self):
+        recipe = {'version': 2, 'name': 'Bounded checks', 'nodes': [
+            {'id': 'body', 'op': 'input', 'slot': 'body', 'inputs': []},
+            {'id': 'route', 'op': 'choose', 'kind': 'document',
+             'test': {'kind': 'page-count', 'min': 1, 'max': 64},
+             'inputs': ['body', 'body', 'body', 'body']},
+            {'id': 'pdf', 'op': 'write', 'inputs': ['route']},
+            *[{'id': f'check{i}', 'op': 'validate', 'profiles': profiles, 'inputs': ['pdf']}
+              for i, profiles in enumerate([['3b'], ['2b'], ['3u'], ['2b', '3u']])]],
+            'outputs': ['check0', 'check1', 'check2', 'check3']}
+        status, data = self.run_recipe(recipe)
+        self.assertEqual(status, 400, data)
+        self.assertIn('at most three validation passes', json.loads(data)['error'])
+        recipe['nodes'][-4]['profiles'] = ['3b', '2b', '3u']
+        status, data = self.run_recipe(recipe)
+        self.assertEqual(status, 200, data)
+        result = json.loads(data)
+        self.assertEqual(result['validatorPasses'], 1)
+        self.assertEqual(result['validationRuns'][0]['profiles'], ['2b', '3b', '3u'])
+
+    def test_nested_routes_skip_expired_bindings_and_runtime_invalid_pages(self):
+        recipe = {'version': 2, 'name': 'Nested lazy routes', 'nodes': [
+            {'id': 'body', 'op': 'input', 'slot': 'body', 'inputs': []},
+            {'id': 'optional', 'op': 'input', 'slot': 'optional', 'inputs': []},
+            {'id': 'bad', 'op': 'select', 'pages': [65], 'inputs': ['body']},
+            {'id': 'stop', 'op': 'stop', 'message': 'Unknown count', 'kind': 'document', 'inputs': []},
+            {'id': 'inner', 'op': 'choose', 'test': {'kind': 'page-count', 'min': 1, 'max': 3}, 'kind': 'document', 'inputs': ['body', 'optional', 'body', 'stop']},
+            {'id': 'outer', 'op': 'choose', 'test': {'kind': 'page-count', 'min': 1, 'max': 3}, 'kind': 'document', 'inputs': ['body', 'bad', 'inner', 'stop']},
+            {'id': 'pdf', 'op': 'write', 'inputs': ['outer']}], 'outputs': ['pdf']}
+        status, data = self.run_recipe(recipe, {'body': self.doc['id'], 'optional': 'expired'})
+        self.assertEqual(status, 200, data)
+        result = json.loads(data)
+        self.assertEqual({d['node'] for d in result['decisions']}, {'outer', 'inner'})
+        self.assertEqual(set(result['skipped']), {'optional', 'bad', 'stop'})
+        self.assertEqual(result['validatorPasses'], 0)
+        next(n for n in recipe['nodes'] if n['id'] == 'outer')['test']['max'] = 64
+        self.assertEqual(self.run_recipe(recipe)[0], 400)
+
+    def test_unselected_validation_profiles_do_not_run_speculatively(self):
+        recipe = {'version': 2, 'name': 'Demanded checks only', 'nodes': [
+            {'id': 'body', 'op': 'input', 'slot': 'body', 'inputs': []},
+            {'id': 'pdf', 'op': 'write', 'inputs': ['body']},
+            {'id': 'wanted', 'op': 'validate', 'profiles': ['3b'], 'inputs': ['pdf']},
+            {'id': 'unused', 'op': 'validate', 'profiles': ['2b', '3u'], 'inputs': ['pdf']},
+            {'id': 'route', 'op': 'choose', 'test': {'kind': 'page-count', 'min': 1, 'max': 64}, 'kind': 'receipt', 'inputs': ['body', 'wanted', 'wanted', 'unused']}], 'outputs': ['route']}
+        status, data = self.run_recipe(recipe)
+        self.assertEqual(status, 200, data)
+        result = json.loads(data)
+        self.assertEqual(result['validatorPasses'], 1)
+        self.assertEqual(result['validationRuns'][0]['profiles'], ['3b'])
+        self.assertEqual(result['skipped'], ['unused'])
+
+    def test_conditional_schema_rejects_mixed_ports_bad_ranges_and_old_versions(self):
+        recipe = self.example('pages')
+        recipe['version'] = 1
+        status, data = request('/api/pipelines/check', recipe)
+        self.assertEqual(status, 400, data)
+        self.assertIn('Version', [i['code'] for i in json.loads(data)['issues']])
+        recipe['version'] = 2
+        route = next(n for n in recipe['nodes'] if n['id'] == 'route')
+        route['test']['min'] = 0
+        route['test']['max'] = 99
+        self.assertIn('Setting', [i['code'] for i in json.loads(request('/api/pipelines/check', recipe)[1])['issues']])
+        route['test'] = {'kind': 'page-count', 'min': 1, 'max': 3}
+        route['inputs'][1] = 'pdf'
+        self.assertIn('Type', [i['code'] for i in json.loads(request('/api/pipelines/check', recipe)[1])['issues']])
+        route['test']['arbitraryCode'] = 'rejected'
+        self.assertIn('Structure', [i['code'] for i in json.loads(request('/api/pipelines/check', recipe)[1])['issues']])
+
     def test_volga_example_round_trips_to_portable_data(self):
         status, data = request('/api/pipelines/example')
         self.assertEqual(status, 200, data)

@@ -175,7 +175,12 @@ object PaperMachine:
               val _ = pipelineInputs.remove(pipelineInputs.head._1)
           }
           json(report(doc)))
-    else if path == "/api/pipelines/example" && method == "GET" then json(PipelineJson.encode(PipelineWiring.example))
+    else if path == "/api/pipelines/example" && method == "GET" then
+      val example = Option(exchange.getRequestURI.getRawQuery).getOrElse("") match
+        case "pages" => PipelineExamples.pages
+        case "validation" => PipelineExamples.validation
+        case _ => PipelineWiring.example
+      json(PipelineJson.encode(example))
     else if Set("/api/pipelines/check", "/api/pipelines/run")(path) && method == "POST" then
       val parsed = PipelineJson.parse(read(exchange, PipelineJson.MaxBytes))
       val envelope = parsed.flatMap { value =>
@@ -274,32 +279,31 @@ object PaperMachine:
 
   private def runPipeline(plan: PdfPipeline.Checked, bindings: Map[String, String]): Reply =
     import PdfPipeline.*
-    val slots = plan.order.collect { case Node(_, Op.Input(slot), _) => slot }.toSet
+    val slots = plan.recipe.nodes.collect { case Node(_, Op.Input(slot), _) => slot }.toSet
     val snapshot = documents.synchronized(documents.toMap) ++ bookends.synchronized(bookends.values.map(doc => doc.id -> doc).toMap) ++ pipelineInputs.synchronized(pipelineInputs.values.map(doc => doc.id -> doc).toMap)
-    if bindings.keySet != slots || !bindings.values.forall(snapshot.contains) then
-      error("Bind every named input to a current PDF. Reopen any expired files.")
+    if !bindings.keySet.subsetOf(slots) then
+      error("Bind only input slots named by the recipe")
     else if !pipelineSlots.tryAcquire() then error("Another pipeline is running. Wait for it to finish.", 429)
     else Using.resource(new AutoCloseable { def close(): Unit = pipelineSlots.release() }) { _ =>
       val profiles = plan.order.flatMap { node => node.op match
         case Op.Validate(profiles) => profiles
         case _ => Vector.empty
       }.distinct
-      if profiles.nonEmpty && !PdfValidation.slots.tryAcquire() then error("Another validation is running. Wait for it to finish.", 429)
-      else Using.resource(new AutoCloseable { def close(): Unit = if profiles.nonEmpty then PdfValidation.slots.release() }) { _ =>
-        val services = new PipelineServices(profiles)
-        evaluate(PdfPipeline.run(plan, bindings.map((slot, id) => slot -> snapshot(id).value), services))
-          .flatMap { run =>
-            val outputs = run.outputs.foldLeft[Either[String, Vector[String]]](Right(Vector.empty)) { case (acc, (id, value)) => acc.flatMap { found => value match
-              case Value.File(bytes) =>
-                val name = plan.recipe.name.replaceAll("[^A-Za-z0-9 _-]", "").trim.take(70)
-                admit(bytes.toArray, s"${if name.nonEmpty then name else "Pipeline"} - $id.pdf")
-                  .map(doc => found :+ s"{\"node\":${quote(id)},\"kind\":\"file\",\"document\":${report(doc)}}")
-              case Value.Receipt(receipt) => Right(found :+ s"{\"node\":${quote(id)},\"kind\":\"receipt\",\"report\":$receipt}")
-              case _ => Left("A pipeline output must be a PDF file or validation receipt")
-            }}
-            outputs.map(values => s"{\"validatorPasses\":${services.validationPasses},\"recipe\":${PipelineJson.encode(plan.recipe)},\"executed\":${run.executed.map(quote).mkString("[", ",", "]")},\"outputs\":${values.mkString("[", ",", "]")}}")
-          }.fold(error(_), json(_))
-      }
+      val services = new PipelineServices(if plan.order.exists(_.op.isInstanceOf[Op.Choose]) then Vector.empty else profiles)
+      evaluate(PdfPipeline.run(plan, bindings.flatMap((slot, id) => snapshot.get(id).map(doc => slot -> doc.value)), services))
+        .flatMap { run =>
+          val outputs = run.outputs.foldLeft[Either[String, Vector[String]]](Right(Vector.empty)) { case (acc, (id, value)) => acc.flatMap { found => value match
+            case Value.File(bytes) =>
+              val name = plan.recipe.name.replaceAll("[^A-Za-z0-9 _-]", "").trim.take(70)
+              admit(bytes.toArray, s"${if name.nonEmpty then name else "Pipeline"} - $id.pdf")
+                .map(doc => found :+ s"{\"node\":${quote(id)},\"kind\":\"file\",\"document\":${report(doc)}}")
+            case Value.Receipt(receipt, _) => Right(found :+ s"{\"node\":${quote(id)},\"kind\":\"receipt\",\"report\":$receipt}")
+            case _ => Left("A pipeline output must be a PDF file or validation receipt")
+          }}
+          val decisions = run.decisions.map(d => s"{\"node\":${quote(d.node)},\"outcome\":${quote(d.outcome.toString.toLowerCase)},\"selected\":${quote(d.selected)},\"reason\":${quote(d.reason)}}").mkString("[", ",", "]")
+          val validationRuns = services.validationRuns.map((hash, profiles) => s"{\"sha256\":${quote(hash)},\"profiles\":${profiles.map(quote).mkString("[", ",", "]")}}").mkString("[", ",", "]")
+          outputs.map(values => s"{\"validationRuns\":$validationRuns,\"decisions\":$decisions,\"skipped\":${run.skipped.map(quote).mkString("[", ",", "]")},\"validatorPasses\":${services.validationPasses},\"recipe\":${PipelineJson.encode(plan.recipe)},\"executed\":${run.executed.map(quote).mkString("[", ",", "]")},\"outputs\":${values.mkString("[", ",", "]")}}")
+        }.fold(message => error(message, if message == PipelineServices.BusyMessage then 429 else 400), json(_))
     }
 
   def main(args: Array[String]): Unit =

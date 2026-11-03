@@ -30,6 +30,93 @@ object PdfPipelineSpec extends ZIOSpecDefault:
   private val base = Recipe(1, "Synthetic recipe", Vector(Node("body", Op.Input("body")), Node("pdf", Op.Write, Vector("body"))), Vector("pdf"))
 
   def spec = suite("Data-defined PDF pipelines")(
+    test("runtime choices skip invalid, stopping and unbound branches") {
+      val recipe = Recipe(2, "Lazy choice", Vector(Node("body", Op.Input("body")),
+        Node("invalid", Op.Select(Vector(99)), Vector("body")), Node("unbound", Op.Input("optional")),
+        Node("route", Op.Choose(Predicate.PageCount(1, 1)), Vector("body", "body", "invalid", "unbound")),
+        Node("pdf", Op.Write, Vector("route"))), Vector("pdf"))
+      val run = value(PdfPipeline.run(checked(recipe), Map("body" -> document), new ServicesStub))
+      assertTrue(run.executed == Vector("body", "route", "pdf"), run.skipped.toSet == Set("invalid", "unbound"),
+        run.decisions.head.outcome == Outcome.Yes, run.decisions.head.selected == "body")
+    },
+    test("nested choices release unused branches and preserve shared aliases within the live budget") {
+      val recipe = Recipe(2, "Nested", Vector(Node("body", Op.Input("body")), Node("stop", Op.Stop("unused")),
+        Node("inner", Op.Choose(Predicate.PageCount(1, 1)), Vector("body", "body", "stop", "stop")),
+        Node("outer", Op.Choose(Predicate.PageCount(2, 4)), Vector("body", "stop", "inner", "stop")),
+        Node("pdf", Op.Write, Vector("outer"))), Vector("pdf"))
+      val program = PdfPipeline.run(checked(recipe), Map("body" -> document), new ServicesStub, Limits(maxLiveObjects = 3))
+      val first = value(program)
+      val second = value(program)
+      assertTrue(first.outputs == second.outputs, first.decisions.map(_.outcome) == Vector(Outcome.No, Outcome.Yes),
+        first.skipped == Vector("stop"), first.executed.count(_ == "body") == 1)
+    },
+    test("two choices can rejoin while executing their shared selected step once") {
+      val recipe = Recipe(2, "Choice join", Vector(Node("body", Op.Input("body")), Node("shared", Op.Stamp("SHARED"), Vector("body")),
+        Node("stop", Op.Stop("unused")),
+        Node("left", Op.Choose(Predicate.PageCount(1, 1)), Vector("body", "shared", "stop", "stop")),
+        Node("right", Op.Choose(Predicate.PageCount(2, 3)), Vector("body", "stop", "shared", "stop")),
+        Node("joined", Op.Assemble(), Vector("left", "right")), Node("pdf", Op.Write, Vector("joined"))), Vector("pdf"))
+      val services = new ServicesStub
+      val run = value(PdfPipeline.run(checked(recipe), Map("body" -> document), services))
+      val bytes = run.outputs.head._2.asInstanceOf[Value.File].bytes
+      val decoded = value(ByteLimit.fromBytes(1024 * 1024).map(limit => PdfDocument.decode(bytes.toArray, limit)))
+      assertTrue(services.stamps == 1, run.executed.distinct == run.executed, value(PdfPages.pageRefs(decoded)).length == 2)
+    },
+    test("an unselected branch still runs when independently requested as an output") {
+      val recipe = Recipe(2, "Independent output", Vector(Node("body", Op.Input("body")), Node("other", Op.Stamp("OTHER"), Vector("body")),
+        Node("stop", Op.Stop("unused")), Node("route", Op.Choose(Predicate.PageCount(1, 1)), Vector("body", "body", "other", "stop")),
+        Node("pdf", Op.Write, Vector("route")), Node("other-pdf", Op.Write, Vector("other"))), Vector("pdf", "other-pdf"))
+      val services = new ServicesStub
+      val run = value(PdfPipeline.run(checked(recipe), Map("body" -> document), services))
+      assertTrue(services.stamps == 1, run.executed.contains("other"), !run.skipped.contains("other"), run.skipped == Vector("stop"))
+    },
+    test("validation routes passed, failed and unable separately; unknown can explicitly stop") {
+      val builder = new RecipeBuilder
+      val body = builder.input("body")
+      val original = builder.write(body)
+      val receipt = builder.validate(original, "3b")
+      val review = builder.write(builder.stamp(body, "REVIEW"))
+      val unable = builder.stopFile("No completed verification")
+      val selected = builder.chooseValidation(receipt, "3b")(original, review, unable)
+      val plan = checked(builder.recipe("Verdict", selected))
+      class Verified(status: Verdict) extends ServicesStub:
+        override def validationReport(bytes: Vector[Byte], profiles: Vector[String]): ValidationReport < (Abort[PdfError] & Sync) =
+          validate(bytes, profiles).map(json => ValidationReport(json, Map("3b" -> status)))
+      val passed = new Verified(Verdict.Passed)
+      val failed = new Verified(Verdict.Failed)
+      val unknown = new Verified(Verdict.Unable)
+      val passRun = value(PdfPipeline.run(plan, Map("body" -> document), passed))
+      val failRun = value(PdfPipeline.run(plan, Map("body" -> document), failed))
+      val stopped = result(PdfPipeline.run(plan, Map("body" -> document), unknown))
+      val opaque = result(PdfPipeline.run(plan, Map("body" -> document), new ServicesStub))
+      assertTrue(passRun.decisions.head.outcome == Outcome.Yes, passed.stamps == 0,
+        failRun.decisions.head.outcome == Outcome.No, failed.stamps == 1,
+        stopped.left.toOption.get.message.contains("No completed verification"), unknown.stamps == 0, opaque.isLeft)
+    },
+    test("declaration routing preserves unknown metadata and never asserts conformance") {
+      import PdfValue.*
+      val metadata = document.copy(objects = document.objects.updated(0, document.objects.head.copy(value = document.objects.head.dictionary.get.updated("Metadata", Ref(ObjectRef(4))))) :+
+        PdfObject(ObjectRef(4), dict("Type" -> Name("Metadata"), "Subtype" -> Name("XML")), Some("<broken".getBytes(java.nio.charset.StandardCharsets.UTF_8).toVector)))
+      val recipe = Recipe(2, "Metadata", Vector(Node("body", Op.Input("body")),
+        Node("route", Op.Choose(Predicate.Declares3b), Vector("body", "body", "body", "body")), Node("pdf", Op.Write, Vector("route"))), Vector("pdf"))
+      val ordinary = value(PdfPipeline.run(checked(recipe), Map("body" -> document), new ServicesStub))
+      val unreadable = value(PdfPipeline.run(checked(recipe), Map("body" -> metadata), new ServicesStub))
+      assertTrue(ordinary.decisions.head.outcome == Outcome.No, unreadable.decisions.head.outcome == Outcome.Unknown)
+    },
+    test("routing fields accumulate, all arms are type-checked, and old recipe versions stay readable") {
+      val invalid = base.copy(nodes = base.nodes ++ Vector(Node("route", Op.Choose(Predicate.PageCount(0, 99)), Vector("body", "body", "body", "body")), Node("stop", Op.Stop(""))))
+      val issues = check(invalid).left.toOption.get
+      val mixed = invalid.copy(version = 2, nodes = base.nodes :+ Node("route", Op.Choose(Predicate.PageCount(1, 1)), Vector("body", "body", "pdf", "body")))
+      assertTrue(issues.map(_.code) == Vector(Code.Version, Code.Setting, Code.Version, Code.Setting),
+        check(mixed).left.toOption.get.exists(_.code == Code.Type), check(base).isRight)
+    },
+    test("including conditional fragments promotes the recipe version and namespaces decisions") {
+      val fragment = Recipe(2, "Fragment", Vector(Node("input", Op.Input("source")),
+        Node("route", Op.Choose(Predicate.PageCount(1, 1)), Vector("input", "input", "input", "input")), Node("file", Op.Write, Vector("route"))), Vector("file"))
+      val combined = base.include("part", fragment, Map("source" -> "body")).toOption.get
+      val run = value(PdfPipeline.run(checked(combined), Map("body" -> document), new ServicesStub))
+      assertTrue(combined.version == 2, run.decisions.head.node == "part-route", run.outputs.length == 2)
+    },
     test("typed Scala authoring produces an inspectable closed graph") {
       val builder = new RecipeBuilder
       val body = builder.input("body")

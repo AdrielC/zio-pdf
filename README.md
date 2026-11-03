@@ -79,8 +79,11 @@ The **Pipelines** tab composes named PDF operations into saved JSON recipes. Bin
 PDF inputs separately, edit connections, insert saved subpipelines, and run graphs
 with several output PDFs and validation branches. A typed Scala builder and Kyo
 runner live in [kyo-pdf-pipeline](kyo-pdf-pipeline/README.md); the example also compiles
-real Volga SMC wiring into the same data model. Shared steps execute once and
-validation receipts identify the exact written bytes.
+real Volga SMC wiring into the same data model. Nested conditionals route by page
+count, metadata claims or completed validation verdicts, with separate unknown
+paths and explicit stop reasons. Shared steps execute once, unselected branches
+are skipped, and decision traces explain the path through the graph. Validation
+receipts identify the exact written bytes.
 
 ### Kyo package migration
 

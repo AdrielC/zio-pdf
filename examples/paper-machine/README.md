@@ -71,11 +71,24 @@ syntax and compiled into plain version 1 data. It selects, stamps, numbers, writ
 and validates the synthetic sample. The sample is an ordinary PDF, so its PDF/A
 checks correctly fail; a declaration or rewrite alone is not conformance.
 
+Use **Try a recipe** for two conditional examples. **Route by page count** chooses
+a short- or long-document stamp, then rejoins at a shared write and validation.
+**Route by validation** returns an already conforming PDF unchanged, stamps a
+failed PDF for review, and stops with a reason when a completed verdict is missing.
+The first conditional example also compiles from real Volga SMC wiring.
+
 - Select an operation in the graph or the operation selector, then change its
   settings or input connections. Add document operations after a selected document;
   file outputs and validation receipts can branch from shared steps.
 - Bind named inputs to the current PDF or choose separate PDFs. Recipes save slot
   names and settings; they contain no document bytes, local paths, or session IDs.
+  Only inputs demanded by the selected path need a binding.
+- **Choose a path** supports page-count ranges, declared PDF/A-3b metadata and
+  completed PDF/A verdicts. Connect yes, no and unknown branches of the same kind:
+  documents, written files or receipts. Choices can nest and rejoin. Unknown
+  evidence has its own route; a claim is not a completed validation pass.
+- **Stop with reason** rejects a selected path with an explicit message. Skipped
+  branches do not load inputs, stamp, write, validate or stop the run.
 - **Capture current packet** converts the explorer's page order, front/back PDFs,
   stamp, numbering and selected validation profiles into a recipe.
 - **Save recipe** and **Load recipe** round-trip JSON. **Recipe JSON** also supports
@@ -84,13 +97,20 @@ checks correctly fail; a declaration or rewrite alone is not conformance.
   existing document nodes. Its operation IDs are namespaced and its outputs added;
   shared source steps still execute once.
 - **Run pipeline** writes up to three PDFs and produces receipts. Inspect or download
-  each output and download the complete execution report. Validation of identical
-  output bytes shares one isolated veraPDF pass across the requested profiles.
+  each output and download the complete execution report. The graph marks skipped
+  operations with dashes; the results explain each decision and list the executed
+  and skipped IDs, validation passes, checked profiles and exact byte hashes.
+
+Version 1 recipes remain readable; choices and stops use version 2. In static
+graphs, identical bytes share a pass across the requested profiles. Conditional
+graphs check only demanded profiles and reuse completed checks when they cover the
+same bytes and profiles. At most three validation passes may start per run; combine
+profiles in one validation operation when several checks are needed together.
 
 The [pipeline module](../../kyo-pdf-pipeline/README.md) also offers typed Scala
 authoring and a Kyo interpreter. The example's `PipelineWiring.scala` demonstrates
 actual Volga authoring compiled to the same data. Graphs execute sequentially;
-unreachable nodes are skipped and dead intermediates released. The editor supports
+unselected and unreachable nodes are skipped and dead intermediates released. The editor supports
 24 operations, four separately retained input PDFs and eight file/receipt outputs.
 Each PDF is limited to 64 pages and 12 MiB. Counted live payload is capped at 64 MiB
 and 32,000 objects; these are retention budgets, not total JVM heap limits.

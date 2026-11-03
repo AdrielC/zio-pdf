@@ -5,6 +5,7 @@ const pipelineState = {
   selected: null,
   bindings: Object.create(null),
   running: false,
+  preparing: 0,
   result: null,
   fragment: null,
   revision: 0,
@@ -18,8 +19,11 @@ const operationNames = {
   number: "Number pages",
   write: "Write PDF",
   validate: "Validate PDF/A",
+  choose: "Choose a path",
+  stop: "Stop with reason",
 };
 function pipelineKind(node) {
+  if (["choose", "stop"].includes(node.op)) return node.kind;
   return node.op === "write"
     ? "file"
     : node.op === "validate"
@@ -110,11 +114,19 @@ function drawPipelineGraph() {
     if (!rows.has(row)) rows.set(row, []);
     rows.get(row).push(node);
   }
+  const longEdges = recipe.nodes.flatMap((node) =>
+    node.inputs.flatMap((input, port) =>
+      depth.get(node.id) - depth.get(input) > 1
+        ? [`${node.id}:${port}`]
+        : [],
+    ),
+  );
+  const gutter = 28 + Math.ceil(longEdges.length / 2) * 12;
   const width = Math.max(
     500,
     ...[...rows.values()].map((nodes) => nodes.length * 208 + 40),
-  );
-  const height = Math.max(250, (Math.max(0, ...depth.values()) + 1) * 90 + 50);
+  ) + gutter * 2;
+  const height = Math.max(250, (Math.max(0, ...depth.values()) + 1) * 110 + 50);
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.style.width = `${width}px`;
   const defs = svgNode("defs", {}),
@@ -134,38 +146,79 @@ function drawPipelineGraph() {
     nodes.forEach((node, index) =>
       positions.set(node.id, {
         x: (width - nodes.length * 208) / 2 + index * 208 + 14,
-        y: row * 90 + 24,
+        y: row * 110 + 24,
       }),
     );
   for (const node of recipe.nodes)
-    for (const input of node.inputs) {
+    for (const [port, input] of node.inputs.entries()) {
       if (!positions.has(input)) continue;
       const a = positions.get(input),
         b = positions.get(node.id),
         middle = (a.y + 54 + b.y) / 2;
+      const decision = pipelineState.result?.decisions?.find(
+        (d) => d.node === node.id,
+      );
+      const selectedPort = decision
+        ? { yes: 1, no: 2, unknown: 3 }[decision.outcome]
+        : -1;
+      const taken = node.op === "choose" && port > 0 && port === selectedPort;
+      const skipped =
+        pipelineState.result?.skipped?.includes(input) ||
+        pipelineState.result?.skipped?.includes(node.id) ||
+        (decision && port > 0 && port !== selectedPort);
+      const destination =
+        b.x + (node.op === "choose" ? [24, 68, 112, 156][port] : 90);
+      const lane = longEdges.indexOf(`${node.id}:${port}`);
+      const rail = lane % 2 === 0
+        ? 20 + Math.floor(lane / 2) * 12
+        : width - 20 - Math.floor(lane / 2) * 12;
+      const path = lane < 0
+        ? `M${a.x + 90} ${a.y + 54} V${middle} H${destination} V${b.y - 4}`
+        : `M${a.x + 90} ${a.y + 54} V${a.y + 66} H${rail} V${b.y - 28} H${destination} V${b.y - 4}`;
       svg.append(
         svgNode("path", {
-          d: `M${a.x + 90} ${a.y + 54} V${middle} H${b.x + 90} V${b.y - 4}`,
-          class: `pipeline-wire${[input, node.id].includes(pipelineState.selected) ? " active" : ""}`,
+          d: path,
+          class: `pipeline-wire${[input, node.id].includes(pipelineState.selected) ? " active" : ""}${taken ? " taken" : ""}${skipped ? " skipped" : ""}`,
           "marker-end": "url(#pipeline-arrow)",
         }),
       );
     }
+  // Labels sit above every trace, so input arrows never obscure their words.
+  for (const node of recipe.nodes) {
+    if (node.op === "choose") {
+      const b = positions.get(node.id);
+      for (const [port, text] of ["test", "yes", "no", "?"].entries()) {
+        const destination = b.x + [24, 68, 112, 156][port];
+        svg.append(svgNode("rect", {
+          x: destination - 17, y: b.y - 22, width: 34, height: 14,
+          class: "pipeline-port-background",
+        }));
+        const label = svgNode("text", {
+          x: destination,
+          y: b.y - 11,
+          class: "pipeline-port-label",
+          "text-anchor": "middle",
+        });
+        label.textContent = text;
+        svg.append(label);
+      }
+    }
+  }
   for (const node of recipe.nodes) {
     const point = positions.get(node.id),
       output = recipe.outputs.includes(node.id);
     const group = svgNode("g", {
       transform: `translate(${point.x},${point.y})`,
-      class: `pipeline-node${pipelineState.selected === node.id ? " selected" : ""}`,
+      class: `pipeline-node${pipelineState.selected === node.id ? " selected" : ""}${pipelineState.result?.skipped?.includes(node.id) ? " skipped" : ""}`,
       role: "button",
       tabindex: 0,
-      "aria-label": `${node.id}: ${operationNames[node.op]}${output ? ", output" : ""}`,
+      "aria-label": `${node.id}: ${operationNames[node.op]}${output ? ", output" : ""}${pipelineState.result ? (pipelineState.result.executed.includes(node.id) ? ", ran" : ", skipped") : ""}`,
     });
     group.append(svgNode("rect", { width: 180, height: 54 }));
     for (const [text, y, cls] of [
       [operationNames[node.op] || node.op, 22, ""],
       [
-        `${node.id.length > 15 ? node.id.slice(0, 14) + "…" : node.id} · ${pipelineKind(node)}`,
+        `${node.id.length > 15 ? node.id.slice(0, 14) + "…" : node.id} · ${pipelineState.result ? (pipelineState.result.executed.includes(node.id) ? "ran" : "skipped") : pipelineKind(node)}`,
         40,
         "pipeline-node-id",
       ],
@@ -241,13 +294,27 @@ function drawPipelineEditor() {
     settings.append(element("p", "", "Add a PDF input to start a recipe."));
     return;
   }
-  if (node.op !== "input") {
-    const kind = node.op === "validate" ? "file" : "document";
-    const available = recipe.nodes.filter(
-      (n) => n.id !== node.id && pipelineKind(n) === kind,
-    );
-    const count = node.op === "assemble" ? Math.max(1, node.inputs.length) : 1;
+  if (!["input", "stop"].includes(node.op)) {
+    const count =
+      node.op === "choose"
+        ? 4
+        : node.op === "assemble"
+          ? Math.max(1, node.inputs.length)
+          : 1;
     for (let i = 0; i < count; i++) {
+      const kind =
+        node.op === "choose"
+          ? i === 0
+            ? node.test.kind === "validation"
+              ? "receipt"
+              : "document"
+            : node.kind
+          : node.op === "validate"
+            ? "file"
+            : "document";
+      const available = recipe.nodes.filter(
+        (n) => n.id !== node.id && pipelineKind(n) === kind,
+      );
       const choices = [
         ["", "Choose a connection"],
         ...available.map((n) => [n.id, `${n.id} · ${operationNames[n.op]}`]),
@@ -259,7 +326,23 @@ function drawPipelineEditor() {
       const row = element("div", "pipeline-port");
       row.append(
         pipelineField(
-          node.op === "assemble" ? `Input ${i + 1}` : `Input ${kind}`,
+          node.op === "choose"
+            ? (node.test.kind === "validation"
+                ? [
+                    "Validation receipt",
+                    "When passed",
+                    "When failed",
+                    "When unable to check",
+                  ]
+                : [
+                    "Document to inspect",
+                    "When matched",
+                    "When not matched",
+                    "When unknown",
+                  ])[i]
+            : node.op === "assemble"
+              ? `Input ${i + 1}`
+              : `Input ${kind}`,
           select,
         ),
       );
@@ -297,11 +380,111 @@ function drawPipelineEditor() {
         title,
         pipelineOptions(options, node[key], (value) => {
           node[key] = key === "catalog" ? Number(value) : value;
-          pipelineChanged();
+          if (key === "kind") {
+            if (value === "document")
+              recipe.outputs = recipe.outputs.filter((id) => id !== node.id);
+            if (node.op === "choose")
+              node.inputs = node.inputs.map((id, index) =>
+                index === 0 ||
+                recipe.nodes.some(
+                  (n) => n.id === id && pipelineKind(n) === value,
+                )
+                  ? id
+                  : "",
+              );
+          }
+          pipelineChanged(key === "kind");
         }),
       ),
     );
   switch (node.op) {
+    case "choose": {
+      choice("Branch output kind", "kind", [
+        ["document", "Document"],
+        ["file", "PDF bytes"],
+        ["receipt", "Validation receipt"],
+      ]);
+      const test = pipelineOptions(
+        [
+          ["page-count", "Page count"],
+          ["declares-3b", "Declares PDF/A-3b (XMP claim)"],
+          ["validation", "Completed validation result"],
+        ],
+        node.test.kind,
+        (value) => {
+          node.test =
+            value === "page-count"
+              ? { kind: value, min: 1, max: 3 }
+              : value === "validation"
+                ? { kind: value, profile: "3b" }
+                : { kind: value };
+          const expected = value === "validation" ? "receipt" : "document";
+          node.inputs[0] =
+            recipe.nodes.find(
+              (n) => n.id !== node.id && pipelineKind(n) === expected,
+            )?.id || "";
+          pipelineChanged(true);
+        },
+      );
+      settings.append(pipelineField("Condition", test));
+      if (node.test.kind === "page-count") {
+        for (const [label, key] of [
+          ["Minimum pages", "min"],
+          ["Maximum pages", "max"],
+        ])
+          settings.append(
+            pipelineField(
+              label,
+              pipelineInput(
+                node.test[key],
+                (value) => (node.test[key] = value),
+                "number",
+              ),
+            ),
+          );
+      }
+      if (node.test.kind === "validation")
+        settings.append(
+          pipelineField(
+            "Profile to inspect",
+            pipelineOptions(
+              [
+                ["3b", "PDF/A-3b"],
+                ["2b", "PDF/A-2b"],
+                ["3u", "PDF/A-3u"],
+              ],
+              node.test.profile,
+              (value) => {
+                node.test.profile = value;
+                pipelineChanged();
+              },
+            ),
+          ),
+        );
+      settings.append(
+        element(
+          "p",
+          "",
+          "Only the selected branch runs. Unknown is a separate route; a missing or unfinished check is never a failed verdict.",
+        ),
+      );
+      break;
+    }
+    case "stop":
+      text("Reason to stop", "message", "text", 160);
+      choice("Branch output kind", "kind", [
+        ["document", "Document"],
+        ["file", "PDF bytes"],
+        ["receipt", "Validation receipt"],
+      ]);
+      settings.append(
+        element(
+          "p",
+          "",
+          "Stops the run only if this operation is reached. Unselected stops stay skipped.",
+        ),
+      );
+      break;
     case "input":
       text("Input slot", "slot", "text", 48);
       settings.append(
@@ -399,6 +582,8 @@ function drawPipelineEditor() {
 async function bindPipelineInput(slot, file = null) {
   if (pipelineState.running) return;
   const revision = pipelineState.revision;
+  pipelineState.preparing++;
+  $("pipeline-run").disabled = true;
   try {
     $("pipeline-status").textContent = `Binding ${slot}…`;
     if (file && (!file.size || file.size > 12 * 1024 * 1024))
@@ -422,6 +607,10 @@ async function bindPipelineInput(slot, file = null) {
     drawPipelineBindings();
   } catch (error) {
     pipelineError(error);
+  } finally {
+    pipelineState.preparing--;
+    $("pipeline-run").disabled =
+      pipelineState.running || pipelineState.preparing > 0;
   }
 }
 function drawPipelineBindings() {
@@ -472,11 +661,14 @@ function drawPipelineBindings() {
     );
 }
 function pipelineSetRecipe(recipe) {
+  if (pipelineState.running)
+    throw new Error("Wait for the current run before replacing its recipe.");
   for (const control of $("pipeline-pane").querySelectorAll(
     "button,input,select,textarea",
   ))
     control.disabled = false;
   pipelineState.recipe = recipe;
+  $("pipeline-run").disabled = pipelineState.preparing > 0;
   pipelineState.selected = recipe.nodes[0]?.id;
   $("pipeline-name").value = recipe.name;
   pipelineChanged(true);
@@ -529,8 +721,42 @@ function addPipelineOperation() {
   const node = {
     id,
     op,
-    inputs: op === "input" ? [] : selected ? [selected.id] : [],
+    inputs: ["input", "stop"].includes(op) ? [] : selected ? [selected.id] : [],
   };
+  if (op === "stop") {
+    Object.assign(node, {
+      kind: "document",
+      message: "This path requires manual review",
+    });
+    recipe.version = 2;
+  }
+  if (op === "choose") {
+    if (recipe.nodes.length > 22)
+      return pipelineError(
+        new Error(
+          "Leave room for the choice and its unknown stop (24 operations maximum).",
+        ),
+      );
+    recipe.version = 2;
+    const stopId = `${id}-unknown`;
+    recipe.nodes.push({
+      id: stopId,
+      op: "stop",
+      message: "The condition could not be determined",
+      kind: "document",
+      inputs: [],
+    });
+    Object.assign(node, {
+      test: { kind: "page-count", min: 1, max: 3 },
+      kind: "document",
+      inputs: [
+        selected?.id || "",
+        selected?.id || "",
+        selected?.id || "",
+        stopId,
+      ],
+    });
+  }
   if (op === "input") node.slot = `input${suffix}`;
   if (op === "select") node.pages = [1];
   if (op === "assemble") node.catalog = 0;
@@ -538,7 +764,10 @@ function addPipelineOperation() {
   if (op === "number")
     Object.assign(node, { start: 1, style: "page", prefix: "" });
   if (op === "validate") node.profiles = ["3b"];
-  if (["select", "stamp", "number", "assemble"].includes(op) && selected) {
+  if (
+    ["select", "stamp", "number", "assemble", "choose"].includes(op) &&
+    selected
+  ) {
     for (const other of recipe.nodes)
       other.inputs = other.inputs.map((input) =>
         input === selected.id ? id : input,
@@ -551,6 +780,8 @@ function addPipelineOperation() {
   drawPipelineBindings();
 }
 async function loadPipelineFile(file) {
+  pipelineState.preparing++;
+  $("pipeline-run").disabled = true;
   try {
     if (!file || file.size > 32 * 1024)
       throw new Error("Choose recipe JSON up to 32 KiB.");
@@ -591,13 +822,62 @@ async function loadPipelineFile(file) {
     }
   } catch (error) {
     pipelineError(error);
+  } finally {
+    pipelineState.preparing--;
+    $("pipeline-run").disabled =
+      pipelineState.running || pipelineState.preparing > 0;
   }
 }
 function renderPipelineResults(result) {
   const holder = $("pipeline-output-list");
   holder.replaceChildren();
   $("pipeline-executed").textContent =
-    `${result.executed.length} operations executed once each · ${result.outputs.length} outputs · ${result.validatorPasses} validator pass${result.validatorPasses === 1 ? "" : "es"}. File downloads and receipts refer to this completed run.`;
+    `${result.executed.length} operations ran once · ${result.skipped?.length || 0} skipped · ${result.outputs.length} outputs · ${result.validatorPasses} validator pass${result.validatorPasses === 1 ? "" : "es"}. File downloads and receipts refer to this completed run.`;
+  if (result.decisions?.length) {
+    const section = element("section", "pipeline-decisions");
+    section.append(element("h4", "", "Routing decisions"));
+    const list = element("ol");
+    for (const decision of result.decisions) {
+      const item = element("li");
+      const validation = result.recipe.nodes.find(
+        (node) => node.id === decision.node,
+      )?.test?.kind === "validation";
+      const outcome = validation
+        ? { yes: "passed", no: "failed", unknown: "unable to check" }
+        : { yes: "matched", no: "not matched", unknown: "unknown" };
+      item.append(
+        element(
+          "strong",
+          "",
+          `${decision.node}: ${outcome[decision.outcome]} → ${decision.selected}`,
+        ),
+        element("p", "", decision.reason),
+      );
+      list.append(item);
+    }
+    section.append(list);
+    holder.append(section);
+  }
+  const trace = element("details", "pipeline-trace");
+  trace.append(
+    element(
+      "summary",
+      "",
+      `Execution trace · ${result.executed.length} ran · ${result.skipped?.length || 0} skipped`,
+    ),
+  );
+  trace.append(element("p", "", `Ran: ${result.executed.join(" → ")}`));
+  for (const [index, pass] of (result.validationRuns || []).entries())
+    trace.append(
+      element(
+        "p",
+        "",
+        `Validation pass ${index + 1}: ${pass.profiles.map((p) => `PDF/A-${p}`).join(", ")} · SHA-256 ${pass.sha256}`,
+      ),
+    );
+  if (result.skipped?.length)
+    trace.append(element("p", "", `Skipped: ${result.skipped.join(", ")}`));
+  holder.append(trace);
   for (const output of result.outputs) {
     if (output.kind === "file") {
       const doc = output.document,
@@ -717,6 +997,7 @@ $("fragment-apply").onclick = async () => {
         node.op === "input" ? bindings[node.slot] : `part${n}-${node.id}`,
       ]),
     );
+    recipe.version = Math.max(recipe.version, fragment.version);
     recipe.nodes.push(
       ...fragment.nodes
         .filter((node) => node.op !== "input")
@@ -827,8 +1108,12 @@ $("pipeline-capture").onclick = async () => {
   }
 };
 $("pipeline-run").onclick = async () => {
-  if (pipelineState.running || !pipelineState.recipe) return;
+  if (pipelineState.running || pipelineState.preparing || !pipelineState.recipe)
+    return;
+  const runRecipe = structuredClone(pipelineState.recipe);
   pipelineState.running = true;
+  pipelineState.result = null;
+  drawPipelineGraph();
   $("pipeline-errors").hidden = true;
   $("pipeline-results").hidden = true;
   $("pipeline-status").textContent =
@@ -838,29 +1123,26 @@ $("pipeline-run").onclick = async () => {
   ))
     control.disabled = true;
   try {
-    const checked = await pipelineRequest(
-      "/api/pipelines/check",
-      pipelineState.recipe,
-    );
+    const checked = await pipelineRequest("/api/pipelines/check", runRecipe);
     const slots = [
         ...new Set(
-          pipelineState.recipe.nodes
+          runRecipe.nodes
             .filter((n) => n.op === "input" && checked.order.includes(n.id))
             .map((n) => n.slot),
         ),
       ],
       bindings = Object.create(null);
     for (const slot of slots) {
-      if (!pipelineState.bindings[slot])
-        throw new Error(`Choose a PDF for input ${slot} before running.`);
-      bindings[slot] = pipelineState.bindings[slot].id;
+      if (pipelineState.bindings[slot])
+        bindings[slot] = pipelineState.bindings[slot].id;
     }
     const result = await pipelineRequest("/api/pipelines/run", {
-      recipe: pipelineState.recipe,
+      recipe: runRecipe,
       bindings,
     });
     pipelineState.result = result;
     renderPipelineResults(result);
+    drawPipelineGraph();
     $("pipeline-status").textContent =
       "Pipeline complete · outputs and receipts are ready";
   } catch (error) {
@@ -906,3 +1188,27 @@ for (const id of [
     pipelineError(error);
   }
 })();
+
+$("pipeline-example").onchange = async () => {
+  if (pipelineState.running) return;
+  pipelineState.preparing++;
+  $("pipeline-run").disabled = true;
+  try {
+    const query = $("pipeline-example").value;
+    if (!query) return;
+    const response = await fetch(
+      `/api/pipelines/example${query === "packet" ? "" : `?${query}`}`,
+    );
+    if (!response.ok) throw new Error("The example could not load.");
+    pipelineSetRecipe(await response.json());
+    await enterPipelines();
+    await checkPipeline();
+  } catch (error) {
+    pipelineError(error);
+  } finally {
+    $("pipeline-example").value = "";
+    pipelineState.preparing--;
+    $("pipeline-run").disabled =
+      pipelineState.running || pipelineState.preparing > 0;
+  }
+};

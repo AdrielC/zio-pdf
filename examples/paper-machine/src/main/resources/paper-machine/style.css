@@ -2218,3 +2218,67 @@ progress::-moz-progress-bar {
     flex-basis: 100%;
   }
 }
+
+/* Runtime routing is literal: skipped steps stay visible, with dashed boundaries. */
+.pipeline-toolbar .pipeline-example-label {
+  max-width: 280px;
+}
+.pipeline-node.skipped rect {
+  stroke-dasharray: 5 4;
+}
+.pipeline-node.skipped text {
+  fill: var(--field-muted);
+}
+.pipeline-node.selected.skipped rect {
+  stroke: var(--ink);
+}
+.pipeline-node.selected.skipped text {
+  fill: var(--ink);
+}
+.pipeline-wire.skipped {
+  stroke-dasharray: 5 4;
+}
+.pipeline-wire.taken {
+  stroke: var(--signal);
+  stroke-width: 2;
+}
+.pipeline-port-label {
+  fill: var(--field-muted);
+  font:
+    10px ui-monospace,
+    monospace;
+}
+.pipeline-port-background {
+  fill: var(--ink);
+}
+.pipeline-decisions {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.pipeline-decisions h4 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+.pipeline-decisions ol {
+  margin: 0;
+  padding-left: 20px;
+}
+.pipeline-decisions li + li {
+  margin-top: 12px;
+}
+.pipeline-decisions p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+.pipeline-trace {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.pipeline-trace summary {
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+}
+.pipeline-trace p {
+  overflow-wrap: anywhere;
+}

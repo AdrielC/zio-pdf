@@ -78,6 +78,21 @@ object PipelineJson:
       }
     def keys(value: JsonObject, allowed: Set[String], path: String): Unit =
       value.keySet().asScala.toVector.sorted.filterNot(allowed).foreach(key => errors += issue(s"$path.$key", "Unknown field"))
+    def portKind(node: JsonObject, path: String): Kind = string(node, "kind", path, Some("document")) match
+      case "document" => Kind.Document
+      case "file" => Kind.File
+      case "receipt" => Kind.Receipt
+      case _ => errors += issue(s"$path.kind", "Choose document, file or receipt"); Kind.Document
+    def predicate(value: JsonElement, path: String): Predicate =
+      val test = obj(value, path)
+      val kind = string(test, "kind", path)
+      val (result, fields): (Predicate, Set[String]) = kind match
+        case "page-count" => (Predicate.PageCount(integer(test, "min", path), integer(test, "max", path)), Set("min", "max"))
+        case "declares-3b" => (Predicate.Declares3b, Set.empty)
+        case "validation" => (Predicate.Validation(string(test, "profile", path)), Set("profile"))
+        case _ => errors += issue(s"$path.kind", "Choose page-count, declares-3b or validation"); (Predicate.Declares3b, Set.empty)
+      keys(test, fields + "kind", path)
+      result
     val root = obj(value, "recipe")
     keys(root, Set("version", "name", "nodes", "outputs"), "recipe")
     val version = integer(root, "version", "recipe")
@@ -101,7 +116,9 @@ object PipelineJson:
         case "number" => (Op.NumberPages(integer(node, "start", path, Some(1)), string(node, "style", path, Some("page")), string(node, "prefix", path, Some(""))), Set("start", "style", "prefix"))
         case "write" => (Op.Write, Set.empty)
         case "validate" => (Op.Validate(strings(node, "profiles", path)), Set("profiles"))
-        case _ => errors += issue(s"$path.op", "Choose input, select, assemble, stamp, number, write or validate"); (Op.Write, Set.empty)
+        case "choose" => (Op.Choose(predicate(node.get("test"), s"$path.test"), portKind(node, path)), Set("test", "kind"))
+        case "stop" => (Op.Stop(string(node, "message", path), portKind(node, path)), Set("message", "kind"))
+        case _ => errors += issue(s"$path.op", "Choose a supported PDF, validation, choose or stop operation"); (Op.Write, Set.empty)
       keys(node, Set("id", "op", "inputs") ++ fields, path)
       Node(id, op, inputs)
     }
@@ -111,6 +128,10 @@ object PipelineJson:
 
   def encode(recipe: Recipe): String =
     def strings(values: Vector[String]): String = values.map(PaperMachine.quote).mkString("[", ",", "]")
+    def predicate(value: Predicate): String = value match
+      case Predicate.PageCount(min, max) => s"{\"kind\":\"page-count\",\"min\":$min,\"max\":$max}"
+      case Predicate.Declares3b => "{\"kind\":\"declares-3b\"}"
+      case Predicate.Validation(profile) => s"{\"kind\":\"validation\",\"profile\":${PaperMachine.quote(profile)}}"
     val nodes = recipe.nodes.map { node =>
       val (kind, settings) = node.op match
         case Op.Input(slot) => ("input", s",\"slot\":${PaperMachine.quote(slot)}")
@@ -120,6 +141,8 @@ object PipelineJson:
         case Op.NumberPages(start, style, prefix) => ("number", s",\"start\":$start,\"style\":${PaperMachine.quote(style)},\"prefix\":${PaperMachine.quote(prefix)}")
         case Op.Write => ("write", "")
         case Op.Validate(profiles) => ("validate", s",\"profiles\":${strings(profiles)}")
+        case Op.Choose(test, kind) => ("choose", s",\"test\":${predicate(test)},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")
+        case Op.Stop(message, kind) => ("stop", s",\"message\":${PaperMachine.quote(message)},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")
       s"{\"id\":${PaperMachine.quote(node.id)},\"op\":${PaperMachine.quote(kind)},\"inputs\":${strings(node.inputs)}$settings}"
     }.mkString("[", ",", "]")
     s"{\"version\":${recipe.version},\"name\":${PaperMachine.quote(recipe.name)},\"nodes\":$nodes,\"outputs\":${strings(recipe.outputs)}}"

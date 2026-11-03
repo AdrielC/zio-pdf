@@ -16,6 +16,10 @@ object PipelineWiring:
   def source(id: String, slot: String): Diagram[Nat.`0`, Nat.`1`] = FreeProp.Embed(Step(id, Some(Op.Input(slot))))
   def step(id: String, op: Op): Diagram[Nat.`1`, Nat.`1`] = FreeProp.Embed(Step(id, Some(op)))
   def join(id: String, catalog: Int = 0): Diagram[Nat.`2`, Nat.`1`] = FreeProp.Embed(Step(id, Some(Op.Assemble(catalog))))
+  def choose(id: String, test: Predicate, kind: Kind = Kind.Document): Diagram[Nat.OfInt[4], Nat.`1`] =
+    FreeProp.Embed(Step(id, Some(Op.Choose(test, kind))))
+  def stop(id: String, message: String, kind: Kind = Kind.Document): Diagram[Nat.`0`, Nat.`1`] =
+    FreeProp.Embed(Step(id, Some(Op.Stop(message, kind))))
   val fork: Diagram[Nat.`1`, Nat.`2`] = FreeProp.Embed(Step("fork", None))
 
   def recipe[N: Nat](name: String, diagram: Diagram[Nat.`0`, N]): Either[Vector[Issue], Recipe] =
@@ -36,7 +40,9 @@ object PipelineWiring:
         walk(left, inputs.take(count(a)))(using a, b) ++ walk(right, inputs.drop(count(a)))(using c, d)
       case FreeProp.Swap(a, _) => inputs.drop(count(a)) ++ inputs.take(count(a))
     val outputs = walk(diagram, Vector.empty)
-    val result = Recipe(1, name, nodes.result(), outputs)
+    val items = nodes.result()
+    val version = if items.exists(n => n.op.isInstanceOf[Op.Choose] || n.op.isInstanceOf[Op.Stop]) then 2 else 1
+    val result = Recipe(version, name, items, outputs)
     check(result).map(_.recipe)
 
   def example: Recipe =
@@ -56,3 +62,25 @@ object PipelineWiring:
       val receipt = validate(check)
       (download, receipt)
     recipe("Marked packet", graph).fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)
+
+  def conditionalExample: Recipe =
+    val read = source("body", "body")
+    val short = step("short", Op.Stamp("SHORT PACKET"))
+    val long = step("long", Op.Stamp("LONG PACKET"))
+    val unknown = stop("unknown", "The document page count could not be determined")
+    val route = choose("route", Predicate.PageCount(1, 3))
+    val write = step("pdf", Op.Write)
+    val checks = step("checks", Op.Validate(Vector("3b")))
+    val graph = syntax.of0:
+      val body = read()
+      val (condition, branches) = fork(body)
+      val (small, large) = fork(branches)
+      val shortPacket = short(small)
+      val longPacket = long(large)
+      val unavailable = unknown()
+      val selected = route(condition, shortPacket, longPacket, unavailable)
+      val bytes = write(selected)
+      val (download, validate) = fork(bytes)
+      val receipt = checks(validate)
+      (download, receipt)
+    recipe("Route by page count", graph).fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)

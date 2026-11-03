@@ -518,6 +518,14 @@ The selected object's dictionary will appear here.</pre
               maxlength="80"
               value="Marked packet"
           /></label>
+          <label class="pipeline-example-label"
+            >Try a recipe<select id="pipeline-example">
+              <option value="">Choose an example</option>
+              <option value="packet">Stamp and number</option>
+              <option value="pages">Branch by page count</option>
+              <option value="validation">Branch by PDF/A verdict</option>
+            </select></label
+          >
           <button class="text-button" id="pipeline-save">Save recipe</button>
           <button class="text-button" id="pipeline-load">Load recipe</button>
           <button class="text-button" id="pipeline-insert">
@@ -533,8 +541,9 @@ The selected object's dictionary will appear here.</pre
         <section class="pipeline-inputs" aria-labelledby="pipeline-input-title">
           <h3 id="pipeline-input-title">Bind your PDFs</h3>
           <p>
-            Recipes keep slot names and settings. Files are chosen separately
-            and stay on this machine.
+            Only inputs reached by the selected path are required. Recipes keep
+            slot names and settings. Files are chosen separately and stay on
+            this machine.
           </p>
           <div id="pipeline-bindings"></div>
         </section>
@@ -591,6 +600,8 @@ The selected object's dictionary will appear here.</pre
                   <option value="input">PDF input</option>
                   <option value="write">Write PDF</option>
                   <option value="validate">Validate PDF/A</option>
+                  <option value="choose">Choose a path</option>
+                  <option value="stop">Stop with reason</option>
                 </select></label
               ><button class="button primary" id="pipeline-add">
                 Add operation
@@ -611,8 +622,9 @@ The selected object's dictionary will appear here.</pre
             </div>
             <p>
               Select an operation here or in the selector. Scroll horizontally
-              and vertically to follow every branch. Outputs are marked in
-              yellow.
+              and vertically to follow every branch. After a run, dashed
+              operations were skipped. Shared steps run once; outputs are
+              marked in yellow.
             </p>
             <div
               class="pipeline-graph-scroll"
@@ -645,8 +657,8 @@ The selected object's dictionary will appear here.</pre
         <details class="pipeline-json">
           <summary>Recipe JSON</summary>
           <p>
-            Edit or paste version 1 recipe data. Apply checks every field and
-            connection before replacing the graph.
+            Edit or paste version 1 or 2 recipe data. Apply checks every field
+            and connection before replacing the graph.
           </p>
           <label class="sr-only" for="pipeline-json">Recipe JSON data</label
           ><textarea id="pipeline-json" spellcheck="false" rows="16"></textarea
@@ -657,8 +669,9 @@ The selected object's dictionary will appear here.</pre
         <p class="pipeline-footnote">
           Up to 24 operations, four named PDF inputs and three output PDFs. Each
           PDF stays within 64 pages and 12 MiB. The runner executes sequentially
-          with bounded retention; each output hash shares one validator pass
-          across requested profiles.
+          with bounded retention. Completed checks are reused for identical
+          bytes. Conditional runs check demanded profiles only, with at most
+          three validation passes per run.
         </p>
       </section>
       <footer>
