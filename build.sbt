@@ -273,7 +273,19 @@ lazy val scalaJs = (project in file("js"))
       val repo = (LocalRootProject / baseDirectory).value
       jsSharedSources(repo) ++ ((baseDirectory.value / "src" / "main" / "scala") ** "*.scala").get()
     },
-    Test / unmanagedSources := ((baseDirectory.value / "src" / "test" / "scala") ** "*.scala").get(),
+    Compile / packageSrc / mappings := {
+      val repo = (LocalRootProject / baseDirectory).value
+      val converter = fileConverter.value
+      val roots = Seq(repo / "src" / "main" / "scala", baseDirectory.value / "src" / "main" / "scala")
+      (Compile / unmanagedSources).value.map { source =>
+        converter.toVirtualFile(source.toPath) -> roots.iterator.flatMap(root => IO.relativize(root, source)).next()
+      }
+    },
+    Test / unmanagedSources := {
+      val shared = (LocalRootProject / baseDirectory).value / "src" / "test" / "scala" / "zio" / "pdf"
+      ((baseDirectory.value / "src" / "test" / "scala") ** "*.scala").get() ++
+        Seq(shared / "XrefStreamSpec.scala", shared / "AsciiFilterBoundsSpec.scala")
+    },
     Test / unmanagedResourceDirectories +=
       (LocalRootProject / Test / resourceDirectory).value,
     Test / fork := false,
