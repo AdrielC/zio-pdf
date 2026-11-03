@@ -1,4 +1,4 @@
-package com.tybera.kyopdf
+package io.github.adrielc.kyopdf
 
 import java.nio.charset.StandardCharsets.ISO_8859_1
 import kyo.*

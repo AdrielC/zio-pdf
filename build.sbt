@@ -13,7 +13,6 @@ val scodecBitsVersion          = "1.2.5"
 val scalaJsDomVersion          = "2.8.1"
 val scalaJavaTimeVersion       = "2.7.0"
 val kyoVersion                 = "1.0.0-RC4"
-val kyoPdfInternalVersion      = "0.2.0-internal.2"
 
 ThisBuild / organization      := "io.github.adrielc"
 ThisBuild / scalaVersion      := "3.8.4"
@@ -81,35 +80,14 @@ lazy val volgaCore = (project in file("modules/volga-core"))
     libraryDependencies += "org.scalameta" %% "munit" % "1.0.0-M7" % Test
   )
 
-private def tyberaMavenSettings = Seq(
-  organization := "com.tybera",
-  version := kyoPdfInternalVersion,
-  publishTo := Some("Tybera Maven" at "https://git.tybera.net/api/packages/Tybera/maven"),
-  credentials ++= {
-    val user = sys.env
-      .get("MAVEN_USER")
-      .orElse(sys.env.get("MAVEN_USERNAME"))
-      .orElse(sys.env.get("GITEA_ACTOR"))
-    val pass = sys.env
-      .get("MAVEN_TOKEN")
-      .orElse(sys.env.get("MAVEN_PASSWORD"))
-      .orElse(sys.env.get("GITEA_TOKEN"))
-    (user, pass) match {
-      case (Some(username), Some(password)) =>
-        Seq(
-          Credentials("Gitea Package Registry", "git.tybera.net", username, password),
-          Credentials("Gitea Package API", "git.tybera.net", username, password)
-        )
-      case _ => Seq.empty
-    }
-  },
+private def kyoPdfArtifactSettings = Seq(
   Compile / packageDoc / publishArtifact := false,
   Compile / packageSrc / publishArtifact := true
 )
 
 /** Kyo-native PDF core. Main sources intentionally have no ZIO dependency. */
 lazy val kyoPdf = (project in file("kyo-pdf-core"))
-  .settings(tyberaMavenSettings)
+  .settings(kyoPdfArtifactSettings)
   .settings(
     name := "kyo-pdf",
     libraryDependencies ++= List(
@@ -120,14 +98,14 @@ lazy val kyoPdf = (project in file("kyo-pdf-core"))
       "dev.zio"   %% "zio-test-sbt" % zioVersion % Test
     ),
     Test / unmanagedResourceDirectories += (LocalRootProject / Test / resourceDirectory).value,
-    Test / mainClass := Some("com.tybera.kyopdf.PdfParserSpec"),
+    Test / mainClass := Some("io.github.adrielc.kyopdf.PdfParserSpec"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 
 /** Optional compatibility edge for ZIO applications consuming the Kyo core. */
 lazy val kyoPdfZio = (project in file("kyo-pdf-zio"))
   .dependsOn(kyoPdf)
-  .settings(tyberaMavenSettings)
+  .settings(kyoPdfArtifactSettings)
   .settings(
     name := "kyo-pdf-zio",
     libraryDependencies ++= List(
@@ -137,7 +115,7 @@ lazy val kyoPdfZio = (project in file("kyo-pdf-zio"))
       "dev.zio"   %% "zio-test"     % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt" % zioVersion % Test
     ),
-    Test / mainClass := Some("com.tybera.kyopdf.zio.PdfZIOSpec"),
+    Test / mainClass := Some("io.github.adrielc.kyopdf.zio.PdfZIOSpec"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 

@@ -3,18 +3,22 @@
 [![CI](https://github.com/AdrielC/zio-pdf/actions/workflows/ci.yml/badge.svg)](https://github.com/AdrielC/zio-pdf/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-The canonical internal line is now Kyo-native. Its bounded decoded document
-graph, page selection/writer, structural parsing, content grammar, schema, and
-thumbnail-object APIs live in `kyo-pdf-core` and do not depend on ZIO. Existing
-ZIO applications use the small `kyo-pdf-zio` adapter, which interprets Kyo
-effects with the official `kyo-zio` bridge.
+The Kyo-native PDF implementation lives in `kyo-pdf-core`. It provides a bounded
+decoded document graph, page selection and writing, structural parsing, content
+grammar, schema, and thumbnail-object APIs without a ZIO dependency. Existing
+ZIO applications use the small `kyo-pdf-zio` adapter, which interprets Kyo effects
+with the official `kyo-zio` bridge.
 
-Internal coordinates:
+Kyo modules use the public project organization and the source build's version:
 
 ```scala
-libraryDependencies += "com.tybera" %% "kyo-pdf"     % "0.2.0-internal.2"
-libraryDependencies += "com.tybera" %% "kyo-pdf-zio" % "0.2.0-internal.2" // optional
+libraryDependencies += "io.github.adrielc" %% "kyo-pdf"     % version
+libraryDependencies += "io.github.adrielc" %% "kyo-pdf-zio" % version // optional
 ```
+
+The Kyo modules are available from source builds and local publication. They
+are not yet included in the Maven Central release workflow; the coordinates
+above do not imply that a Kyo release is available from Maven Central.
 
 The original `zio-pdf` implementation remains in this repository as a parity
 reference and compatibility implementation. It is not a dependency of the Kyo
@@ -23,7 +27,7 @@ core.
 ## Kyo quick start
 
 ```scala
-import com.tybera.kyopdf.*
+import io.github.adrielc.kyopdf.*
 import kyo.*
 
 val report: ScanReport < Abort[PdfError] =
@@ -40,11 +44,19 @@ val selected: Vector[Byte] < (Abort[PdfError] & Sync) =
 From a ZIO application:
 
 ```scala
-import com.tybera.kyopdf.zio.PdfZIO
+import io.github.adrielc.kyopdf.zio.PdfZIO
 
 val document = PdfZIO.decodeStream(upload, limit)
 val selected = PdfZIO.selectPagesStream(upload, limit, first = 2, last = 4)
 ```
+
+### Kyo package migration
+
+The Kyo core now uses `io.github.adrielc.kyopdf` and its adapter uses
+`io.github.adrielc.kyopdf.zio`. Consumers of earlier Kyo pre-release artifacts
+must update their imports and dependency organization, then recompile. This
+is a source and binary compatibility change for those artifacts. Existing
+`zio.pdf` APIs and the published `zio-pdf` coordinates remain unchanged.
 
 ## Legacy ZIO implementation
 
@@ -66,7 +78,9 @@ libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.1" // JVM
 libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.1" // Scala.js
 ```
 
-Only the JVM and Scala.js `zio-pdf` artifacts are publishable. Examples, benchmarks, the browser application, and comparison benches are build-only projects.
+The release workflow publishes the JVM and Scala.js `zio-pdf` artifacts.
+Kyo modules support local source builds. Examples, benchmarks, the browser
+application, and comparison benches are build-only projects.
 
 ## Quick start
 

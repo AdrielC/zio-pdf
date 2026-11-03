@@ -1,7 +1,7 @@
-package com.tybera.kyopdf.zio
+package io.github.adrielc.kyopdf.zio
 
 import kyo.{Abort, Async, ZIOs, <}
-import com.tybera.kyopdf.{ByteLimit, ContentToken, ObjectRef, PdfContentParser, PdfDocument, PdfError, PdfInput, PdfObject, PdfPages, PdfParser, PdfWriter, RetentionLimits, ScanReport}
+import io.github.adrielc.kyopdf.{ByteLimit, ContentToken, ObjectRef, PdfContentParser, PdfDocument, PdfError, PdfInput, PdfObject, PdfPages, PdfParser, PdfWriter, RetentionLimits, ScanReport}
 import _root_.zio.{IO, ZIO}
 import _root_.zio.stream.ZStream
 

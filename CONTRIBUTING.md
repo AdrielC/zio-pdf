@@ -49,9 +49,15 @@ Public coordinates are:
 libraryDependencies += "io.github.adrielc" %% "zio-pdf" % version
 ```
 
-Internal Kyo coordinates are published explicitly to Tybera Maven from the
-`kyoPdf/publish` and `kyoPdfZio/publish` tasks. They require `MAVEN_USER` and
-`MAVEN_TOKEN` (or the documented Gitea equivalents); credentials are never
-stored in the repository.
+The Kyo modules inherit the same public organization and source build version.
+Build local dependencies with `sbt -batch ';kyoPdf/publishLocal;kyoPdfZio/publishLocal'`.
+The release workflow currently publishes only the JVM and Scala.js `zio-pdf`
+artifacts; it does not publish the Kyo modules.
+
+Kyo packages use `io.github.adrielc.kyopdf` and `io.github.adrielc.kyopdf.zio`.
+Consumers of earlier Kyo pre-release artifacts must update imports and the
+dependency organization and recompile. The package move changes source and
+binary compatibility for those artifacts; keep this migration explicit in
+release notes.
 
 Tags matching `v*` run the full tests, examples, package audit, external-consumer proof, and signed Maven Central publication before GitHub creates a release. Publication requires repository secrets named `PGP_SECRET`, `PGP_PASSPHRASE`, `SONATYPE_USERNAME`, and `SONATYPE_PASSWORD`. The workflow fails if any are missing.

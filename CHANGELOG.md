@@ -4,10 +4,20 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
-- Internal `0.1.0-internal.3` artifacts accept a binary-marker comment directly
+- Kyo parsing accepts a binary-marker comment directly
   after the PDF version, matching zio-pdf writer output.
-- Internal `0.1.0-internal.2` artifacts create a fresh `kyo-parse` effect for
+- Kyo parsing creates a fresh `kyo-parse` effect for
   every scan, making repeated and ZIO-lifted parser runs independent.
+
+### Changed
+
+- Kyo packages now use `io.github.adrielc.kyopdf` and
+  `io.github.adrielc.kyopdf.zio`. Earlier Kyo pre-release consumers must update
+  imports and dependency organization and recompile; this is a source and
+  binary compatibility change. Existing `zio.pdf` APIs are unchanged.
+- Kyo modules inherit the public project organization and source build version.
+  Removed the company-specific publishing configuration. The existing release
+  workflow still publishes only the JVM and Scala.js `zio-pdf` artifacts.
 
 ### Fixed
 
@@ -19,9 +29,9 @@ All notable changes to this project are documented here.
 
 ### Added
 
-- Internal `com.tybera:kyo-pdf_3:0.1.0-internal.1` artifact with a ZIO-free
+- `kyo-pdf` artifact with a ZIO-free
   Kyo core using `Abort`, `kyo-parse`, and `kyo-schema`.
-- Optional `com.tybera:kyo-pdf-zio_3:0.1.0-internal.1` adapter using the
+- Optional `kyo-pdf-zio` adapter using the
   official `kyo-zio` interpreter for typed failures and cancellation.
 - Bounded classic-xref indirect lengths, Flate object streams, xref-stream
   accounting, content tokens, encryption rejection, and thumbnail objects in
