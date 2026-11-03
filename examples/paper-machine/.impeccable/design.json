@@ -1,0 +1,297 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T15:55:46.711952Z",
+  "title": "Design System: Paper Machine",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Instrument Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0428 238.8)",
+          "oklch(26% 0.0428 238.8)",
+          "oklch(38% 0.0428 238.8)",
+          "oklch(49% 0.0428 238.8)",
+          "oklch(61% 0.0428 238.8)",
+          "oklch(72% 0.0428 238.8)",
+          "oklch(84% 0.0428 238.8)",
+          "oklch(95% 0.0428 238.8)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Cool Paper",
+        "tonalRamp": [
+          "oklch(15% 0.0025 228.8)",
+          "oklch(26% 0.0025 228.8)",
+          "oklch(38% 0.0025 228.8)",
+          "oklch(49% 0.0025 228.8)",
+          "oklch(61% 0.0025 228.8)",
+          "oklch(72% 0.0025 228.8)",
+          "oklch(84% 0.0025 228.8)",
+          "oklch(95% 0.0025 228.8)"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "Bench White",
+        "tonalRamp": [
+          "oklch(15% 0.0000 0.0)",
+          "oklch(26% 0.0000 0.0)",
+          "oklch(38% 0.0000 0.0)",
+          "oklch(49% 0.0000 0.0)",
+          "oklch(61% 0.0000 0.0)",
+          "oklch(72% 0.0000 0.0)",
+          "oklch(84% 0.0000 0.0)",
+          "oklch(95% 0.0000 0.0)"
+        ]
+      },
+      "signal": {
+        "role": "primary",
+        "displayName": "Electric Signal",
+        "tonalRamp": [
+          "oklch(15% 0.1538 113.5)",
+          "oklch(26% 0.1538 113.5)",
+          "oklch(38% 0.1538 113.5)",
+          "oklch(49% 0.1538 113.5)",
+          "oklch(61% 0.1538 113.5)",
+          "oklch(72% 0.1538 113.5)",
+          "oklch(84% 0.1538 113.5)",
+          "oklch(95% 0.1538 113.5)"
+        ]
+      },
+      "blue": {
+        "role": "neutral",
+        "displayName": "Slate Blue",
+        "tonalRamp": [
+          "oklch(15% 0.0680 244.6)",
+          "oklch(26% 0.0680 244.6)",
+          "oklch(38% 0.0680 244.6)",
+          "oklch(49% 0.0680 244.6)",
+          "oklch(61% 0.0680 244.6)",
+          "oklch(72% 0.0680 244.6)",
+          "oklch(84% 0.0680 244.6)",
+          "oklch(95% 0.0680 244.6)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Quiet Slate",
+        "tonalRamp": [
+          "oklch(15% 0.0265 242.3)",
+          "oklch(26% 0.0265 242.3)",
+          "oklch(38% 0.0265 242.3)",
+          "oklch(49% 0.0265 242.3)",
+          "oklch(61% 0.0265 242.3)",
+          "oklch(72% 0.0265 242.3)",
+          "oklch(84% 0.0265 242.3)",
+          "oklch(95% 0.0265 242.3)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Panel Seam",
+        "tonalRamp": [
+          "oklch(15% 0.0129 236.7)",
+          "oklch(26% 0.0129 236.7)",
+          "oklch(38% 0.0129 236.7)",
+          "oklch(49% 0.0129 236.7)",
+          "oklch(61% 0.0129 236.7)",
+          "oklch(72% 0.0129 236.7)",
+          "oklch(84% 0.0129 236.7)",
+          "oklch(95% 0.0129 236.7)"
+        ]
+      },
+      "field-muted": {
+        "role": "neutral",
+        "displayName": "Field Readout",
+        "tonalRamp": [
+          "oklch(15% 0.0284 232.8)",
+          "oklch(26% 0.0284 232.8)",
+          "oklch(38% 0.0284 232.8)",
+          "oklch(49% 0.0284 232.8)",
+          "oklch(61% 0.0284 232.8)",
+          "oklch(72% 0.0284 232.8)",
+          "oklch(84% 0.0284 232.8)",
+          "oklch(95% 0.0284 232.8)"
+        ]
+      },
+      "trace": {
+        "role": "neutral",
+        "displayName": "Idle Trace",
+        "tonalRamp": [
+          "oklch(15% 0.0443 236.2)",
+          "oklch(26% 0.0443 236.2)",
+          "oklch(38% 0.0443 236.2)",
+          "oklch(49% 0.0443 236.2)",
+          "oklch(61% 0.0443 236.2)",
+          "oklch(72% 0.0443 236.2)",
+          "oklch(84% 0.0443 236.2)",
+          "oklch(95% 0.0443 236.2)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Heavy, tight Chivo headline; responsive size is documented in DESIGN.md."
+      },
+      "title": {
+        "displayName": "Section title",
+        "purpose": "Compact, sturdy names for work areas."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default instructions and interface copy."
+      },
+      "mono": {
+        "displayName": "Literal syntax",
+        "purpose": "PDF dictionaries; smaller related sizes identify references and addresses."
+      }
+    },
+    "shadows": [
+      {
+        "name": "rendered-sheet",
+        "value": "0 8px 20px #142d3d22",
+        "purpose": "Separate the rendered PDF page from its bench."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Button and node transitions, plus the assembly reveal."
+      },
+      {
+        "name": "control-state",
+        "value": "0.2s",
+        "purpose": "Button background/color and node fill/stroke transitions."
+      },
+      {
+        "name": "current",
+        "value": "1.2s linear infinite",
+        "purpose": "Active trace dash offset moves to -26; disabled with reduced motion."
+      },
+      {
+        "name": "assemble",
+        "value": "0.55s",
+        "purpose": "Result clip-path reveals from inset(0 100% 0 0) to inset(0 0 0 0); disabled with reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide-min",
+        "value": "1600px"
+      },
+      {
+        "name": "compact-max",
+        "value": "1050px"
+      },
+      {
+        "name": "stack-max",
+        "value": "760px"
+      },
+      {
+        "name": "narrow-max",
+        "value": "380px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Navy action for opening or downloading a PDF.",
+      "html": "<button class=\"ds-primary\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 16V4m-5 5 5-5 5 5M4 15v5h16v-5\"/></svg>Open a PDF</button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:46px;padding:12px 20px;border:0;border-radius:0;font-weight:600;font-size:14px;line-height:1.5;cursor:pointer;font-family:Chivo,Arial,sans-serif;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1)),color .2s var(--ease,cubic-bezier(.16,1,.3,1));background:var(--ink,#142d3d);color:var(--white,#fff)}.ds-primary:hover{background:#31536a}.ds-primary:active{transform:translateY(1px)}.ds-primary:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-primary:disabled{cursor:not-allowed;opacity:.4}.ds-primary svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}@media(max-width:760px){.ds-primary{font-size:13px;min-height:44px;padding:11px 16px}}@media(prefers-reduced-motion:reduce){.ds-primary{transition:none}}"
+    },
+    {
+      "name": "Build action",
+      "kind": "button",
+      "refersTo": "button-build",
+      "description": "Signal-filled action for assembling the selected page order.",
+      "html": "<button class=\"ds-build\">Build PDF<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m-6-6 6 6-6 6\"/></svg></button>",
+      "css": ".ds-build{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:46px;padding:12px 20px;border:0;border-radius:0;font-weight:600;font-size:14px;line-height:1.5;cursor:pointer;font-family:Chivo,Arial,sans-serif;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1)),color .2s var(--ease,cubic-bezier(.16,1,.3,1));min-height:42px;padding:10px 16px;background:var(--signal,#e2ed6b);color:var(--ink,#142d3d);white-space:nowrap}.ds-build:hover{background:#d0df42}.ds-build:active{transform:translateY(1px)}.ds-build:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-build:disabled{cursor:not-allowed;opacity:.5}.ds-build svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}@media(max-width:760px){.ds-build{font-size:13px;min-height:44px;padding:11px 16px}}@media(prefers-reduced-motion:reduce){.ds-build{transition:none}}"
+    },
+    {
+      "name": "Text action",
+      "kind": "button",
+      "refersTo": "button-text",
+      "description": "Quiet contextual action with an underline on hover.",
+      "html": "<button class=\"ds-text\">Inspect this page<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 18 18 6M6 6h12v12\"/></svg></button>",
+      "css": ".ds-text{display:inline-flex;align-items:center;gap:6px;border:0;padding:5px 0;background:none;color:var(--ink,#142d3d);font-size:12px;font-weight:600;line-height:1.5;white-space:nowrap;cursor:pointer;font-family:Chivo,Arial,sans-serif;}.ds-text:hover{text-decoration:underline;text-underline-offset:4px}.ds-text:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-text:disabled{cursor:not-allowed;opacity:.4}.ds-text svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}"
+    },
+    {
+      "name": "Page navigation",
+      "kind": "nav",
+      "refersTo": "page-navigation",
+      "description": "Outline arrows and a tabular page counter; the first boundary is disabled.",
+      "html": "<nav class=\"ds-page-nav\" aria-label=\"Page navigation\"><button disabled aria-label=\"Previous page\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m14 6-6 6 6 6\"/></svg></button><span>1 / 4</span><button aria-label=\"Next page\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m10 6 6 6-6 6\"/></svg></button></nav>",
+      "css": ".ds-page-nav{display:flex;align-items:center;gap:8px;color:var(--ink,#142d3d);font-family:Chivo,Arial,sans-serif;}.ds-page-nav span{font-size:11px;min-width:42px;text-align:center;font-variant-numeric:tabular-nums}.ds-page-nav button{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--line,#cbd4da);background:transparent;color:inherit;padding:2px;cursor:pointer}.ds-page-nav button:hover{background:var(--white,#fff)}.ds-page-nav button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-page-nav button:disabled{cursor:not-allowed;opacity:.4}.ds-page-nav svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}"
+    },
+    {
+      "name": "Reference chips",
+      "kind": "chip",
+      "refersTo": "reference-button",
+      "description": "Literal indirect references; unavailable graph targets remain visible and disabled.",
+      "html": "<div class=\"ds-references\"><button>6 0 R</button><button>7 0 R</button><button disabled title=\"Outside the displayed graph\">181 0 R</button></div>",
+      "css": ".ds-references{display:flex;flex-wrap:wrap;gap:6px}.ds-references button{border:1px solid var(--line,#cbd4da);background:var(--white,#fff);color:var(--ink,#142d3d);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10px;line-height:1.5;padding:4px 8px;border-radius:0;cursor:pointer}.ds-references button:hover{background:var(--signal,#e2ed6b);border-color:var(--signal,#e2ed6b)}.ds-references button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-references button:disabled{cursor:not-allowed;opacity:.4}"
+    },
+    {
+      "name": "Inspector and native selector",
+      "kind": "card",
+      "refersTo": "inspector",
+      "description": "A white inspector, ordinary object selector and scrollable syntax well.",
+      "html": "<section class=\"ds-inspector\"><div class=\"ds-inspector-heading\"><h2>Inside the object</h2><select aria-label=\"Choose an object\"><option>3 0 R \u00b7 Page</option><option>7 0 R \u00b7 Stream</option><option>Document trailer</option></select></div><pre tabindex=\"0\" aria-label=\"PDF dictionary syntax\">&lt;&lt;\n  /Type /Page\n  /MediaBox [ 0 0 595 420 ]\n  /Resources &lt;&lt; /Font &lt;&lt; /F1 6 0 R &gt;&gt; &gt;&gt;\n  /Contents 7 0 R\n&gt;&gt;</pre></section>",
+      "css": ".ds-inspector{background:var(--white,#fff);color:var(--ink,#142d3d);padding:24px;max-width:520px;border:1px solid var(--line,#cbd4da);font-family:Chivo,Arial,sans-serif;}.ds-inspector-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.ds-inspector h2{font-size:20px;font-weight:700;letter-spacing:-.025em;line-height:1.25;margin:0}.ds-inspector select{min-width:0;max-width:180px;background:var(--paper,#f3f5f6);border:1px solid var(--line,#cbd4da);padding:6px 25px 6px 9px;font-size:11px;border-radius:0;color:var(--ink,#142d3d);font-family:Chivo,Arial,sans-serif;}.ds-inspector pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.7;overflow:auto;height:139px;background:var(--paper,#f3f5f6);padding:12px 15px;margin:10px 0 13px;white-space:pre;tab-size:2;color:#26475d;scrollbar-width:thin}.ds-inspector select:focus-visible,.ds-inspector pre:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}@media(max-width:1050px){.ds-inspector{padding:20px}.ds-inspector select{max-width:140px}}@media(max-width:760px){.ds-inspector h2{font-size:19px}.ds-inspector select{max-width:160px}}@media(max-width:380px){.ds-inspector select{max-width:132px}}"
+    },
+    {
+      "name": "Energized object pair",
+      "kind": "custom",
+      "refersTo": "object-selected",
+      "description": "A selected page and a related stream joined by a real reference-shaped orthogonal trace.",
+      "html": "<div class=\"ds-field\"><svg viewBox=\"0 0 280 100\" aria-label=\"Selected page and related stream\"><path class=\"ds-trace\" d=\"M110 34H140V54H170\"/><g class=\"ds-node ds-selected\" transform=\"translate(10,10)\" role=\"button\" tabindex=\"0\" aria-pressed=\"true\" aria-label=\"Page, object 3 0 R\"><rect width=\"100\" height=\"48\"/><text class=\"ds-node-title\" x=\"11\" y=\"19\">Page</text><text class=\"ds-node-address\" x=\"11\" y=\"36\">3 0 R</text><circle class=\"ds-port\" cx=\"100\" cy=\"24\" r=\"2.5\"/></g><g class=\"ds-node ds-stream ds-related\" transform=\"translate(170,30)\" role=\"button\" tabindex=\"0\" aria-pressed=\"false\" aria-label=\"Stream, object 7 0 R\"><rect width=\"100\" height=\"48\"/><text class=\"ds-node-title\" x=\"11\" y=\"19\">Stream</text><text class=\"ds-node-address\" x=\"11\" y=\"36\">7 0 R</text><circle class=\"ds-port\" cx=\"0\" cy=\"24\" r=\"2.5\"/></g></svg></div>",
+      "css": ".ds-field{background:var(--field,#142d3d);padding:16px;font-family:Chivo,Arial,sans-serif;}.ds-field svg{display:block;width:100%;max-width:420px}.ds-trace{fill:none;stroke:var(--signal,#e2ed6b);stroke-width:2;stroke-dasharray:8 5;animation:ds-current 1.2s linear infinite}.ds-node{cursor:pointer;outline:none}.ds-node rect{fill:#1c394b;stroke:#6d8899;stroke-width:1;transition:fill .2s var(--ease,cubic-bezier(.16,1,.3,1)),stroke .2s var(--ease,cubic-bezier(.16,1,.3,1))}.ds-port{fill:#8da7b6}.ds-node-title{fill:var(--white,#fff);font-size:13px;font-weight:600}.ds-node-address{fill:var(--field-muted,#b4c9d5);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}.ds-stream rect{stroke-dasharray:4 3}.ds-related rect{stroke:var(--signal,#e2ed6b)}.ds-node:hover rect,.ds-node:focus-visible rect{fill:#395972;stroke:white;stroke-width:2}.ds-selected rect{fill:var(--signal,#e2ed6b);stroke:var(--signal,#e2ed6b)}.ds-selected .ds-node-title,.ds-selected .ds-node-address,.ds-selected .ds-port{fill:var(--ink,#142d3d)}.ds-node:focus-visible rect{stroke-width:3}.ds-node text{pointer-events:none;user-select:none}@keyframes ds-current{to{stroke-dashoffset:-26}}@media(prefers-reduced-motion:reduce){.ds-trace{animation:none}.ds-node rect{transition:none}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Circuit Network Analyzer",
+    "overview": "Paper Machine treats PDF structure as something a person can probe. A navy measurement field, electric-yellow signals and a cool paper bench give the studio the character of a working instrument. The visual language belongs to this example; it does not define the PDF library's identity.\n\nSturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork.",
+    "keyCharacteristics": [
+      "Square controls and contiguous, bordered work areas.",
+      "Solid selected objects, outlined related objects and orthogonal reference traces.",
+      "Restrained depth, reserved for the rendered sheet.",
+      "Motion attached to a live connection or a completed assembly."
+    ],
+    "rules": [
+      {
+        "name": "The Energized State Rule",
+        "body": "Yellow identifies an actionable or connected state. A selected object takes a solid yellow field; related objects retain their field and gain a yellow outline.",
+        "section": "colors"
+      },
+      {
+        "name": "The Literal Readout Rule",
+        "body": "Reserve monospace for PDF syntax and addresses; use Chivo for names, instructions and actions.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sheet Depth Rule",
+        "body": "Keep instrument chrome flat; reserve ambient elevation for the rendered page.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** keep actual PDF previews and literal object addresses attached to their controls.",
+      "**Do** distinguish a solid selected node from outlined related nodes.",
+      "**Do** preserve local scrolling, keyboard focus and reduced-motion behavior when extending a work area.",
+      "**Do** use the larger narrow-screen assembly controls with their established spacing."
+    ],
+    "donts": [
+      "**Don't** introduce rounded card shells around the contiguous instrument panels.",
+      "**Don't** use monospace for display headlines or action labels.",
+      "**Don't** add ambient shadows to ordinary controls or panel seams.",
+      "**Don't** turn sample artwork colors or tiny technical annotations into a general palette or heading scale."
+    ]
+  }
+}

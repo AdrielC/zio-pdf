@@ -119,6 +119,16 @@ lazy val kyoPdfZio = (project in file("kyo-pdf-zio"))
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 
+/** Loopback-only visual explorer; rendering stays outside the Kyo core. */
+lazy val paperMachine = (project in file("examples/paper-machine"))
+  .dependsOn(kyoPdf)
+  .settings(
+    name := "paper-machine",
+    publish / skip := true,
+    libraryDependencies += "org.apache.pdfbox" % "pdfbox" % "3.0.4",
+    Compile / mainClass := Some("io.github.adrielc.kyopdf.demo.PaperMachine")
+  )
+
 lazy val root = (project in file("."))
   .dependsOn(volgaCore)
   .settings(

@@ -50,6 +50,21 @@ val document = PdfZIO.decodeStream(upload, limit)
 val selected = PdfZIO.selectPagesStream(upload, limit, first = 2, last = 4)
 ```
 
+### Paper Machine visual studio
+
+Explore a PDF's live object graph, inspect dictionaries, preview pages, and download
+a new PDF with pages selected in your own order:
+
+```sh
+sbt 'paperMachine/run'
+```
+
+Open the printed loopback URL. The studio starts with synthetic vector artwork and
+also accepts local PDFs up to 12 MiB and 64 pages. Kyo PDF handles parsing and
+rewriting; PDFBox renders previews. See the [studio guide](examples/paper-machine/README.md)
+for limits and checks. Ordered selection is also available directly through
+`PdfPages.select(document, Vector(4, 1, 3))`.
+
 ### Kyo package migration
 
 The Kyo core now uses `io.github.adrielc.kyopdf` and its adapter uses

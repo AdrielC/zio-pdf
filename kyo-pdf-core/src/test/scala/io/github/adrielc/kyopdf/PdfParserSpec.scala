@@ -333,6 +333,62 @@ object PdfParserSpec extends ZIOSpecDefault:
         content.exists(bytes => new String(bytes.toArray, ISO_8859_1).contains("Second"))
       )
     },
+    test("ordered page selection writes pages in the requested order with a matching trailer") {
+      val checked = for
+        limit <- result(ByteLimit.mebibytes(1))
+        original <- result(PdfDocument.decode(incrementalPdf, limit))
+        selected <- result(PdfPages.select(original, Vector(2, 1)))
+        bytes <- syncResult(PdfWriter.write(selected))
+        _ <- qpdfCheck(bytes.toArray, "synthetic reordered pages")
+        decoded <- result(PdfDocument.decode(bytes.toArray, limit))
+        pages <- result(PdfPages.pageRefs(decoded))
+      yield
+        val contents = pages.map { page =>
+          val stream = decoded.byRef(page).dictionary.get.get("Contents").collect { case PdfValue.Ref(ref) => decoded.byRef(ref) }.get
+          new String(stream.stream.get.toArray, ISO_8859_1)
+        }
+        val info = decoded.trailer.get("Info").collect { case PdfValue.Ref(ref) => decoded.byRef.get(ref) }.flatten
+        (decoded, contents, info)
+      assertTrue(
+        checked.exists(_._2 == Vector("BT (Second) Tj ET", "BT (First) Tj ET")),
+        checked.exists(_._1.trailer.get("Prev").isEmpty),
+        checked.exists(value => value._1.trailer.get("Size").contains(PdfValue.Number(value._1.objects.map(_.index.number).max + 1))),
+        checked.exists(_._3.flatMap(_.dictionary).flatMap(_.get("Title")).contains(PdfValue.Literal("Synthetic revision".getBytes(ISO_8859_1).toVector)))
+      )
+    },
+    test("rewritten page parents cannot collide with a retained source object numbered two") {
+      val content = "BT /F1 12 Tf (Synthetic page) Tj ET"
+      val bytes = assemble(List(
+        "<< /Type /Catalog /Pages 3 0 R >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        "<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 3 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 2 0 R >> >> /Contents 5 0 R >>",
+        s"<< /Length ${content.length} >>\nstream\n$content\nendstream"
+      ))
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val original = result(PdfDocument.decode(bytes, limit)).toOption.get
+      val checks = Vector(result(PdfPages.select(original, 1, 1)), result(PdfPages.select(original, Vector(1)))).map { selected =>
+        for
+          document <- selected
+          written <- syncResult(PdfWriter.write(document))
+          decoded <- result(PdfDocument.decode(written.toArray, limit))
+          pages <- result(PdfPages.pageRefs(decoded))
+        yield pages.forall(ref => decoded.byRef(ref).dictionary.flatMap(_.get("Parent")).contains(PdfValue.Ref(ObjectRef(2))))
+      }
+      assertTrue(checks.forall(_.contains(true)))
+    },
+    test("ordered page selection supports subsets and rejects empty, duplicate, or out-of-range pages") {
+      val limit = result(ByteLimit.mebibytes(1)).toOption.get
+      val document = result(PdfDocument.decode(twoPagePdf, limit)).toOption.get
+      val subset = result(PdfPages.select(document, Vector(2))).flatMap(value => result(PdfPages.pageRefs(value)))
+      assertTrue(
+        subset.exists(_.length == 1),
+        result(PdfPages.select(document, Vector.empty)).isLeft,
+        result(PdfPages.select(document, Vector(1, 1))).isLeft,
+        result(PdfPages.select(document, Vector(0))).left.exists(_ == PdfError.InvalidPageRange(0, 0, 2)),
+        result(PdfPages.select(document, Vector(3))).left.exists(_ == PdfError.InvalidPageRange(3, 3, 2))
+      )
+    },
     test("rewritten trailers discard revision offsets and keep document metadata") {
       val checked = for
         limit <- result(ByteLimit.mebibytes(1))

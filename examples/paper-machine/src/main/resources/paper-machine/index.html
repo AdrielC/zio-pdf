@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#142d3d" />
+    <title>Paper Machine · Kyo PDF studio</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <!--
+THESIS: A PDF as a live circuit: its structure and visible pages together.
+OWN-WORLD: Navy measurement field, electric-yellow active signals, cool white bench,
+Chivo lettering, square instrument controls and orthogonal reference traces.
+STORY: Start with synthetic field notes; inspect an object; assemble a new page order;
+download a real PDF rewritten by Kyo PDF.
+FIRST VIEWPORT: Product bar, large title and file action; broad object map to the left,
+rendered page bench to the right. Dictionary and assembly sit directly below.
+FORM: Circuit network analyzer, grounded direction 6, seed c3792202. Brief delegates
+the choice. Code-first. Signature: selecting a page energizes its reference traces.
+FINISH: Preview, map and dictionary stay synchronized. Mobile stacks the instrument;
+all actions work with a keyboard. Motion respects reduced-motion preferences.
+-->
+    <a class="skip-link" href="#workspace">Skip to studio</a>
+    <header class="masthead">
+      <a class="wordmark" href="/" aria-label="Paper Machine home"
+        ><svg viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M3 5h17v9H3zM12 18h17v9H12zM20 9h8v9M12 23H4v-9" /></svg
+        >Paper Machine<span class="brand-dot"></span
+      ></a>
+      <span class="byline"
+        >A working experiment with
+        <a
+          href="https://github.com/AdrielC/zio-pdf"
+          target="_blank"
+          rel="noreferrer"
+          >Kyo PDF</a
+        ></span
+      >
+      <span class="local"><span></span> Runs on your machine</span>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="studio-title">
+        <div>
+          <h1 id="studio-title">A PDF. Wide open.</h1>
+          <p>Follow the objects. Find the connections. Make a different cut.</p>
+        </div>
+        <div class="open-actions">
+          <button class="button primary" id="open" data-busy>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 16V4m-5 5 5-5 5 5M4 15v5h16v-5" /></svg
+            >Open a PDF
+          </button>
+          <input id="file" type="file" accept="application/pdf,.pdf" hidden />
+          <span>Local files · up to 12 MiB · 64 pages</span>
+        </div>
+      </section>
+
+      <div class="notice" id="notice" role="status" aria-live="polite">
+        Starting the instrument…
+      </div>
+      <div class="filebar">
+        <div class="document-label">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 3h9l5 5v13H5zM14 3v6h5M8 13h8m-8 4h5" /></svg
+          ><strong id="filename">Loading specimen</strong
+          ><span id="filemeta"></span>
+        </div>
+        <button class="text-button" id="sample" data-busy>
+          Reset to sample
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 18 18 6M6 6h12v12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="workspace" id="workspace">
+        <section class="instrument" aria-labelledby="map-title">
+          <div class="instrument-heading">
+            <div>
+              <h2 id="map-title">The object map</h2>
+              <p id="map-summary">Reading the document graph</p>
+            </div>
+            <span class="live-label">LIVE STRUCTURE</span>
+          </div>
+          <div class="graph-scroll" id="graph-scroll">
+            <svg
+              id="graph"
+              viewBox="0 0 720 440"
+              role="group"
+              aria-label="PDF object graph"
+            ></svg>
+          </div>
+          <div class="legend">
+            <span><i class="page-key"></i>Page</span
+            ><span><i class="stream-key"></i>Stream</span
+            ><span><i class="other-key"></i>Structure</span
+            ><span class="graph-help"
+              ><span class="desktop-help">Select an object to trace it</span
+              ><span class="mobile-help">Scroll the map to explore</span></span
+            >
+          </div>
+        </section>
+
+        <section class="bench" aria-labelledby="bench-title">
+          <div class="section-heading">
+            <h2 id="bench-title">The page bench</h2>
+            <div class="page-nav">
+              <button
+                class="icon-button"
+                id="previous"
+                aria-label="Previous page"
+                disabled
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m14 6-6 6 6 6" />
+                </svg></button
+              ><span id="page-counter">— / —</span
+              ><button
+                class="icon-button"
+                id="next"
+                aria-label="Next page"
+                disabled
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m10 6 6 6-6 6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="page-stage" id="page-stage">
+            <img id="preview" alt="Rendered PDF page" hidden />
+            <p id="preview-message">Preparing the sample PDF…</p>
+          </div>
+          <div class="preview-caption">
+            <span id="page-ref">Actual PDF preview</span
+            ><button class="text-button" id="inspect-page" disabled>
+              Inspect this page
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 18 18 6M6 6h12v12" />
+              </svg>
+            </button>
+          </div>
+          <div class="source-heading">
+            <h3>Source pages</h3>
+            <span>Choose a page to look closer</span>
+          </div>
+          <div
+            class="source-pages"
+            id="source-pages"
+            aria-label="Source pages"
+          ></div>
+        </section>
+
+        <section class="inspector" aria-labelledby="inspector-title">
+          <div class="section-heading">
+            <h2 id="inspector-title">Inside the object</h2>
+            <label class="sr-only" for="object-select">Choose an object</label
+            ><select id="object-select" aria-label="Choose an object">
+              <option>Loading…</option>
+            </select>
+          </div>
+          <div class="inspector-meta">
+            <strong id="object-kind">Dictionary</strong
+            ><span id="object-size"></span
+            ><button class="text-button" id="trailer" disabled>
+              View trailer
+            </button>
+          </div>
+          <pre id="syntax" tabindex="0" aria-label="PDF dictionary syntax">
+The selected object's dictionary will appear here.</pre
+          >
+          <div class="references">
+            <span id="reference-label">REFERENCES</span>
+            <div id="references"></div>
+          </div>
+        </section>
+
+        <section class="assembly" aria-labelledby="assembly-title">
+          <div class="section-heading">
+            <h2 id="assembly-title">Make your own cut.</h2>
+            <button class="text-button" id="restore" disabled>
+              Restore order
+            </button>
+          </div>
+          <p class="assembly-description">
+            Move or remove pages. Add them back from the page bench.
+          </p>
+          <ol
+            class="sequence"
+            id="sequence"
+            aria-label="Output page order"
+          ></ol>
+          <div class="assembly-footer">
+            <span id="selection-summary">Choose pages for your output</span
+            ><button class="button build" id="build" data-busy disabled>
+              Build PDF
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12h16m-6-6 6 6-6 6" />
+              </svg>
+            </button>
+          </div>
+          <div class="result" id="result" hidden>
+            <div>
+              <strong>Your new cut is ready.</strong
+              ><span id="result-summary"></span>
+            </div>
+            <a
+              class="button primary"
+              id="download"
+              download="paper-machine-remix.pdf"
+              >Download PDF
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v13m-5-5 5 5 5-5M4 20h16" /></svg
+            ></a>
+          </div>
+        </section>
+      </div>
+      <footer>
+        <p>PDF structure &amp; rewriting by Kyo PDF. Previews by PDFBox.</p>
+        <p id="sample-note">
+          The built-in field notes are synthetic vector artwork.
+        </p>
+        <a
+          href="https://github.com/AdrielC/zio-pdf"
+          target="_blank"
+          rel="noreferrer"
+          >Explore the source
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 18 18 6M6 6h12v12" /></svg
+        ></a>
+      </footer>
+    </main>
+  </body>
+</html>

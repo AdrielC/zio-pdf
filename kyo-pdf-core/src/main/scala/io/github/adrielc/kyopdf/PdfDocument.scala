@@ -163,6 +163,17 @@ object PdfPages:
       else rebuild(document, pages.slice(first - 1, last)).fold(Abort.fail, identity)
     }
 
+  /** Select distinct, 1-based pages in the requested output order. */
+  def select(document: PdfDocument, pageNumbers: Vector[Int]): PdfDocument < Abort[PdfError] =
+    pageEntries(document).map { pages =>
+      if pageNumbers.isEmpty then Abort.fail(PdfError.InvalidPdf("Select at least one PDF page"))
+      else if pageNumbers.distinct.length != pageNumbers.length then
+        Abort.fail(PdfError.InvalidPdf("PDF page selection contains duplicate page numbers"))
+      else pageNumbers.find(number => number < 1 || number > pages.length) match
+        case Some(number) => Abort.fail(PdfError.InvalidPageRange(number, number, pages.length))
+        case None => rebuild(document, pageNumbers.map(number => pages(number - 1))).fold(Abort.fail, identity)
+    }
+
   private def rebuild(document: PdfDocument, selected: Vector[(ObjectRef, Dict)]): Either[PdfError, PdfDocument] =
     val objects = document.byRef
     val selectedRefs = selected.map(_._1)
@@ -178,7 +189,8 @@ object PdfPages:
           found <- result
           original <- objects.get(ref).toRight(PdfError.InvalidPdf(s"Selected page object ${ref.number} is missing"))
           index <- mapping.get(ref).toRight(PdfError.InvalidPdf(s"Selected page object ${ref.number} was not mapped"))
-        yield found :+ PdfObject(index, rewrite(page.removed("Parent").updated("Parent", Ref(ObjectRef(2))), mapping), original.stream)
+        // New references belong to the output graph, outside the source remapping domain.
+        yield found :+ PdfObject(index, rewriteDictionary(page.removed("Parent"), mapping).updated("Parent", Ref(ObjectRef(2))), original.stream)
       }
       dependencyObjects <- dependencies.foldLeft[Either[PdfError, Vector[PdfObject]]](Right(Vector.empty)) { (result, ref) =>
         for
@@ -193,15 +205,13 @@ object PdfPages:
           mapped <- mapping.get(ref).toRight(PdfError.InvalidPdf(s"Selected page object ${ref.number} was not mapped"))
         yield found :+ Ref(mapped)
       }
-      rewrittenCatalog = rewrite(catalog.removed("Pages"), mapping) match
-        case value: Dict => value
-        case _ => catalog.removed("Pages")
+      rewrittenCatalog = rewriteDictionary(catalog.removed("Pages"), mapping)
       catalogObject = PdfObject(ObjectRef(1), rewrittenCatalog.updated("Pages", Ref(ObjectRef(2))))
       pagesObject = PdfObject(ObjectRef(2), dict(
         "Type" -> Name("Pages"),
         "Kids" -> Array(kids),
         "Count" -> Number(BigDecimal(selected.length))))
-      rewrittenTrailer = (Dict(trailer.fields.map(field => field.copy(value = rewrite(field.value, mapping)))): Dict)
+      rewrittenTrailer = rewriteDictionary(trailer, mapping)
     yield PdfDocument(document.version, Vector(catalogObject, pagesObject) ++ selectedObjects ++ dependencyObjects,
       rewrittenTrailer.updated("Root", Ref(ObjectRef(1))).updated("Size", Number(BigDecimal(mapping.size + 3))))
 
@@ -227,10 +237,13 @@ object PdfPages:
       _ <- refs(trailer).foldLeft[Either[PdfError, Unit]](Right(()))((result, ref) => result.flatMap(_ => visit(ref)))
     yield retained.toVector
 
+  private def rewriteDictionary(value: Dict, mapping: Map[ObjectRef, ObjectRef]): Dict =
+    Dict(value.fields.map(field => field.copy(value = rewrite(field.value, mapping))))
+
   private def rewrite(value: PdfValue, mapping: Map[ObjectRef, ObjectRef]): PdfValue = value match
     case Ref(ref) => Ref(mapping.getOrElse(ref, ref))
     case Array(values) => Array(values.map(rewrite(_, mapping)))
-    case Dict(fields) => Dict(fields.map(field => field.copy(value = rewrite(field.value, mapping))))
+    case value: Dict => rewriteDictionary(value, mapping)
     case other => other
 
   private def refs(value: PdfValue): Vector[ObjectRef] = value match
