@@ -1,4 +1,4 @@
-package com.tybera.kyopdf
+package io.github.adrielc.kyopdf
 
 import kyo.{Abort, Schema, <}
 

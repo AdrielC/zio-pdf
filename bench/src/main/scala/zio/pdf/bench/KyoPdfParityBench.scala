@@ -3,7 +3,7 @@ package zio.pdf.bench
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
 import scala.compiletime.uninitialized
-import com.tybera.kyopdf.{ByteLimit as KyoByteLimit, PdfDocument, PdfError}
+import io.github.adrielc.kyopdf.{ByteLimit as KyoByteLimit, PdfDocument, PdfError}
 import kyo.{Abort, Result}
 import zio.{Chunk, Runtime, Unsafe}
 import zio.pdf.{ByteLimit, PdfEngine}

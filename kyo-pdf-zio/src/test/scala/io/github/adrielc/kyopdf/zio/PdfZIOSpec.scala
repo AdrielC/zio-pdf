@@ -1,7 +1,7 @@
-package com.tybera.kyopdf.zio
+package io.github.adrielc.kyopdf.zio
 
 import java.nio.charset.StandardCharsets.ISO_8859_1
-import com.tybera.kyopdf.{ByteLimit, Facts, PdfError, RetentionLimits}
+import io.github.adrielc.kyopdf.{ByteLimit, Facts, PdfError, RetentionLimits}
 import _root_.zio.stream.ZStream
 import _root_.zio.test.*
 
@@ -40,7 +40,7 @@ object PdfZIOSpec extends ZIOSpecDefault:
       yield assertTrue(result.left.exists(_.isInstanceOf[PdfError.TooLarge]))
     },
     test("a parser effect can be reused across direct and ZIO-lifted scans") {
-      val direct = kyo.Abort.run[PdfError](ByteLimit.mebibytes(1).map(limit => com.tybera.kyopdf.PdfParser.scan(bytes, limit))).eval
+      val direct = kyo.Abort.run[PdfError](ByteLimit.mebibytes(1).map(limit => io.github.adrielc.kyopdf.PdfParser.scan(bytes, limit))).eval
       for
         limit <- PdfZIO.run(kyo.Async.defer(ByteLimit.mebibytes(1)))
         first <- PdfZIO.scanStream(ZStream.fromIterable(bytes), limit)

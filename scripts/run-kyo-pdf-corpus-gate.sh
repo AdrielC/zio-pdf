@@ -18,4 +18,4 @@ if [[ ! -d $corpus_dir ]]; then
 fi
 
 corpus_dir=$(cd "$corpus_dir" && pwd -P)
-KYO_PDF_CORPUS_DIR=$corpus_dir sbt -batch 'kyoPdf/testOnly com.tybera.kyopdf.ExternalCorpusSpec'
+KYO_PDF_CORPUS_DIR=$corpus_dir sbt -batch 'kyoPdf/testOnly io.github.adrielc.kyopdf.ExternalCorpusSpec'

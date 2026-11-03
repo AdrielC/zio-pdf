@@ -7,3 +7,8 @@ fiber.
 
 This module is deliberately one-way: the PDF implementation lives in
 `kyo-pdf`; ZIO is an application-edge adapter.
+
+Import the adapter as `io.github.adrielc.kyopdf.zio.PdfZIO`. Earlier Kyo
+pre-release consumers must update imports and dependency organization and
+recompile; see the root README for migration details and source-build
+coordinates.
