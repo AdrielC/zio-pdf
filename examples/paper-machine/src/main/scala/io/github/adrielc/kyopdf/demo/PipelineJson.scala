@@ -83,6 +83,13 @@ object PipelineJson:
       case "file" => Kind.File
       case "receipt" => Kind.Receipt
       case _ => errors += issue(s"$path.kind", "Choose document, file or receipt"); Kind.Document
+    def portKinds(node: JsonObject, path: String): Vector[Kind] =
+      strings(node, "kinds", path).zipWithIndex.map { (value, index) => value match
+        case "document" => Kind.Document
+        case "file" => Kind.File
+        case "receipt" => Kind.Receipt
+        case _ => errors += issue(s"$path.kinds[$index]", "Choose document, file or receipt"); Kind.Document
+      }
     def predicate(value: JsonElement, path: String): Predicate =
       val test = obj(value, path)
       val kind = string(test, "kind", path)
@@ -118,6 +125,8 @@ object PipelineJson:
         case "validate" => (Op.Validate(strings(node, "profiles", path)), Set("profiles"))
         case "choose" => (Op.Choose(predicate(node.get("test"), s"$path.test"), portKind(node, path)), Set("test", "kind"))
         case "stop" => (Op.Stop(string(node, "message", path), portKind(node, path)), Set("message", "kind"))
+        case "keep" => (Op.Keep(integer(node, "index", path), portKinds(node, path)), Set("index", "kinds"))
+        case "stop-after" => (Op.StopAfter(string(node, "message", path), portKinds(node, path), portKind(node, path)), Set("message", "kinds", "kind"))
         case _ => errors += issue(s"$path.op", "Choose a supported PDF, validation, choose or stop operation"); (Op.Write, Set.empty)
       keys(node, Set("id", "op", "inputs") ++ fields, path)
       Node(id, op, inputs)
@@ -143,6 +152,8 @@ object PipelineJson:
         case Op.Validate(profiles) => ("validate", s",\"profiles\":${strings(profiles)}")
         case Op.Choose(test, kind) => ("choose", s",\"test\":${predicate(test)},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")
         case Op.Stop(message, kind) => ("stop", s",\"message\":${PaperMachine.quote(message)},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")
+        case Op.Keep(index, kinds) => ("keep", s",\"index\":$index,\"kinds\":${strings(kinds.map(_.toString.toLowerCase))}")
+        case Op.StopAfter(message, kinds, kind) => ("stop-after", s",\"message\":${PaperMachine.quote(message)},\"kinds\":${strings(kinds.map(_.toString.toLowerCase))},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")
       s"{\"id\":${PaperMachine.quote(node.id)},\"op\":${PaperMachine.quote(kind)},\"inputs\":${strings(node.inputs)}$settings}"
     }.mkString("[", ",", "]")
     s"{\"version\":${recipe.version},\"name\":${PaperMachine.quote(recipe.name)},\"nodes\":$nodes,\"outputs\":${strings(recipe.outputs)}}"

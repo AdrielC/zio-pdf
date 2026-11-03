@@ -101,7 +101,8 @@ The first conditional example also compiles from real Volga SMC wiring.
   operations with dashes; the results explain each decision and list the executed
   and skipped IDs, validation passes, checked profiles and exact byte hashes.
 
-Version 1 recipes remain readable; choices and stops use version 2. In static
+Version 1 and 2 recipes remain readable. Version 3 preserves arrow projections and
+stops that evaluate their inputs first. In static
 graphs, identical bytes share a pass across the requested profiles. Conditional
 graphs check only demanded profiles and reuse completed checks when they cover the
 same bytes and profiles. At most three validation passes may start per run; combine
@@ -109,7 +110,9 @@ profiles in one validation operation when several checks are needed together.
 
 The [pipeline module](../../kyo-pdf-pipeline/README.md) also offers typed Scala
 authoring and a Kyo interpreter. The example's `PipelineWiring.scala` demonstrates
-actual Volga authoring compiled to the same data. Graphs execute sequentially;
+actual Volga SMC authoring over typed `PdfArrow[A, B]` operations, compiled to the
+same data. Arrows support composition, tensor products, explicit forks, typed joins
+and reusable conditional branches; mismatched types are rejected during construction. Graphs execute sequentially;
 unselected and unreachable nodes are skipped and dead intermediates released. The editor supports
 24 operations, four separately retained input PDFs and eight file/receipt outputs.
 Each PDF is limited to 64 pages and 12 MiB. Counted live payload is capped at 64 MiB

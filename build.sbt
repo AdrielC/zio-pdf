@@ -141,8 +141,11 @@ lazy val paperMachine = (project in file("examples/paper-machine"))
     libraryDependencies ++= List(
       "org.apache.pdfbox" % "pdfbox" % "3.0.4",
       "org.verapdf" % "validation-model" % "1.30.3",
-      "com.google.code.gson" % "gson" % "2.13.1"
+      "com.google.code.gson" % "gson" % "2.13.1",
+      "dev.zio" %% "zio-test" % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt" % zioVersion % Test
     ),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     Compile / mainClass := Some("io.github.adrielc.kyopdf.demo.PaperMachine")
   )
 

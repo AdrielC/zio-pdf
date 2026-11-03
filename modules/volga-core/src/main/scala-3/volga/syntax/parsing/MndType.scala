@@ -21,7 +21,12 @@ object MndType:
         new:
             def empty                                = typing.one
             extension (x: MndType[q, TypeRepr])
-                def combine(y: MndType[q, TypeRepr]) = AppliedType(typing.tensor, List(x, y))
+                def combine(y: MndType[q, TypeRepr]) =
+                    // Reduce the actual universe product instead of leaving an applied
+                    // type lambda in adaptation evidence (notably for Scala tuples).
+                    (x.asType, y.asType) match
+                        case ('[a], '[b]) => typing.tensorT[a, b]
+                        case _ => report.errorAndAbort("SMC tensor operands must be value types")
 end MndType
 
 type MndType[q <: Quotes & Singleton, TR] = MndType.MndType[q, TR]

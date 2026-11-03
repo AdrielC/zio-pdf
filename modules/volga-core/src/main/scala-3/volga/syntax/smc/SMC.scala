@@ -24,6 +24,7 @@ abstract final class V[T]
 type Reconstruct[U[_], X] = X match
     case V[a]       => a
     case EmptyTuple => U[tags.One]
+    case h *: EmptyTuple => Reconstruct[U, h]
     case h *: t     => U[tags.Tensor[Reconstruct[U, h], Reconstruct[U, t]]]
     case Unit       => U[tags.One]
     case EmptyTuple => U[tags.One]
@@ -31,8 +32,9 @@ type Reconstruct[U[_], X] = X match
 type TResults[U[_], X] <: Tuple = X match
     case Nat.Zero             => EmptyTuple
     case Nat.Succ[n]          => V[Nat.`1`] *: TResults[U, n]
-    case U[tags.Tensor[u, v]] => Results[U, u] *: TResults[U, v]
-    case U[tags.One]          => EmptyTuple
+    // Concrete tuple/unit patterns remain reducible under Scala 3.8's match-type rules.
+    case (u, v)              => Results[U, u] *: TResults[U, v]
+    case Unit                => EmptyTuple
     case _                    => V[X] *: EmptyTuple
 
 type Results[U[_], X] = X match
@@ -40,16 +42,26 @@ type Results[U[_], X] = X match
     // A single wire composes directly with the next unary operation.
     case Nat.Succ[Nat.Zero]    => V[Nat.`1`]
     case Nat.Succ[n]          => V[Nat.`1`] *: TResults[U, n]
-    case U[tags.Tensor[u, v]] => Results[U, u] *: TResults[U, v]
-    case U[tags.One]          => Unit
+    case (u, v)              => Results[U, u] *: TResults[U, v]
+    case Unit                => Unit
     case _                    => V[X]
 
 final abstract class SyApp[H[_, _], U[_]] extends Aliases[H, U]:
     extension [A, B](f: H[A, B]) def apply(v: V[A]): Results[U, B]
+    // Typed Scala products coexist with the arity-only PROP overloads below.
+    extension [A, B, C](f: H[(A, B), C])
+        @scala.annotation.targetName("applyTensor2")
+        def apply(a: V[A], b: V[B]): Results[U, C]
+    extension [A, B, C, D](f: H[((A, B), C), D])
+        @scala.annotation.targetName("applyTensor3")
+        def apply(a: V[A], b: V[B], c: V[C]): Results[U, D]
+    extension [A, B, C, D, E](f: H[(((A, B), C), D), E])
+        @scala.annotation.targetName("applyTensor4")
+        def apply(a: V[A], b: V[B], c: V[C], d: V[D]): Results[U, E]
     extension [B](f: H[Nat.`2`, B]) def apply(a: V[Nat.`1`], b: V[Nat.`1`]): Results[U, B]
     extension [B](f: H[Nat.OfInt[3], B]) def apply(a: V[Nat.`1`], b: V[Nat.`1`], c: V[Nat.`1`]): Results[U, B]
     extension [B](f: H[Nat.OfInt[4], B]) def apply(a: V[Nat.`1`], b: V[Nat.`1`], c: V[Nat.`1`], d: V[Nat.`1`]): Results[U, B]
-    extension [B](f: H[I, B]) def apply(): V[B]
+    extension [B](f: H[I, B]) def apply(): Results[U, B]
 
 trait TEq[A1 <: AnyKind, A2 <: AnyKind]
 

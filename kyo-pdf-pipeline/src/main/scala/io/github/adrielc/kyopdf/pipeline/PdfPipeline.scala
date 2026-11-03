@@ -30,12 +30,17 @@ object PdfPipeline:
     case Validate(profiles: Vector[String])
     case Choose(test: Predicate, kind: Kind = Kind.Document)
     case Stop(message: String, kind: Kind = Kind.Document)
+    /** Arrow projections retain evaluation of every input before selecting a value. */
+    case Keep(index: Int, kinds: Vector[Kind])
+    case StopAfter(message: String, kinds: Vector[Kind], kind: Kind = Kind.Document)
 
     def output: Kind = this match
       case Write => Kind.File
       case Validate(_) => Kind.Receipt
       case Choose(_, kind) => kind
       case Stop(_, kind) => kind
+      case Keep(index, kinds) => kinds.lift(index).getOrElse(Kind.Document)
+      case StopAfter(_, _, kind) => kind
       case _ => Kind.Document
     def input: Kind = this match
       case Choose(test, _) => test.input
@@ -48,7 +53,7 @@ object PdfPipeline:
       * IDs are namespaced; no runtime closures or hidden references are introduced.
       */
     def include(prefix: String, fragment: Recipe, bindings: Map[String, String]): Either[Vector[Issue], Recipe] =
-      if !Set(1, 2)(fragment.version) then return Left(Vector(Issue("fragment.version", Code.Version, "Use recipe version 1 or 2")))
+      if !Set(1, 2, 3)(fragment.version) then return Left(Vector(Issue("fragment.version", Code.Version, "Use recipe version 1, 2 or 3")))
       check(fragment) match
         case Left(issues) => return Left(issues.map(issue => issue.copy(path = "fragment." + issue.path)))
         case _ => ()
@@ -80,7 +85,7 @@ object PdfPipeline:
   def check(recipe: Recipe): Either[Vector[Issue], Checked] =
     val issues = Vector.newBuilder[Issue]
     def add(path: String, code: Code, message: String): Unit = issues += Issue(path, code, message)
-    if !Set(1, 2)(recipe.version) then add("version", Code.Version, "Use recipe version 1 or 2")
+    if !Set(1, 2, 3)(recipe.version) then add("version", Code.Version, "Use recipe version 1, 2 or 3")
     if recipe.name.trim.isEmpty || !line(recipe.name, 80) then add("name", Code.Setting, "Give the recipe a single-line name up to 80 characters")
     if recipe.nodes.isEmpty || recipe.nodes.length > MaxNodes then add("nodes", Code.Limit, s"Use 1 to $MaxNodes nodes")
     if recipe.outputs.isEmpty || recipe.outputs.length > MaxOutputs || recipe.outputs.distinct != recipe.outputs then
@@ -90,6 +95,14 @@ object PdfPipeline:
       if !identifier(node.id) then add(s"$path.id", Code.Identifier, "Use a letter followed by up to 47 letters, digits, hyphens or underscores")
       if node.inputs.length > 4 then add(s"$path.inputs", Code.Limit, "A node may have at most four inputs")
       node.op match
+        case Op.Keep(index, kinds) =>
+          if recipe.version < 3 then add(s"$path.op", Code.Version, "Keep requires recipe version 3")
+          if kinds.isEmpty || kinds.length > 4 then add(s"$path.kinds", Code.Setting, "Use one to four input kinds")
+          if index < 0 || index >= kinds.length then add(s"$path.index", Code.Setting, "Keep an existing zero-based input")
+        case Op.StopAfter(message, kinds, _) =>
+          if recipe.version < 3 then add(s"$path.op", Code.Version, "Stop after inputs requires recipe version 3")
+          if kinds.isEmpty || kinds.length > 4 then add(s"$path.kinds", Code.Setting, "Use one to four input kinds")
+          if message.trim.isEmpty || !line(message, 160) then add(s"$path.message", Code.Setting, "Give the stop a single-line reason up to 160 characters")
         case Op.Choose(test, _) =>
           if recipe.version < 2 then add(s"$path.op", Code.Version, "Choose requires recipe version 2")
           test match
@@ -118,6 +131,8 @@ object PdfPipeline:
         case Op.Input(_) | Op.Stop(_, _) => node.inputs.isEmpty
         case Op.Choose(_, _) => node.inputs.length == 4
         case Op.Assemble(_) => node.inputs.nonEmpty && node.inputs.length <= 4
+        case Op.Keep(_, kinds) => node.inputs.length == kinds.length
+        case Op.StopAfter(_, kinds, _) => node.inputs.length == kinds.length
         case _ => node.inputs.length == 1
       if !validArity then add(s"$path.inputs", Code.Arity, "Inputs do not match this operation's ports")
     }
@@ -136,6 +151,8 @@ object PdfPipeline:
           case Some(source) =>
             val expected = node.op match
               case Op.Choose(_, kind) if port > 0 => kind
+              case Op.Keep(_, kinds) => kinds(port)
+              case Op.StopAfter(_, kinds, _) => kinds(port)
               case _ => node.op.input
             if source.op.output != expected then add(s"nodes[$index].inputs[$port]", Code.Type,
               s"${node.id} needs $expected at port ${port + 1}; $id produces ${source.op.output}")
@@ -295,6 +312,8 @@ object PdfPipeline:
                 case Op.Stamp(text, placement) => services.stamp(document(), text, placement).map(Value.Document.apply)
                 case Op.NumberPages(start, style, prefix) => services.number(document(), start, style, prefix).map(Value.Document.apply)
                 case Op.Write => PdfWriter.write(document()).map(Value.File.apply)
+                case Op.Keep(index, _) => args(index)
+                case Op.StopAfter(message, _, _) => Abort.fail(PdfError.InvalidPdf(s"Pipeline stopped at $id: $message"))
                 case Op.Validate(profiles) => args.head match
                   case Value.File(bytes) => services.validationReport(bytes, profiles).map(report => Value.Receipt(report.json, report.verdicts))
                   case _ => Abort.fail(PdfError.InvalidPdf("Checked file port changed type"))

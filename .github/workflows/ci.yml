@@ -52,7 +52,7 @@ jobs:
       - name: Run verified test suites
         run: |
           npm ci
-          sbt -batch ';kyoPdf/testFull;kyoPdfZio/testFull;kyoPdfPipeline/testFull;paperMachine/compile;root/testFull;scalaJs/testFull;bench/testFull'
+          sbt -batch ';kyoPdf/testFull;kyoPdfZio/testFull;kyoPdfPipeline/testFull;paperMachine/testFull;root/testFull;scalaJs/testFull;bench/testFull'
 
       - name: Package API and documentation
         run: sbt -batch ';kyoPdf/package;kyoPdfZio/package;kyoPdfPipeline/package;root/package;root/packageDoc;scalaJs/package'

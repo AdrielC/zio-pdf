@@ -1,86 +1,71 @@
 package io.github.adrielc.kyopdf.demo
 
-import io.github.adrielc.kyopdf.pipeline.PdfPipeline.*
-import volga.SymmetricCat
+import io.github.adrielc.kyopdf.pipeline.{PdfArrow, PdfPipeline}
+import PdfArrow.*
+import volga.{Iso, MonoidalObjects, SymmetricCat}
 import volga.syntax.smc
-import volga.free.{FreeProp, Nat, PropOb}
+import volga.tags
 
-/** Real Volga SMC authoring compiled to the portable recipe, including fork/join.
-  * Volga checks port counts; PdfPipeline.check also checks payload kinds/settings.
-  */
+/** The actual Volga category and SMC macro over typed, reusable PDF arrows. */
 object PipelineWiring:
-  final case class Step[I, O](id: String, op: Option[Op])
-  type Diagram[I, O] = FreeProp[Step, I, O]
-  given SymmetricCat[Diagram, PropOb] = FreeProp.propCat[Step]
-  val syntax = smc.syntax[Diagram, PropOb, Nat.Plus]
-  def source(id: String, slot: String): Diagram[Nat.`0`, Nat.`1`] = FreeProp.Embed(Step(id, Some(Op.Input(slot))))
-  def step(id: String, op: Op): Diagram[Nat.`1`, Nat.`1`] = FreeProp.Embed(Step(id, Some(op)))
-  def join(id: String, catalog: Int = 0): Diagram[Nat.`2`, Nat.`1`] = FreeProp.Embed(Step(id, Some(Op.Assemble(catalog))))
-  def choose(id: String, test: Predicate, kind: Kind = Kind.Document): Diagram[Nat.OfInt[4], Nat.`1`] =
-    FreeProp.Embed(Step(id, Some(Op.Choose(test, kind))))
-  def stop(id: String, message: String, kind: Kind = Kind.Document): Diagram[Nat.`0`, Nat.`1`] =
-    FreeProp.Embed(Step(id, Some(Op.Stop(message, kind))))
-  val fork: Diagram[Nat.`1`, Nat.`2`] = FreeProp.Embed(Step("fork", None))
+  type Objects[T] = T match
+    case tags.Obj[a] => Ports[a]
+    case tags.One => Unit
+    case tags.Tensor[a, b] => (a, b)
 
-  def recipe[N: Nat](name: String, diagram: Diagram[Nat.`0`, N]): Either[Vector[Issue], Recipe] =
-    val nodes = Vector.newBuilder[Node]
-    def count(n: Nat[?]): Int = n match
-      case Nat.Zero() => 0
-      case Nat.Succ(previous) => 1 + count(previous)
-    def walk[A: Nat, B: Nat](value: Diagram[A, B], inputs: Vector[String]): Vector[String] = value match
-      case FreeProp.Id() => inputs
-      case FreeProp.Embed(step) => step.op match
-        case None => Vector(inputs.head, inputs.head)
-        case Some(op) =>
-          nodes += Node(step.id, op, inputs)
-          Vector(step.id)
-      case FreeProp.AndThen(first, second, middle) =>
-        walk(second, walk(first, inputs)(using summon[Nat[A]], middle))(using middle, summon[Nat[B]])
-      case FreeProp.Par(left, right, a, b, c, d) =>
-        walk(left, inputs.take(count(a)))(using a, b) ++ walk(right, inputs.drop(count(a)))(using c, d)
-      case FreeProp.Swap(a, _) => inputs.drop(count(a)) ++ inputs.take(count(a))
-    val outputs = walk(diagram, Vector.empty)
-    val items = nodes.result()
-    val version = if items.exists(n => n.op.isInstanceOf[Op.Choose] || n.op.isInstanceOf[Op.Stop]) then 2 else 1
-    val result = Recipe(version, name, items, outputs)
-    check(result).map(_.recipe)
+  given objects: MonoidalObjects[Objects] with
+    given unitOb: Ports[Unit] = Ports.unit
+    given tensorOb[A: Ports, B: Ports]: Ports[(A, B)] = Ports.pair[A, B]
 
-  def example: Recipe =
-    val read = source("body", "body")
-    val select = step("cut", Op.Select(Vector(4, 1, 3)))
-    val stamp = step("stamp", Op.Stamp("DRAFT"))
-    val number = step("numbers", Op.NumberPages(1, "bates", "DOC-"))
-    val write = step("pdf", Op.Write)
-    val validate = step("checks", Op.Validate(Vector("3b", "2b", "3u")))
+  given category: SymmetricCat[PdfArrow, Objects] with
+    def identity[A: Ports]: PdfArrow[A, A] = PdfArrow.id[A]
+    def compose[A: Ports, B: Ports, C: Ports](f: PdfArrow[B, C], g: PdfArrow[A, B]): PdfArrow[A, C] = g >>> f
+    def tensor[A: Ports, B: Ports, C: Ports, D: Ports](f: PdfArrow[A, B], g: PdfArrow[C, D]): PdfArrow[(A, C), (B, D)] = f >< g
+    def assocLeft[A: Ports, B: Ports, C: Ports]: PdfArrow[(A, (B, C)), ((A, B), C)] = PdfArrow.assocLeft[A, B, C]
+    def braiding[A: Ports, B: Ports]: PdfArrow[(A, B), (B, A)] = PdfArrow.swap[A, B]
+    def leftUnit[A: Ports]: Iso[PdfArrow, Objects, (Unit, A), A] = Iso(PdfArrow.leftUnit[A], PdfArrow.spawnLeft[A])
+
+  val syntax = smc.syntax[PdfArrow, Objects, Tuple2]
+
+  def recipe[B](name: String, arrow: PdfArrow[Unit, B]): Either[Vector[PdfPipeline.Issue], PdfPipeline.Recipe] = PdfArrow.recipe(name, arrow)
+  private def checked[B](name: String, arrow: PdfArrow[Unit, B]): PdfPipeline.Recipe =
+    recipe(name, arrow).fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)
+
+  def example: PdfPipeline.Recipe =
+    val read = input("body")
+    val cut = select(4, 1, 3)
+    val mark = stamp("DRAFT")
+    val numbers = number(1, "bates", "DOC-")
+    val split = fork[File]
+    val checks = validate("3b", "2b", "3u")
     val graph = syntax.of0:
       val body = read()
-      val cut = select(body)
-      val marked = stamp(cut)
-      val numbered = number(marked)
+      val selected = cut(body)
+      val marked = mark(selected)
+      val numbered = numbers(marked)
       val bytes = write(numbered)
-      val (download, check) = fork(bytes)
-      val receipt = validate(check)
+      val (download, check) = split(bytes)
+      val receipt = checks(check)
       (download, receipt)
-    recipe("Marked packet", graph).fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)
+    checked("Marked packet", graph)
 
-  def conditionalExample: Recipe =
-    val read = source("body", "body")
-    val short = step("short", Op.Stamp("SHORT PACKET"))
-    val long = step("long", Op.Stamp("LONG PACKET"))
-    val unknown = stop("unknown", "The document page count could not be determined")
-    val route = choose("route", Predicate.PageCount(1, 3))
-    val write = step("pdf", Op.Write)
-    val checks = step("checks", Op.Validate(Vector("3b")))
+  def conditionalArrow: PdfArrow[Document, Document] =
+    choose(pages(1, 3))(
+      stamp("SHORT PACKET").named("short"),
+      stamp("LONG PACKET").named("long"),
+      stop[Document, Document]("The document page count could not be determined").named("unknown")
+    ).named("route")
+
+  def conditionalExample: PdfPipeline.Recipe =
+    val read = input("body")
+    val route = conditionalArrow
+    val split = fork[File]
+    val checks = validate("3b")
     val graph = syntax.of0:
       val body = read()
-      val (condition, branches) = fork(body)
-      val (small, large) = fork(branches)
-      val shortPacket = short(small)
-      val longPacket = long(large)
-      val unavailable = unknown()
-      val selected = route(condition, shortPacket, longPacket, unavailable)
+      val selected = route(body)
       val bytes = write(selected)
-      val (download, validate) = fork(bytes)
-      val receipt = checks(validate)
+      val (download, check) = split(bytes)
+      val receipt = checks(check)
       (download, receipt)
-    recipe("Route by page count", graph).fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)
+    checked("Route by page count", graph)

@@ -44,8 +44,9 @@ The confirmed workflow is code-first: build the working interface directly.
 - Pipelines are versioned data graphs with named PDF inputs, typed ports, selection,
   assembly, stamps, numbering, PDF writes and PDF/A receipts. The editor can save,
   load, capture packets and insert reusable saved recipes. Scala and Volga authoring
-  compile to the same model. Version 1 stays readable; version 2 adds nested,
-  three-way choices and explicit stop operations. Conditions use page-count ranges,
+  use immutable typed arrows and the actual Volga SMC category, compiling to the
+  same model. Version 2 adds nested three-way choices and explicit stops. Version 3
+  preserves input evaluation before projections and stops. Earlier recipes stay readable. Conditions use page-count ranges,
   metadata claims or completed validation verdicts, keeping unknown evidence separate.
   Only the selected path demands its inputs and operations. Graph execution is
   sequential; shared steps run once. Traces show decisions and skipped operations.

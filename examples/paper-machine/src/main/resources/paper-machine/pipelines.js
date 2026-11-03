@@ -21,9 +21,12 @@ const operationNames = {
   validate: "Validate PDF/A",
   choose: "Choose a path",
   stop: "Stop with reason",
+  keep: "Keep a value",
+  "stop-after": "Stop after inputs",
 };
 function pipelineKind(node) {
-  if (["choose", "stop"].includes(node.op)) return node.kind;
+  if (["choose", "stop", "stop-after"].includes(node.op)) return node.kind;
+  if (node.op === "keep") return node.kinds[node.index];
   return node.op === "write"
     ? "file"
     : node.op === "validate"
@@ -240,7 +243,18 @@ function drawPipelineGraph() {
   }
   $("pipeline-map-summary").textContent =
     `${recipe.nodes.length} operations · ${recipe.outputs.length} outputs`;
+  centerPipelineSelection();
 }
+function centerPipelineSelection() {
+  const scroll = $("pipeline-graph").parentElement;
+  const selected = scroll.querySelector(".pipeline-node.selected");
+  if (!selected || !scroll.clientWidth) return;
+  const node = selected.getBoundingClientRect();
+  const viewport = scroll.getBoundingClientRect();
+  scroll.scrollLeft += node.left + node.width / 2 - viewport.left - viewport.width / 2;
+  scroll.scrollTop += node.top + node.height / 2 - viewport.top - viewport.height / 2;
+}
+new ResizeObserver(centerPipelineSelection).observe($("pipeline-graph").parentElement);
 function pipelineField(label, control) {
   const wrapper = element("label", "", label);
   wrapper.append(control);
@@ -298,12 +312,16 @@ function drawPipelineEditor() {
     const count =
       node.op === "choose"
         ? 4
+        : ["keep", "stop-after"].includes(node.op)
+          ? node.kinds.length
         : node.op === "assemble"
           ? Math.max(1, node.inputs.length)
           : 1;
     for (let i = 0; i < count; i++) {
       const kind =
-        node.op === "choose"
+        ["keep", "stop-after"].includes(node.op)
+          ? node.kinds[i]
+          : node.op === "choose"
           ? i === 0
             ? node.test.kind === "validation"
               ? "receipt"
@@ -340,6 +358,8 @@ function drawPipelineEditor() {
                     "When not matched",
                     "When unknown",
                   ])[i]
+            : ["keep", "stop-after"].includes(node.op)
+              ? `Input ${i + 1} · ${kind}`
             : node.op === "assemble"
               ? `Input ${i + 1}`
               : `Input ${kind}`,
@@ -379,7 +399,7 @@ function drawPipelineEditor() {
       pipelineField(
         title,
         pipelineOptions(options, node[key], (value) => {
-          node[key] = key === "catalog" ? Number(value) : value;
+          node[key] = ["catalog", "index"].includes(key) ? Number(value) : value;
           if (key === "kind") {
             if (value === "document")
               recipe.outputs = recipe.outputs.filter((id) => id !== node.id);
@@ -398,6 +418,10 @@ function drawPipelineEditor() {
       ),
     );
   switch (node.op) {
+    case "keep":
+      choice("Value to keep", "index", node.kinds.map((kind, index) => [String(index), `Input ${index + 1} · ${kind}`]));
+      settings.append(element("p", "", "Evaluates every connected input, then keeps the selected value. Earlier operations still run."));
+      break;
     case "choose": {
       choice("Branch output kind", "kind", [
         ["document", "Document"],
@@ -471,6 +495,7 @@ function drawPipelineEditor() {
       break;
     }
     case "stop":
+    case "stop-after":
       text("Reason to stop", "message", "text", 160);
       choice("Branch output kind", "kind", [
         ["document", "Document"],
@@ -481,7 +506,9 @@ function drawPipelineEditor() {
         element(
           "p",
           "",
-          "Stops the run only if this operation is reached. Unselected stops stay skipped.",
+          node.op === "stop-after"
+            ? "Evaluates every connected input before stopping with this reason. Unselected stops stay skipped."
+            : "Stops the run only if this operation is reached. Unselected stops stay skipped.",
         ),
       );
       break;

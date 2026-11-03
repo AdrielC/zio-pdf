@@ -58,7 +58,7 @@ class PipelineTest(unittest.TestCase):
 
     def test_page_count_example_runs_only_the_selected_stamp(self):
         recipe = self.example('pages')
-        self.assertEqual(recipe['version'], 2)
+        self.assertEqual(recipe['version'], 3)
         status, checked = request('/api/pipelines/check', recipe)
         self.assertEqual(status, 200, checked)
         self.assertEqual(json.loads(checked)['recipe'], recipe)
@@ -94,7 +94,7 @@ class PipelineTest(unittest.TestCase):
         result = json.loads(data)
         self.assertEqual(result['decisions'][0]['outcome'], 'yes')
         self.assertEqual(result['validatorPasses'], 1)
-        self.assertEqual(set(result['skipped']), {'review', 'review-pdf', 'unable'})
+        self.assertEqual(set(result['skipped']), {'review-source', 'review', 'review-pdf', 'unable'})
         output, before, after = result['outputs']
         self.assertEqual(output['document']['sha256'], before['report']['sha256'])
         self.assertEqual(before['report']['checkedAt'], after['report']['checkedAt'])
@@ -181,7 +181,7 @@ class PipelineTest(unittest.TestCase):
         status, data = request('/api/pipelines/check', recipe)
         self.assertEqual(status, 400, data)
         self.assertIn('Version', [i['code'] for i in json.loads(data)['issues']])
-        recipe['version'] = 2
+        recipe['version'] = 3
         route = next(n for n in recipe['nodes'] if n['id'] == 'route')
         route['test']['min'] = 0
         route['test']['max'] = 99
@@ -201,6 +201,42 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(status, 200, checked)
         self.assertEqual(json.loads(checked)['recipe'], recipe)
         self.assertEqual(recipe['outputs'], ['pdf', 'checks'])
+
+    def test_arrow_projection_and_sequential_stop_round_trip_with_typed_ports(self):
+        recipe = {'version': 3, 'name': 'Arrow ports', 'nodes': [
+            {'id': 'body', 'op': 'input', 'slot': 'body', 'inputs': []},
+            {'id': 'pdf', 'op': 'write', 'inputs': ['body']},
+            {'id': 'checks', 'op': 'validate', 'profiles': ['3b'], 'inputs': ['pdf']},
+            {'id': 'keep', 'op': 'keep', 'index': 0, 'kinds': ['file', 'receipt'], 'inputs': ['pdf', 'checks']}],
+            'outputs': ['keep']}
+        status, data = request('/api/pipelines/check', recipe)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(json.loads(data)['recipe'], recipe)
+        status, data = self.run_recipe(recipe)
+        self.assertEqual(status, 200, data)
+        result = json.loads(data)
+        self.assertEqual(result['executed'], ['body', 'pdf', 'checks', 'keep'])
+        self.assertEqual(result['validatorPasses'], 1)
+        self.assertEqual(result['outputs'][0]['document']['sha256'], result['validationRuns'][0]['sha256'])
+        invalid = copy.deepcopy(recipe)
+        invalid['version'] = 2
+        self.assertIn('Version', [i['code'] for i in json.loads(request('/api/pipelines/check', invalid)[1])['issues']])
+        invalid['version'] = 3
+        invalid['nodes'][-1]['index'] = 9
+        self.assertIn('Setting', [i['code'] for i in json.loads(request('/api/pipelines/check', invalid)[1])['issues']])
+        invalid['nodes'][-1]['index'] = 0
+        invalid['nodes'][-1]['kinds'] = ['file', 'file']
+        self.assertIn('Type', [i['code'] for i in json.loads(request('/api/pipelines/check', invalid)[1])['issues']])
+        invalid['nodes'][-1]['kinds'][1] = 'arbitrary-class'
+        self.assertIn('Structure', [i['code'] for i in json.loads(request('/api/pipelines/check', invalid)[1])['issues']])
+        recipe['nodes'][-1] = {'id': 'keep', 'op': 'stop-after', 'message': 'Checked before stopping',
+                               'kind': 'file', 'kinds': ['receipt'], 'inputs': ['checks']}
+        status, data = request('/api/pipelines/check', recipe)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(json.loads(data)['recipe'], recipe)
+        status, data = self.run_recipe(recipe)
+        self.assertEqual(status, 400, data)
+        self.assertIn('Checked before stopping', json.loads(data)['error'])
 
     def test_strict_json_and_structural_limits(self):
         for raw in [b'{"version":1,"version":1}', b'{}{}', b'{"name":"\xff"}', b'[' * 18 + b']' * 18, b' ' * 32769]:
