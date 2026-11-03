@@ -16,9 +16,17 @@ libraryDependencies += "io.github.adrielc" %% "kyo-pdf"     % version
 libraryDependencies += "io.github.adrielc" %% "kyo-pdf-zio" % version // optional
 ```
 
-The Kyo modules are available from source builds and local publication. They
-are not yet included in the Maven Central release workflow; the coordinates
-above do not imply that a Kyo release is available from Maven Central.
+The JVM Kyo modules are available from source builds and local publication.
+For Scala Native 0.5 and Scala 3, the v0.3.0 release publishes the Kyo core:
+
+```scala
+libraryDependencies += "io.github.adrielc" % "kyo-pdf_native0.5_3" % "0.3.0"
+```
+
+Native builds require a Scala Native toolchain, Expat, and zlib. On Ubuntu,
+install `clang libexpat1-dev zlib1g-dev`; macOS provides the libraries in its
+SDK. The Native core parses, rewrites, and reads PDF/A declarations. The studio
+server and independent PDF/A validator still run on the JVM.
 
 The original `zio-pdf` implementation remains in this repository as a parity
 reference and compatibility implementation. It is not a dependency of the Kyo
@@ -113,9 +121,9 @@ libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.2.1" // JVM
 libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.2.1" // Scala.js
 ```
 
-The release workflow publishes the JVM and Scala.js `zio-pdf` artifacts.
-Kyo modules support local source builds. Examples, benchmarks, the browser
-application, and comparison benches are build-only projects.
+The release workflow publishes the JVM and Scala.js `zio-pdf` artifacts and,
+starting with v0.3.0, the Scala Native Kyo PDF core. Examples, benchmarks, the
+browser application, and comparison benches are build-only projects.
 
 ## Quick start
 
@@ -516,7 +524,10 @@ Plain `git clone` is enough — no submodules.
 
 ## Release process
 
-Tags matching `v*` run the complete test and package proof before `sbt-ci-release` signs and uploads both JVM and Scala.js artifacts. The workflow fails if Sonatype or PGP credentials are absent. It reads both coordinates back from Maven Central before creating the GitHub release.
+Tags matching `v*` require curated notes in `release-notes/<tag>.md`. The
+workflow tests the build and links an external Native consumer before
+`sbt-ci-release` signs and uploads the JVM, Scala.js, and Scala Native artifacts.
+It verifies all three coordinates on Maven Central before creating the GitHub release.
 
 ## License
 

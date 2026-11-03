@@ -77,3 +77,29 @@ jobs:
 
       - name: Prove external consumption
         run: bash scripts/verify-external-consumer.sh
+
+  native:
+    name: Scala Native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libexpat1-dev zlib1g-dev
+      - name: Install sbt
+        run: |
+          if ! command -v sbt >/dev/null 2>&1; then
+            curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
+            chmod +x /usr/local/bin/cs
+            cs install sbt
+          fi
+          echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
+      - name: Test and consume the Scala Native package
+        run: |
+          sbt --server -J-Xms256m -J-Xmx2g -Dsbt.server.autostart=false -batch kyoPdfNative/testFull
+          bash scripts/verify-native-consumer.sh

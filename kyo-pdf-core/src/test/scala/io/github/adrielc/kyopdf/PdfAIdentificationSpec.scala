@@ -66,6 +66,14 @@ object PdfAIdentificationSpec extends ZIOSpecDefault:
         xmp("<pdfaid:part>" + "3" * 65 + "</pdfaid:part>"))
       assertTrue(inputs.forall(xml => run(PdfAIdentification.inspect(document(xml.getBytes(UTF_8)))).state == PdfADeclarationState.Unreadable))
     },
+    test("UTF-16 DTDs and shallow documents exceeding the event budget are rejected") {
+      val dtd = "<!DOCTYPE x SYSTEM 'file:///unavailable'>" + xmp(declaration)
+      val many = "<x>" + "<y/>" * 25001 + "</x>"
+      assertTrue(
+        run(PdfAIdentification.inspect(document(dtd.getBytes(UTF_16)))).state == PdfADeclarationState.Unreadable,
+        run(PdfAIdentification.inspect(document(many.getBytes(UTF_8)))).state == PdfADeclarationState.Unreadable
+      )
+    },
     test("non-document RDF subjects cannot declare this PDF") {
       val xml = xmp(declaration).replace("r:about=\"\"", "r:about=\"urn:example:another-resource\"")
       assertTrue(run(PdfAIdentification.inspect(document(xml.getBytes(UTF_8)))).state == PdfADeclarationState.NotDeclared)

@@ -26,8 +26,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Install independent PDF validators
-        run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils
+      - name: Install PDF validators and Native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils clang libexpat1-dev zlib1g-dev
       - uses: coursier/cache-action@95e5b1029b6b86e7bac033ee44a0697d8a527d2d # v8.1.1
       - name: Install sbt
         run: |
@@ -47,6 +47,10 @@ jobs:
         run: bash scripts/audit-published-artifact.sh
       - name: Prove external consumption
         run: bash scripts/verify-external-consumer.sh
+      - name: Test and consume the Scala Native package
+        run: |
+          sbt --server -J-Xms256m -J-Xmx2g -Dsbt.server.autostart=false -batch kyoPdfNative/testFull
+          bash scripts/verify-native-consumer.sh
       - name: Validate generated PDF independently
         run: bash scripts/verify-generated-pdf.sh
 
@@ -58,7 +62,7 @@ jobs:
       PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-      CI_RELEASE: ';root/publishSigned;scalaJs/publishSigned'
+      CI_RELEASE: ';root/publishSigned;scalaJs/publishSigned;kyoPdfNative/publishSigned'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -86,7 +90,7 @@ jobs:
             exit 1
           fi
           sbt -batch ci-release
-      - name: Verify both artifacts from Maven Central
+      - name: Verify all artifacts from Maven Central
         shell: bash
         run: |
           set -euo pipefail
@@ -94,13 +98,14 @@ jobs:
           for attempt in $(seq 1 30); do
             jvm="https://repo.maven.apache.org/maven2/io/github/adrielc/zio-pdf_3/${version}/zio-pdf_3-${version}.pom"
             js="https://repo.maven.apache.org/maven2/io/github/adrielc/zio-pdf_sjs1_3/${version}/zio-pdf_sjs1_3-${version}.pom"
-            if curl -fsS --retry 2 "${jvm}" >/dev/null && curl -fsS --retry 2 "${js}" >/dev/null; then
-              echo "Verified zio-pdf ${version} JVM and Scala.js artifacts on Maven Central."
+            native="https://repo.maven.apache.org/maven2/io/github/adrielc/kyo-pdf_native0.5_3/${version}/kyo-pdf_native0.5_3-${version}.pom"
+            if curl -fsS --retry 2 "${jvm}" >/dev/null && curl -fsS --retry 2 "${js}" >/dev/null && curl -fsS --retry 2 "${native}" >/dev/null; then
+              echo "Verified ${version} JVM, Scala.js, and Scala Native artifacts on Maven Central."
               exit 0
             fi
             sleep 20
           done
-          echo "Maven Central did not expose both zio-pdf ${version} artifacts within 10 minutes." >&2
+          echo "Maven Central did not expose all ${version} artifacts within 10 minutes." >&2
           exit 1
 
   github-release:
