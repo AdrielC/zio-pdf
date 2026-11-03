@@ -65,6 +65,16 @@ rewriting; PDFBox renders previews. See the [studio guide](examples/paper-machin
 for limits and checks. Ordered selection is also available directly through
 `PdfPages.select(document, Vector(4, 1, 3))`.
 
+The assembly bench can prepend/append PDFs, stamp pages, add ordinary or Bates
+numbers, and validate the finished PDF in the same build run. Source pages retain
+their PDF objects; embedded-font artwork is composed with `PdfAssembly.overlay`,
+and `PdfAssembly.concatenate` combines documents in the chosen order.
+
+The **Validate PDFs** tab queues multiple files and checks selected PDF/A-3b,
+PDF/A-2b, and PDF/A-3u profiles together with veraPDF. Namespace-aware XMP
+identification remains separate from validation. Results include exact-file
+fingerprints, rule evidence, and downloadable JSON/CSV batch reports.
+
 ### Kyo package migration
 
 The Kyo core now uses `io.github.adrielc.kyopdf` and its adapter uses

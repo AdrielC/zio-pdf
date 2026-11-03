@@ -9,6 +9,7 @@ const state = {
   order: [],
   busy: false,
   preview: 0,
+  bookends: { head: null, tail: null },
 };
 const paths = {
   left: "m14 6-6 6 6 6",
@@ -91,12 +92,13 @@ function thumbnail(page, className) {
 }
 function activate(doc) {
   state.doc = doc;
+  resetPacketOptions();
   state.page = 1;
   state.order = doc.pages.map((page) => page.number);
   state.selected = doc.pages[0].ref;
   $("filename").textContent = doc.name;
   $("filemeta").textContent =
-    `${bytes(doc.bytes)} · PDF ${doc.version} · ${doc.pages.length} pages`;
+    `${bytes(doc.bytes)} · PDF ${doc.version} · ${doc.pages.length} page${doc.pages.length === 1 ? "" : "s"}`;
   $("map-summary").textContent =
     `${doc.objectCount} objects · ${doc.streamCount} streams` +
     (doc.objectCount > doc.objects.length
@@ -119,6 +121,7 @@ function activate(doc) {
   showObject(state.selected);
   showPage(1);
   drawSequence();
+  if (typeof updateValidationStatus === "function") updateValidationStatus();
 }
 
 function drawGraph() {
@@ -424,8 +427,11 @@ function drawSequence() {
     item.append(controls);
     $("sequence").append(item);
   });
+  const added =
+    (state.bookends.head?.pages.length || 0) +
+    (state.bookends.tail?.pages.length || 0);
   $("selection-summary").textContent = state.order.length
-    ? `${state.order.length} pages → ${state.order.join(" · ")}`
+    ? `${state.order.length} selected → ${state.order.join(" · ")}${added ? ` + ${added} front/back = ${state.order.length + added} pages` : ""}`
     : "No pages selected";
   $("build").disabled = state.busy || !state.order.length;
 }
@@ -454,11 +460,14 @@ async function openFile(file) {
         headers: { "X-File-Name": encodeURIComponent(file.name) },
       }),
     );
-    $("sample-note").textContent =
-      "Your file stays in this local studio process.";
+    $("sample-note").textContent = "Your file stays on this machine.";
   });
 }
-$("open").addEventListener("click", () => $("file").click());
+$("open").addEventListener("click", () => {
+  if (typeof validationState !== "undefined" && validationState.active)
+    $("validation-files").click();
+  else $("file").click();
+});
 $("file").addEventListener("change", () => {
   openFile($("file").files[0]);
   $("file").value = "";
@@ -486,27 +495,125 @@ $("restore").addEventListener("click", () => {
   drawSources();
 });
 $("build").addEventListener("click", () =>
-  operation("Rebuilding the page tree, references and trailer…", async () => {
-    const order = [...state.order];
-    const doc = await request(`/api/documents/${state.doc.id}/remix`, {
-      method: "POST",
-      body: order.join(","),
-    });
-    activate(doc);
-    $("result-summary").textContent =
-      `Source pages ${order.join(" → ")} · ${bytes(doc.bytes)} · graph updated`;
-    $("download").href = `/api/documents/${doc.id}/file`;
-    $("download").download = doc.name;
-    $("result").hidden = false;
-  }),
+  operation(
+    "Assembling pages, stamps, numbering and the new trailer…",
+    async () => {
+      const order = [...state.order];
+      const validate = $("packet-validate").checked;
+      if (
+        validate &&
+        (!selectedProfiles().length ||
+          validationState.running ||
+          validationState.items.length >= 20)
+      ) {
+        throw new Error(
+          "Choose validation profiles and leave a free queue slot before building with validation.",
+        );
+      }
+      const options = new URLSearchParams({
+        pages: order.join(","),
+        head: state.bookends.head?.id || "",
+        tail: state.bookends.tail?.id || "",
+        stamp: $("stamp-enabled").checked ? $("stamp-text").value : "",
+        placement: $("stamp-placement").value,
+        numbered: String($("number-enabled").checked),
+        start: $("number-enabled").checked ? $("number-start").value : "1",
+        style: $("number-enabled").checked ? $("number-style").value : "page",
+        prefix: $("number-enabled").checked ? $("number-prefix").value : "",
+      });
+      if ($("stamp-enabled").checked && !options.get("stamp").trim())
+        throw new Error("Enter the stamp text.");
+      const added =
+        (state.bookends.head?.pages.length || 0) +
+        (state.bookends.tail?.pages.length || 0);
+      const doc = await request(`/api/documents/${state.doc.id}/compose`, {
+        method: "POST",
+        body: options,
+      });
+      activate(doc);
+      $("result-summary").textContent =
+        `${doc.pages.length} output pages${added ? ` · ${added} front/back pages` : ""} · ${bytes(doc.bytes)} · preview and graph updated`;
+      $("download").href = `/api/documents/${doc.id}/file`;
+      $("download").download = doc.name;
+      $("result").hidden = false;
+      if (validate) await validateBuiltDocument(doc);
+    },
+  ),
 );
+function resetPacketOptions() {
+  state.bookends = { head: null, tail: null };
+  for (const slot of ["head", "tail"]) {
+    $(`${slot}-details`).textContent = "No PDF added";
+    $(`${slot}-clear`).disabled = true;
+    $(`${slot}-file`).value = "";
+  }
+  $("stamp-enabled").checked = false;
+  $("number-enabled").checked = false;
+  $("packet-validate").checked = false;
+  $("stamp-fields").hidden = true;
+  $("number-fields").hidden = true;
+}
+for (const type of ["stamp", "number"]) {
+  $(`${type}-enabled`).addEventListener("change", () => {
+    $(`${type}-fields`).hidden = !$(`${type}-enabled`).checked;
+  });
+}
+for (const slot of ["head", "tail"]) {
+  $(`${slot}-choose`).addEventListener("click", () =>
+    $(`${slot}-file`).click(),
+  );
+  $(`${slot}-clear`).addEventListener("click", () => {
+    state.bookends[slot] = null;
+    $(`${slot}-details`).textContent = "No PDF added";
+    $(`${slot}-clear`).disabled = true;
+    drawSequence();
+  });
+  $(`${slot}-file`).addEventListener("change", () => {
+    const file = $(`${slot}-file`).files[0];
+    $(`${slot}-file`).value = "";
+    if (!file) return;
+    operation(
+      `Reading ${slot === "head" ? "front" : "back"} pages…`,
+      async () => {
+        if (!file.size || file.size > 12 * 1024 * 1024)
+          throw new Error("Choose a PDF up to 12 MiB.");
+        const doc = await request(`/api/bookends/${slot}`, {
+          method: "POST",
+          body: file,
+          headers: { "X-File-Name": encodeURIComponent(file.name) },
+        });
+        if (
+          doc.pages.length +
+            state.order.length +
+            (state.bookends[slot === "head" ? "tail" : "head"]?.pages.length ||
+              0) >
+          64
+        )
+          throw new Error(
+            "The final packet may contain at most 64 pages. Choose a smaller PDF.",
+          );
+        state.bookends[slot] = doc;
+        $(`${slot}-details`).textContent =
+          `${doc.name} · ${doc.pages.length} page${doc.pages.length === 1 ? "" : "s"}`;
+        $(`${slot}-clear`).disabled = false;
+        drawSequence();
+      },
+    );
+  });
+}
 document.addEventListener("dragover", (event) => {
   if (event.dataTransfer.types.includes("Files")) event.preventDefault();
 });
 document.addEventListener("drop", (event) => {
   if (event.dataTransfer.types.includes("Files")) {
     event.preventDefault();
-    openFile(event.dataTransfer.files[0]);
+    if (
+      typeof addValidationFiles === "function" &&
+      (event.dataTransfer.files.length > 1 || validationState.active)
+    ) {
+      selectStudioTool(true);
+      addValidationFiles(event.dataTransfer.files);
+    } else openFile(event.dataTransfer.files[0]);
   }
 });
 sample();

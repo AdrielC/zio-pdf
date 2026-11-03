@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-03T15:55:46.711952Z",
+  "generatedAt": "2026-11-03T16:51:00.623792Z",
   "title": "Design System: Paper Machine",
   "extensions": {
     "colorMeta": {
@@ -8,14 +8,14 @@
         "role": "neutral",
         "displayName": "Instrument Navy",
         "tonalRamp": [
-          "oklch(15% 0.0428 238.8)",
-          "oklch(26% 0.0428 238.8)",
-          "oklch(38% 0.0428 238.8)",
-          "oklch(49% 0.0428 238.8)",
-          "oklch(61% 0.0428 238.8)",
-          "oklch(72% 0.0428 238.8)",
-          "oklch(84% 0.0428 238.8)",
-          "oklch(95% 0.0428 238.8)"
+          "#142d3d",
+          "#1c394b",
+          "#31566f",
+          "#395972",
+          "#3e6585",
+          "#7290a3",
+          "#b4c9d5",
+          "#e8edf1"
         ]
       },
       "paper": {
@@ -129,6 +129,342 @@
           "oklch(84% 0.0443 236.2)",
           "oklch(95% 0.0443 236.2)"
         ]
+      },
+      "action-hover": {
+        "role": "neutral",
+        "displayName": "Action Hover Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0552 239.5)",
+          "oklch(26% 0.0552 239.5)",
+          "oklch(38% 0.0552 239.5)",
+          "oklch(49% 0.0552 239.5)",
+          "oklch(61% 0.0552 239.5)",
+          "oklch(72% 0.0552 239.5)",
+          "oklch(84% 0.0552 239.5)",
+          "oklch(95% 0.0552 239.5)"
+        ]
+      },
+      "signal-hover": {
+        "role": "neutral",
+        "displayName": "Signal Hover",
+        "tonalRamp": [
+          "oklch(15% 0.1737 114.8)",
+          "oklch(26% 0.1737 114.8)",
+          "oklch(38% 0.1737 114.8)",
+          "oklch(49% 0.1737 114.8)",
+          "oklch(61% 0.1737 114.8)",
+          "oklch(72% 0.1737 114.8)",
+          "oklch(84% 0.1737 114.8)",
+          "oklch(95% 0.1737 114.8)"
+        ]
+      },
+      "node": {
+        "role": "neutral",
+        "displayName": "Structure Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0474 237.8)",
+          "oklch(26% 0.0474 237.8)",
+          "oklch(38% 0.0474 237.8)",
+          "oklch(49% 0.0474 237.8)",
+          "oklch(61% 0.0474 237.8)",
+          "oklch(72% 0.0474 237.8)",
+          "oklch(84% 0.0474 237.8)",
+          "oklch(95% 0.0474 237.8)"
+        ]
+      },
+      "node-page": {
+        "role": "neutral",
+        "displayName": "Page Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0594 239.6)",
+          "oklch(26% 0.0594 239.6)",
+          "oklch(38% 0.0594 239.6)",
+          "oklch(49% 0.0594 239.6)",
+          "oklch(61% 0.0594 239.6)",
+          "oklch(72% 0.0594 239.6)",
+          "oklch(84% 0.0594 239.6)",
+          "oklch(95% 0.0594 239.6)"
+        ]
+      },
+      "node-hover": {
+        "role": "neutral",
+        "displayName": "Object Hover Navy",
+        "tonalRamp": [
+          "oklch(15% 0.0558 243.0)",
+          "oklch(26% 0.0558 243.0)",
+          "oklch(38% 0.0558 243.0)",
+          "oklch(49% 0.0558 243.0)",
+          "oklch(61% 0.0558 243.0)",
+          "oklch(72% 0.0558 243.0)",
+          "oklch(84% 0.0558 243.0)",
+          "oklch(95% 0.0558 243.0)"
+        ]
+      },
+      "node-line": {
+        "role": "neutral",
+        "displayName": "Structure Stroke",
+        "tonalRamp": [
+          "oklch(15% 0.0402 236.0)",
+          "oklch(26% 0.0402 236.0)",
+          "oklch(38% 0.0402 236.0)",
+          "oklch(49% 0.0402 236.0)",
+          "oklch(61% 0.0402 236.0)",
+          "oklch(72% 0.0402 236.0)",
+          "oklch(84% 0.0402 236.0)",
+          "oklch(95% 0.0402 236.0)"
+        ]
+      },
+      "node-page-line": {
+        "role": "neutral",
+        "displayName": "Page Stroke",
+        "tonalRamp": [
+          "oklch(15% 0.0390 234.7)",
+          "oklch(26% 0.0390 234.7)",
+          "oklch(38% 0.0390 234.7)",
+          "oklch(49% 0.0390 234.7)",
+          "oklch(61% 0.0390 234.7)",
+          "oklch(72% 0.0390 234.7)",
+          "oklch(84% 0.0390 234.7)",
+          "oklch(95% 0.0390 234.7)"
+        ]
+      },
+      "bench": {
+        "role": "neutral",
+        "displayName": "Page Bench",
+        "tonalRamp": [
+          "oklch(15% 0.0076 241.7)",
+          "oklch(26% 0.0076 241.7)",
+          "oklch(38% 0.0076 241.7)",
+          "oklch(49% 0.0076 241.7)",
+          "oklch(61% 0.0076 241.7)",
+          "oklch(72% 0.0076 241.7)",
+          "oklch(84% 0.0076 241.7)",
+          "oklch(95% 0.0076 241.7)"
+        ]
+      },
+      "assembly": {
+        "role": "neutral",
+        "displayName": "Assembly Ground",
+        "tonalRamp": [
+          "oklch(15% 0.0147 115.0)",
+          "oklch(26% 0.0147 115.0)",
+          "oklch(38% 0.0147 115.0)",
+          "oklch(49% 0.0147 115.0)",
+          "oklch(61% 0.0147 115.0)",
+          "oklch(72% 0.0147 115.0)",
+          "oklch(84% 0.0147 115.0)",
+          "oklch(95% 0.0147 115.0)"
+        ]
+      },
+      "assembly-line": {
+        "role": "neutral",
+        "displayName": "Assembly Seam",
+        "tonalRamp": [
+          "oklch(15% 0.0253 122.0)",
+          "oklch(26% 0.0253 122.0)",
+          "oklch(38% 0.0253 122.0)",
+          "oklch(49% 0.0253 122.0)",
+          "oklch(61% 0.0253 122.0)",
+          "oklch(72% 0.0253 122.0)",
+          "oklch(84% 0.0253 122.0)",
+          "oklch(95% 0.0253 122.0)"
+        ]
+      },
+      "assembly-hover": {
+        "role": "neutral",
+        "displayName": "Assembly Hover",
+        "tonalRamp": [
+          "oklch(15% 0.0340 118.1)",
+          "oklch(26% 0.0340 118.1)",
+          "oklch(38% 0.0340 118.1)",
+          "oklch(49% 0.0340 118.1)",
+          "oklch(61% 0.0340 118.1)",
+          "oklch(72% 0.0340 118.1)",
+          "oklch(84% 0.0340 118.1)",
+          "oklch(95% 0.0340 118.1)"
+        ]
+      },
+      "syntax": {
+        "role": "neutral",
+        "displayName": "Syntax Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0541 239.5)",
+          "oklch(26% 0.0541 239.5)",
+          "oklch(38% 0.0541 239.5)",
+          "oklch(49% 0.0541 239.5)",
+          "oklch(61% 0.0541 239.5)",
+          "oklch(72% 0.0541 239.5)",
+          "oklch(84% 0.0541 239.5)",
+          "oklch(95% 0.0541 239.5)"
+        ]
+      },
+      "notice": {
+        "role": "neutral",
+        "displayName": "Information Strip",
+        "tonalRamp": [
+          "oklch(15% 0.0104 247.9)",
+          "oklch(26% 0.0104 247.9)",
+          "oklch(38% 0.0104 247.9)",
+          "oklch(49% 0.0104 247.9)",
+          "oklch(61% 0.0104 247.9)",
+          "oklch(72% 0.0104 247.9)",
+          "oklch(84% 0.0104 247.9)",
+          "oklch(95% 0.0104 247.9)"
+        ]
+      },
+      "checking": {
+        "role": "neutral",
+        "displayName": "Active File Wash",
+        "tonalRamp": [
+          "oklch(15% 0.0199 112.9)",
+          "oklch(26% 0.0199 112.9)",
+          "oklch(38% 0.0199 112.9)",
+          "oklch(49% 0.0199 112.9)",
+          "oklch(61% 0.0199 112.9)",
+          "oklch(72% 0.0199 112.9)",
+          "oklch(84% 0.0199 112.9)",
+          "oklch(95% 0.0199 112.9)"
+        ]
+      },
+      "progress-track": {
+        "role": "neutral",
+        "displayName": "Progress Track",
+        "tonalRamp": [
+          "oklch(15% 0.0385 235.0)",
+          "oklch(26% 0.0385 235.0)",
+          "oklch(38% 0.0385 235.0)",
+          "oklch(49% 0.0385 235.0)",
+          "oklch(61% 0.0385 235.0)",
+          "oklch(72% 0.0385 235.0)",
+          "oklch(84% 0.0385 235.0)",
+          "oklch(95% 0.0385 235.0)"
+        ]
+      },
+      "queued-text": {
+        "role": "neutral",
+        "displayName": "Queued Readout",
+        "tonalRamp": [
+          "oklch(15% 0.0343 237.7)",
+          "oklch(26% 0.0343 237.7)",
+          "oklch(38% 0.0343 237.7)",
+          "oklch(49% 0.0343 237.7)",
+          "oklch(61% 0.0343 237.7)",
+          "oklch(72% 0.0343 237.7)",
+          "oklch(84% 0.0343 237.7)",
+          "oklch(95% 0.0343 237.7)"
+        ]
+      },
+      "passed-bg": {
+        "role": "neutral",
+        "displayName": "Verified Field",
+        "tonalRamp": [
+          "oklch(15% 0.0153 145.5)",
+          "oklch(26% 0.0153 145.5)",
+          "oklch(38% 0.0153 145.5)",
+          "oklch(49% 0.0153 145.5)",
+          "oklch(61% 0.0153 145.5)",
+          "oklch(72% 0.0153 145.5)",
+          "oklch(84% 0.0153 145.5)",
+          "oklch(95% 0.0153 145.5)"
+        ]
+      },
+      "passed-text": {
+        "role": "neutral",
+        "displayName": "Verified Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0814 146.7)",
+          "oklch(26% 0.0814 146.7)",
+          "oklch(38% 0.0814 146.7)",
+          "oklch(49% 0.0814 146.7)",
+          "oklch(61% 0.0814 146.7)",
+          "oklch(72% 0.0814 146.7)",
+          "oklch(84% 0.0814 146.7)",
+          "oklch(95% 0.0814 146.7)"
+        ]
+      },
+      "passed-line": {
+        "role": "neutral",
+        "displayName": "Verified Stroke",
+        "tonalRamp": [
+          "oklch(15% 0.0413 142.9)",
+          "oklch(26% 0.0413 142.9)",
+          "oklch(38% 0.0413 142.9)",
+          "oklch(49% 0.0413 142.9)",
+          "oklch(61% 0.0413 142.9)",
+          "oklch(72% 0.0413 142.9)",
+          "oklch(84% 0.0413 142.9)",
+          "oklch(95% 0.0413 142.9)"
+        ]
+      },
+      "failed-bg": {
+        "role": "neutral",
+        "displayName": "Failed Field",
+        "tonalRamp": [
+          "oklch(15% 0.0219 42.6)",
+          "oklch(26% 0.0219 42.6)",
+          "oklch(38% 0.0219 42.6)",
+          "oklch(49% 0.0219 42.6)",
+          "oklch(61% 0.0219 42.6)",
+          "oklch(72% 0.0219 42.6)",
+          "oklch(84% 0.0219 42.6)",
+          "oklch(95% 0.0219 42.6)"
+        ]
+      },
+      "failed-text": {
+        "role": "neutral",
+        "displayName": "Failed Ink",
+        "tonalRamp": [
+          "oklch(15% 0.1294 33.9)",
+          "oklch(26% 0.1294 33.9)",
+          "oklch(38% 0.1294 33.9)",
+          "oklch(49% 0.1294 33.9)",
+          "oklch(61% 0.1294 33.9)",
+          "oklch(72% 0.1294 33.9)",
+          "oklch(84% 0.1294 33.9)",
+          "oklch(95% 0.1294 33.9)"
+        ]
+      },
+      "failed-line": {
+        "role": "neutral",
+        "displayName": "Failed Stroke",
+        "tonalRamp": [
+          "oklch(15% 0.1312 37.1)",
+          "oklch(26% 0.1312 37.1)",
+          "oklch(38% 0.1312 37.1)",
+          "oklch(49% 0.1312 37.1)",
+          "oklch(61% 0.1312 37.1)",
+          "oklch(72% 0.1312 37.1)",
+          "oklch(84% 0.1312 37.1)",
+          "oklch(95% 0.1312 37.1)"
+        ]
+      },
+      "unable-bg": {
+        "role": "neutral",
+        "displayName": "Unable Field",
+        "tonalRamp": [
+          "oklch(15% 0.0286 84.6)",
+          "oklch(26% 0.0286 84.6)",
+          "oklch(38% 0.0286 84.6)",
+          "oklch(49% 0.0286 84.6)",
+          "oklch(61% 0.0286 84.6)",
+          "oklch(72% 0.0286 84.6)",
+          "oklch(84% 0.0286 84.6)",
+          "oklch(95% 0.0286 84.6)"
+        ]
+      },
+      "unable-text": {
+        "role": "neutral",
+        "displayName": "Unable Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0775 74.8)",
+          "oklch(26% 0.0775 74.8)",
+          "oklch(38% 0.0775 74.8)",
+          "oklch(49% 0.0775 74.8)",
+          "oklch(61% 0.0775 74.8)",
+          "oklch(72% 0.0775 74.8)",
+          "oklch(84% 0.0775 74.8)",
+          "oklch(95% 0.0775 74.8)"
+        ]
       }
     },
     "typographyMeta": {
@@ -147,6 +483,30 @@
       "mono": {
         "displayName": "Literal syntax",
         "purpose": "PDF dictionaries; smaller related sizes identify references and addresses."
+      },
+      "validation-headline": {
+        "displayName": "Validation headline",
+        "purpose": "Subordinate queue headline, reducing to 27px when stacked."
+      },
+      "packet-title": {
+        "displayName": "Packet title",
+        "purpose": "Ruled legend for optional packet finishing."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Plain Chivo action labels and queue filenames."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field legends, evidence and compact actions."
+      },
+      "annotation": {
+        "displayName": "Annotation",
+        "purpose": "Supporting file metadata and receipts."
+      },
+      "small-annotation": {
+        "displayName": "Small annotation",
+        "purpose": "Profile captions, technical notes and narrow verdict labels."
       }
     },
     "shadows": [
@@ -210,9 +570,9 @@
       "name": "Build action",
       "kind": "button",
       "refersTo": "button-build",
-      "description": "Signal-filled action for assembling the selected page order.",
-      "html": "<button class=\"ds-build\">Build PDF<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m-6-6 6 6-6 6\"/></svg></button>",
-      "css": ".ds-build{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:46px;padding:12px 20px;border:0;border-radius:0;font-weight:600;font-size:14px;line-height:1.5;cursor:pointer;font-family:Chivo,Arial,sans-serif;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1)),color .2s var(--ease,cubic-bezier(.16,1,.3,1));min-height:42px;padding:10px 16px;background:var(--signal,#e2ed6b);color:var(--ink,#142d3d);white-space:nowrap}.ds-build:hover{background:#d0df42}.ds-build:active{transform:translateY(1px)}.ds-build:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-build:disabled{cursor:not-allowed;opacity:.5}.ds-build svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}@media(max-width:760px){.ds-build{font-size:13px;min-height:44px;padding:11px 16px}}@media(prefers-reduced-motion:reduce){.ds-build{transition:none}}"
+      "description": "Signal-filled build or validation action; the navy run bar uses a signal-colored keyboard outline.",
+      "html": "<div class=\"ds-run\"><button class=\"ds-build\">Build PDF<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m-6-6 6 6-6 6\"/></svg></button></div>",
+      "css": ".ds-build{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-height:46px;padding:12px 20px;border:0;border-radius:0;font-weight:600;font-size:14px;line-height:1.5;cursor:pointer;font-family:Chivo,Arial,sans-serif;transition:background .2s var(--ease,cubic-bezier(.16,1,.3,1)),color .2s var(--ease,cubic-bezier(.16,1,.3,1));min-height:42px;padding:10px 16px;background:var(--signal,#e2ed6b);color:var(--ink,#142d3d);white-space:nowrap}.ds-build:hover{background:#d0df42}.ds-build:active{transform:translateY(1px)}.ds-build:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px;}.ds-build:disabled{cursor:not-allowed;opacity:.5}.ds-build svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;}@media(max-width:760px){.ds-build{font-size:13px;min-height:44px;padding:11px 16px}}@media(prefers-reduced-motion:reduce){.ds-build{transition:none}}.ds-run{padding:18px 24px;background:var(--field,#142d3d)}.ds-run .ds-build:focus-visible{outline-color:var(--signal,#e2ed6b)}"
     },
     {
       "name": "Text action",
@@ -253,11 +613,34 @@
       "description": "A selected page and a related stream joined by a real reference-shaped orthogonal trace.",
       "html": "<div class=\"ds-field\"><svg viewBox=\"0 0 280 100\" aria-label=\"Selected page and related stream\"><path class=\"ds-trace\" d=\"M110 34H140V54H170\"/><g class=\"ds-node ds-selected\" transform=\"translate(10,10)\" role=\"button\" tabindex=\"0\" aria-pressed=\"true\" aria-label=\"Page, object 3 0 R\"><rect width=\"100\" height=\"48\"/><text class=\"ds-node-title\" x=\"11\" y=\"19\">Page</text><text class=\"ds-node-address\" x=\"11\" y=\"36\">3 0 R</text><circle class=\"ds-port\" cx=\"100\" cy=\"24\" r=\"2.5\"/></g><g class=\"ds-node ds-stream ds-related\" transform=\"translate(170,30)\" role=\"button\" tabindex=\"0\" aria-pressed=\"false\" aria-label=\"Stream, object 7 0 R\"><rect width=\"100\" height=\"48\"/><text class=\"ds-node-title\" x=\"11\" y=\"19\">Stream</text><text class=\"ds-node-address\" x=\"11\" y=\"36\">7 0 R</text><circle class=\"ds-port\" cx=\"0\" cy=\"24\" r=\"2.5\"/></g></svg></div>",
       "css": ".ds-field{background:var(--field,#142d3d);padding:16px;font-family:Chivo,Arial,sans-serif;}.ds-field svg{display:block;width:100%;max-width:420px}.ds-trace{fill:none;stroke:var(--signal,#e2ed6b);stroke-width:2;stroke-dasharray:8 5;animation:ds-current 1.2s linear infinite}.ds-node{cursor:pointer;outline:none}.ds-node rect{fill:#1c394b;stroke:#6d8899;stroke-width:1;transition:fill .2s var(--ease,cubic-bezier(.16,1,.3,1)),stroke .2s var(--ease,cubic-bezier(.16,1,.3,1))}.ds-port{fill:#8da7b6}.ds-node-title{fill:var(--white,#fff);font-size:13px;font-weight:600}.ds-node-address{fill:var(--field-muted,#b4c9d5);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}.ds-stream rect{stroke-dasharray:4 3}.ds-related rect{stroke:var(--signal,#e2ed6b)}.ds-node:hover rect,.ds-node:focus-visible rect{fill:#395972;stroke:white;stroke-width:2}.ds-selected rect{fill:var(--signal,#e2ed6b);stroke:var(--signal,#e2ed6b)}.ds-selected .ds-node-title,.ds-selected .ds-node-address,.ds-selected .ds-port{fill:var(--ink,#142d3d)}.ds-node:focus-visible rect{stroke-width:3}.ds-node text{pointer-events:none;user-select:none}@keyframes ds-current{to{stroke-dashoffset:-26}}@media(prefers-reduced-motion:reduce){.ds-trace{animation:none}.ds-node rect{transition:none}}"
+    },
+    {
+      "name": "Studio tabs",
+      "kind": "nav",
+      "description": "Shared-seam tool navigation with an explicit active underline; keyboard switching belongs to the live app.",
+      "html": "<nav class=\"ds-tabs\" role=\"tablist\" aria-label=\"Studio tools\"><button role=\"tab\" aria-selected=\"true\">Explore &amp; remix</button><button role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Validate PDFs<span>BATCH + MULTI-PROFILE</span></button></nav>",
+      "css": ".ds-tabs{display:flex;gap:26px;border-bottom:1px solid var(--line,#cbd4da);font-family:Chivo,Arial,sans-serif}.ds-tabs>button{position:relative;border:0;background:none;padding:12px 0 14px;min-height:46px;font-size:14px;font-weight:600;color:var(--muted,#566571);cursor:pointer}.ds-tabs>button[aria-selected=\"true\"]{color:var(--ink,#142d3d);border-bottom:3px solid var(--ink,#142d3d);padding-bottom:11px}.ds-tabs>button:hover{color:var(--ink,#142d3d)}.ds-tabs>button:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-tabs span{font-size:9px;font-weight:500;letter-spacing:.025em;margin-left:9px;color:var(--muted,#566571)}@media(max-width:760px){.ds-tabs{gap:20px}.ds-tabs>button{font-size:12px}.ds-tabs span{display:none}}"
+    },
+    {
+      "name": "Packet field",
+      "kind": "input",
+      "refersTo": "packet-field",
+      "description": "Square, labeled native fields exposed by enabled finishing operations; minimum height 44px.",
+      "html": "<div class=\"ds-packet\"><label>Stamp text<input value=\"DRAFT\" maxlength=\"80\"></label><label>Placement<select><option>Top right</option><option>Center</option></select></label></div>",
+      "css": ".ds-packet{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:8px 0 16px;background:#f1f3e8;font-family:Chivo,Arial,sans-serif}.ds-packet label{display:flex;flex-direction:column;gap:6px;color:var(--muted,#566571);font-size:12px}.ds-packet input,.ds-packet select{width:100%;min-width:0;min-height:44px;padding:8px;border:1px solid var(--line,#cbd4da);border-radius:0;background:var(--white,#fff);color:var(--ink,#142d3d);font:inherit}.ds-packet input:focus-visible,.ds-packet select:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}"
+    },
+    {
+      "name": "Validation outcomes and receipt",
+      "kind": "card",
+      "refersTo": "validation-file",
+      "description": "Per-file claim, explicit profile verdicts and native evidence disclosure; completed rows remain mounted during the batch.",
+      "html": "<article class=\"ds-validation\"><strong>synthetic-3b-with-attachment.pdf</strong><span class=\"ds-filemeta\">1.3 KiB \u00b7 synthetic specimen</span><div class=\"ds-outcomes\"><div class=\"ds-claim\"><span>XMP identification</span><strong>Declares PDF/A-3b</strong></div><div><span>PDF/A-3b</span><b class=\"ds-badge ds-passed\">Verified</b></div><div><span>PDF/A-2b</span><b class=\"ds-badge ds-failed\">Failed</b></div><div><span>PDF/A-3u</span><b class=\"ds-badge ds-unable\">Unable to check</b></div></div><details class=\"ds-details\"><summary>Evidence &amp; failure details</summary><dl><dt>Engine</dt><dd>veraPDF</dd><dt>SHA-256</dt><dd class=\"ds-fingerprint\">5adf0b03b3a861ea4e2561a4a31eac3999304c5f0f011607af3c4b1c229ff008</dd></dl><p>Receipts belong to the exact file bytes and requested profile.</p></details></article>",
+      "css": ".ds-validation{padding:23px 24px;background:var(--white,#fff);color:var(--ink,#142d3d);border:1px solid var(--line,#cbd4da);font:14px/1.5 Chivo,Arial,sans-serif}.ds-validation>strong{display:block;font-weight:600;overflow-wrap:anywhere}.ds-filemeta{display:block;font-size:11px;color:var(--muted,#566571);margin-top:4px}.ds-outcomes{display:flex;gap:18px 30px;flex-wrap:wrap;margin-top:20px}.ds-outcomes>div{min-width:110px}.ds-outcomes>.ds-claim{flex:1;min-width:200px}.ds-outcomes>div>span{display:block;color:var(--muted,#566571);font-size:10px;margin-bottom:7px}.ds-claim strong{font-size:12px;font-weight:500}.ds-badge{display:inline-block;padding:5px 9px;font-size:11px;font-weight:600;background:#e8edf1;color:#465b69}.ds-passed{background:#e7f0e7;color:#27542d}.ds-failed{background:#fbe9e2;color:#8c301c}.ds-unable{background:#f6ecd8;color:#6e4e1d}.ds-details{margin-top:20px;border-top:1px solid var(--line,#cbd4da);padding-top:12px}.ds-details summary{width:fit-content;cursor:pointer;font-size:12px;font-weight:500;padding:5px 0}.ds-details summary:focus-visible{outline:3px solid var(--blue,#3e6585);outline-offset:4px}.ds-details dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:7px 18px;font-size:11px;margin:18px 0 24px}.ds-details dt{color:var(--muted,#566571)}.ds-details dd{margin:0;overflow-wrap:anywhere}.ds-fingerprint{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.ds-details p{font-size:12px;max-width:75ch}@media(max-width:760px){.ds-validation{padding:20px 18px}.ds-validation>strong{font-size:13px}.ds-outcomes{gap:18px 22px;margin-top:14px}.ds-outcomes>.ds-claim{flex:1 0 100%;min-width:0}.ds-outcomes>div{min-width:93px}.ds-badge{font-size:10px}.ds-details dl{grid-template-columns:75px minmax(0,1fr);gap:9px 12px}}"
     }
   ],
   "narrative": {
     "northStar": "Circuit Network Analyzer",
-    "overview": "Paper Machine treats PDF structure as something a person can probe. A navy measurement field, electric-yellow signals and a cool paper bench give the studio the character of a working instrument. The visual language belongs to this example; it does not define the PDF library's identity.\n\nSturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork.",
+    "overview": "Paper Machine treats PDF structure as something a person can probe. A navy measurement field, electric-yellow signals and a cool paper bench give the studio the character of a working instrument. The visual language belongs to this example; it does not define the PDF library's identity.\n\nSturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork. Packet finishing and batch validation extend the same instrument through plain fields, contiguous rows and evidence attached to each file.",
     "keyCharacteristics": [
       "Square controls and contiguous, bordered work areas.",
       "Solid selected objects, outlined related objects and orthogonal reference traces.",
@@ -265,6 +648,11 @@
       "Motion attached to a live connection or a completed assembly."
     ],
     "rules": [
+      {
+        "name": "The Verdict Evidence Rule",
+        "body": "A metadata claim never receives verified styling by itself. Pair every status color with a literal outcome label; verification belongs to completed checks of the exact bytes.",
+        "section": "colors"
+      },
       {
         "name": "The Energized State Rule",
         "body": "Yellow identifies an actionable or connected state. A selected object takes a solid yellow field; related objects retain their field and gain a yellow outline.",
@@ -285,13 +673,18 @@
       "**Do** keep actual PDF previews and literal object addresses attached to their controls.",
       "**Do** distinguish a solid selected node from outlined related nodes.",
       "**Do** preserve local scrolling, keyboard focus and reduced-motion behavior when extending a work area.",
-      "**Do** use the larger narrow-screen assembly controls with their established spacing."
+      "**Do** use the larger narrow-screen assembly controls with their established spacing.",
+      "**Do** keep queue outcomes labeled, receipts tied to exact bytes and completed disclosures stable while a batch advances.",
+      "**Do** reveal finishing fields progressively and clear enabled finishing choices after a successful build.",
+      "**Do** use real PDF renders for every preview; no generated raster artwork ships with the studio."
     ],
     "donts": [
       "**Don't** introduce rounded card shells around the contiguous instrument panels.",
       "**Don't** use monospace for display headlines or action labels.",
       "**Don't** add ambient shadows to ordinary controls or panel seams.",
-      "**Don't** turn sample artwork colors or tiny technical annotations into a general palette or heading scale."
+      "**Don't** turn sample artwork colors or tiny technical annotations into a general palette or heading scale.",
+      "**Don't** apply verified styling to an XMP claim, stale fingerprint or unfinished check.",
+      "**Don't** use a low-contrast focus outline on the navy run bar."
     ]
   }
 }

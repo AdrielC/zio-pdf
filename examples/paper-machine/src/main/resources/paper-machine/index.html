@@ -8,6 +8,7 @@
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/style.css" />
     <script src="/app.js" defer></script>
+    <script src="/validation.js" defer></script>
   </head>
   <body>
     <!--
@@ -52,173 +53,431 @@ all actions work with a keyboard. Motion respects reduced-motion preferences.
           <button class="button primary" id="open" data-busy>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 16V4m-5 5 5-5 5 5M4 15v5h16v-5" /></svg
-            >Open a PDF
+            ><span id="open-label">Open a PDF</span>
           </button>
           <input id="file" type="file" accept="application/pdf,.pdf" hidden />
-          <span>Local files · up to 12 MiB · 64 pages</span>
+          <span id="open-limits">Local files · up to 12 MiB · 64 pages</span>
         </div>
       </section>
 
       <div class="notice" id="notice" role="status" aria-live="polite">
         Starting the instrument…
       </div>
-      <div class="filebar">
-        <div class="document-label">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5 3h9l5 5v13H5zM14 3v6h5M8 13h8m-8 4h5" /></svg
-          ><strong id="filename">Loading specimen</strong
-          ><span id="filemeta"></span>
-        </div>
-        <button class="text-button" id="sample" data-busy>
-          Reset to sample
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 18 18 6M6 6h12v12" />
-          </svg>
+      <nav class="studio-tabs" role="tablist" aria-label="Studio tools">
+        <button
+          id="explore-tab"
+          role="tab"
+          aria-selected="true"
+          aria-controls="explore-pane"
+        >
+          Explore &amp; remix
         </button>
-      </div>
+        <button
+          id="validate-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="validation-pane"
+          tabindex="-1"
+        >
+          Validate PDFs <span class="tab-note">BATCH + MULTI-PROFILE</span>
+        </button>
+      </nav>
+      <div id="explore-pane" role="tabpanel" aria-labelledby="explore-tab">
+        <div class="filebar">
+          <div class="document-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 3h9l5 5v13H5zM14 3v6h5M8 13h8m-8 4h5" /></svg
+            ><strong id="filename">Loading specimen</strong
+            ><span id="filemeta"></span>
+            <span id="pdfa-status" class="declaration-label"></span>
+          </div>
+          <button class="text-button" id="sample" data-busy>
+            Reset to sample
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 18 18 6M6 6h12v12" />
+            </svg>
+          </button>
+        </div>
+        <div class="current-validation">
+          <span
+            >Identification is a metadata claim. Validation checks the exact
+            file.</span
+          ><button class="text-button" id="validate-current" disabled>
+            Queue this PDF for validation
+          </button>
+        </div>
 
-      <div class="workspace" id="workspace">
-        <section class="instrument" aria-labelledby="map-title">
-          <div class="instrument-heading">
-            <div>
-              <h2 id="map-title">The object map</h2>
-              <p id="map-summary">Reading the document graph</p>
+        <div class="workspace" id="workspace">
+          <section class="instrument" aria-labelledby="map-title">
+            <div class="instrument-heading">
+              <div>
+                <h2 id="map-title">The object map</h2>
+                <p id="map-summary">Reading the document graph</p>
+              </div>
+              <span class="live-label">LIVE STRUCTURE</span>
             </div>
-            <span class="live-label">LIVE STRUCTURE</span>
-          </div>
-          <div class="graph-scroll" id="graph-scroll">
-            <svg
-              id="graph"
-              viewBox="0 0 720 440"
-              role="group"
-              aria-label="PDF object graph"
-            ></svg>
-          </div>
-          <div class="legend">
-            <span><i class="page-key"></i>Page</span
-            ><span><i class="stream-key"></i>Stream</span
-            ><span><i class="other-key"></i>Structure</span
-            ><span class="graph-help"
-              ><span class="desktop-help">Select an object to trace it</span
-              ><span class="mobile-help">Scroll the map to explore</span></span
-            >
-          </div>
-        </section>
+            <div class="graph-scroll" id="graph-scroll">
+              <svg
+                id="graph"
+                viewBox="0 0 720 440"
+                role="group"
+                aria-label="PDF object graph"
+              ></svg>
+            </div>
+            <div class="legend">
+              <span><i class="page-key"></i>Page</span
+              ><span><i class="stream-key"></i>Stream</span
+              ><span><i class="other-key"></i>Structure</span
+              ><span class="graph-help"
+                ><span class="desktop-help">Select an object to trace it</span
+                ><span class="mobile-help"
+                  >Scroll the map to explore</span
+                ></span
+              >
+            </div>
+          </section>
 
-        <section class="bench" aria-labelledby="bench-title">
-          <div class="section-heading">
-            <h2 id="bench-title">The page bench</h2>
-            <div class="page-nav">
-              <button
-                class="icon-button"
-                id="previous"
-                aria-label="Previous page"
-                disabled
-              >
+          <section class="bench" aria-labelledby="bench-title">
+            <div class="section-heading">
+              <h2 id="bench-title">The page bench</h2>
+              <div class="page-nav">
+                <button
+                  class="icon-button"
+                  id="previous"
+                  aria-label="Previous page"
+                  disabled
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m14 6-6 6 6 6" />
+                  </svg></button
+                ><span id="page-counter">— / —</span
+                ><button
+                  class="icon-button"
+                  id="next"
+                  aria-label="Next page"
+                  disabled
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m10 6 6 6-6 6" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="page-stage" id="page-stage">
+              <img id="preview" alt="Rendered PDF page" hidden />
+              <p id="preview-message">Preparing the sample PDF…</p>
+            </div>
+            <div class="preview-caption">
+              <span id="page-ref">Actual PDF preview</span
+              ><button class="text-button" id="inspect-page" disabled>
+                Inspect this page
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m14 6-6 6 6 6" />
-                </svg></button
-              ><span id="page-counter">— / —</span
-              ><button
-                class="icon-button"
-                id="next"
-                aria-label="Next page"
-                disabled
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m10 6 6 6-6 6" />
+                  <path d="M6 18 18 6M6 6h12v12" />
                 </svg>
               </button>
             </div>
-          </div>
-          <div class="page-stage" id="page-stage">
-            <img id="preview" alt="Rendered PDF page" hidden />
-            <p id="preview-message">Preparing the sample PDF…</p>
-          </div>
-          <div class="preview-caption">
-            <span id="page-ref">Actual PDF preview</span
-            ><button class="text-button" id="inspect-page" disabled>
-              Inspect this page
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6 18 18 6M6 6h12v12" />
-              </svg>
-            </button>
-          </div>
-          <div class="source-heading">
-            <h3>Source pages</h3>
-            <span>Choose a page to look closer</span>
-          </div>
-          <div
-            class="source-pages"
-            id="source-pages"
-            aria-label="Source pages"
-          ></div>
-        </section>
-
-        <section class="inspector" aria-labelledby="inspector-title">
-          <div class="section-heading">
-            <h2 id="inspector-title">Inside the object</h2>
-            <label class="sr-only" for="object-select">Choose an object</label
-            ><select id="object-select" aria-label="Choose an object">
-              <option>Loading…</option>
-            </select>
-          </div>
-          <div class="inspector-meta">
-            <strong id="object-kind">Dictionary</strong
-            ><span id="object-size"></span
-            ><button class="text-button" id="trailer" disabled>
-              View trailer
-            </button>
-          </div>
-          <pre id="syntax" tabindex="0" aria-label="PDF dictionary syntax">
-The selected object's dictionary will appear here.</pre
-          >
-          <div class="references">
-            <span id="reference-label">REFERENCES</span>
-            <div id="references"></div>
-          </div>
-        </section>
-
-        <section class="assembly" aria-labelledby="assembly-title">
-          <div class="section-heading">
-            <h2 id="assembly-title">Make your own cut.</h2>
-            <button class="text-button" id="restore" disabled>
-              Restore order
-            </button>
-          </div>
-          <p class="assembly-description">
-            Move or remove pages. Add them back from the page bench.
-          </p>
-          <ol
-            class="sequence"
-            id="sequence"
-            aria-label="Output page order"
-          ></ol>
-          <div class="assembly-footer">
-            <span id="selection-summary">Choose pages for your output</span
-            ><button class="button build" id="build" data-busy disabled>
-              Build PDF
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 12h16m-6-6 6 6-6 6" />
-              </svg>
-            </button>
-          </div>
-          <div class="result" id="result" hidden>
-            <div>
-              <strong>Your new cut is ready.</strong
-              ><span id="result-summary"></span>
+            <div class="source-heading">
+              <h3>Source pages</h3>
+              <span>Choose a page to look closer</span>
             </div>
-            <a
-              class="button primary"
-              id="download"
-              download="paper-machine-remix.pdf"
-              >Download PDF
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 4v13m-5-5 5 5 5-5M4 20h16" /></svg
-            ></a>
-          </div>
-        </section>
+            <div
+              class="source-pages"
+              id="source-pages"
+              aria-label="Source pages"
+            ></div>
+          </section>
+
+          <section class="inspector" aria-labelledby="inspector-title">
+            <div class="section-heading">
+              <h2 id="inspector-title">Inside the object</h2>
+              <label class="sr-only" for="object-select">Choose an object</label
+              ><select id="object-select" aria-label="Choose an object">
+                <option>Loading…</option>
+              </select>
+            </div>
+            <div class="inspector-meta">
+              <strong id="object-kind">Dictionary</strong
+              ><span id="object-size"></span
+              ><button class="text-button" id="trailer" disabled>
+                View trailer
+              </button>
+            </div>
+            <pre id="syntax" tabindex="0" aria-label="PDF dictionary syntax">
+The selected object's dictionary will appear here.</pre
+            >
+            <div class="references">
+              <span id="reference-label">REFERENCES</span>
+              <div id="references"></div>
+            </div>
+          </section>
+
+          <section class="assembly" aria-labelledby="assembly-title">
+            <div class="section-heading">
+              <h2 id="assembly-title">Make your own cut.</h2>
+              <button class="text-button" id="restore" disabled>
+                Restore order
+              </button>
+            </div>
+            <p class="assembly-description">
+              Move or remove pages. Add them back from the page bench.
+            </p>
+            <ol
+              class="sequence"
+              id="sequence"
+              aria-label="Output page order"
+            ></ol>
+            <fieldset class="packet-options" id="packet-options" data-busy>
+              <legend>Finish the packet</legend>
+              <p>
+                Front PDF → your selected pages → back PDF. Stamps and numbers
+                follow the final order.
+              </p>
+              <div class="packet-bookends">
+                <div class="packet-bookend">
+                  <strong>Front pages</strong
+                  ><span id="head-details">No PDF added</span>
+                  <div>
+                    <button
+                      class="text-button"
+                      id="head-choose"
+                      aria-label="Choose front PDF"
+                      type="button"
+                    >
+                      Choose PDF</button
+                    ><button
+                      class="text-button"
+                      id="head-clear"
+                      aria-label="Remove front PDF"
+                      type="button"
+                      disabled
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <input
+                    type="file"
+                    id="head-file"
+                    accept="application/pdf,.pdf"
+                    hidden
+                  />
+                </div>
+                <div class="packet-bookend">
+                  <strong>Back pages</strong
+                  ><span id="tail-details">No PDF added</span>
+                  <div>
+                    <button
+                      class="text-button"
+                      id="tail-choose"
+                      aria-label="Choose back PDF"
+                      type="button"
+                    >
+                      Choose PDF</button
+                    ><button
+                      class="text-button"
+                      id="tail-clear"
+                      aria-label="Remove back PDF"
+                      type="button"
+                      disabled
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <input
+                    type="file"
+                    id="tail-file"
+                    accept="application/pdf,.pdf"
+                    hidden
+                  />
+                </div>
+              </div>
+              <div class="packet-finishing">
+                <div>
+                  <label class="packet-toggle"
+                    ><input type="checkbox" id="stamp-enabled" /> Stamp every
+                    output page</label
+                  >
+                  <div id="stamp-fields" class="packet-fields" hidden>
+                    <label
+                      >Stamp text<input
+                        id="stamp-text"
+                        value="DRAFT"
+                        maxlength="80"
+                    /></label>
+                    <label
+                      >Placement<select id="stamp-placement">
+                        <option value="top">Top right</option>
+                        <option value="center">Center</option>
+                      </select></label
+                    >
+                  </div>
+                </div>
+                <div>
+                  <label class="packet-toggle"
+                    ><input type="checkbox" id="number-enabled" /> Number every
+                    output page</label
+                  >
+                  <div id="number-fields" class="packet-fields" hidden>
+                    <label
+                      >Start at<input
+                        type="number"
+                        id="number-start"
+                        value="1"
+                        min="1"
+                        max="999999"
+                        step="1"
+                    /></label>
+                    <label
+                      >Format<select id="number-style">
+                        <option value="page">Page 1 of N</option>
+                        <option value="number">1, 2, 3…</option>
+                        <option value="bates">000001 (Bates)</option>
+                      </select></label
+                    >
+                    <label
+                      >Prefix (optional)<input
+                        id="number-prefix"
+                        maxlength="24"
+                        placeholder="DOC-"
+                    /></label>
+                  </div>
+                </div>
+              </div>
+              <label class="packet-toggle packet-validate"
+                ><input type="checkbox" id="packet-validate" /> Validate the
+                finished PDF in the same run</label
+              >
+              <p class="packet-note">
+                Uses the profiles selected in Validate PDFs. Added PDFs include
+                all their pages; stamps and numbers become searchable page
+                content. Check the built preview before downloading.
+              </p>
+            </fieldset>
+            <div class="assembly-footer">
+              <span id="selection-summary">Choose pages for your output</span
+              ><button class="button build" id="build" data-busy disabled>
+                Build PDF
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 12h16m-6-6 6 6-6 6" />
+                </svg>
+              </button>
+            </div>
+            <div class="result" id="result" hidden>
+              <div>
+                <strong>Your new cut is ready.</strong
+                ><span id="result-summary"></span>
+              </div>
+              <a
+                class="button primary"
+                id="download"
+                download="paper-machine-remix.pdf"
+                >Download PDF
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 4v13m-5-5 5 5 5-5M4 20h16" /></svg
+              ></a>
+            </div>
+          </section>
+        </div>
       </div>
+      <section
+        id="validation-pane"
+        role="tabpanel"
+        aria-labelledby="validate-tab"
+        hidden
+      >
+        <div class="validation-heading">
+          <div>
+            <h2>One queue. Every check.</h2>
+            <p>
+              Select PDFs, choose profiles, and run them together. Each verdict
+              belongs to the exact file bytes.
+            </p>
+          </div>
+          <button class="text-button" id="validation-examples">
+            Try three synthetic examples
+          </button>
+        </div>
+        <div class="validation-controls">
+          <fieldset id="validation-profiles">
+            <legend>Check against</legend>
+            <label><input type="checkbox" value="3b" checked />PDF/A-3b</label
+            ><label><input type="checkbox" value="2b" />PDF/A-2b</label
+            ><label><input type="checkbox" value="3u" />PDF/A-3u</label
+            ><span>Also checks XMP identification and Kyo readability.</span>
+          </fieldset>
+          <div class="queue-actions">
+            <button class="button primary" id="validation-add">Add PDFs</button
+            ><button class="text-button" id="validation-clear" disabled>
+              Clear queue</button
+            ><span>Up to 20 files · 12 MiB each · processed locally</span>
+          </div>
+        </div>
+        <input
+          id="validation-files"
+          type="file"
+          multiple
+          accept="application/pdf,.pdf"
+          hidden
+        />
+        <div
+          class="validation-notice"
+          id="validation-notice"
+          role="status"
+          aria-live="polite"
+        ></div>
+        <div class="validation-run">
+          <div>
+            <p id="validation-progress-text" role="status" aria-live="polite">
+              Add PDFs to start a validation pass.
+            </p>
+            <progress
+              id="validation-progress"
+              max="1"
+              value="0"
+              aria-label="Files checked"
+              hidden
+            ></progress>
+          </div>
+          <button class="text-button" id="validation-stop" disabled>
+            Stop after this file</button
+          ><button class="button build" id="validation-run" disabled>
+            Validate queue
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 12h16m-6-6 6 6-6 6" />
+            </svg>
+          </button>
+        </div>
+        <ol
+          id="validation-queue"
+          class="validation-queue"
+          aria-label="PDF validation queue"
+        ></ol>
+        <div id="validation-empty" class="validation-empty">
+          <h3>Bring the whole stack.</h3>
+          <p>
+            Add several PDFs or drop them here. Choose one or more profiles,
+            then validate the queue. The synthetic examples include a valid
+            PDF/A-3b with an attachment, a false declaration, and an ordinary
+            PDF.
+          </p>
+        </div>
+        <div class="validation-export">
+          <p id="validation-summary">
+            A declaration is evidence. A completed validator pass is a verified
+            result.
+          </p>
+          <button class="text-button" id="validation-json" disabled>
+            Download JSON report</button
+          ><button class="text-button" id="validation-csv" disabled>
+            Download CSV summary
+          </button>
+        </div>
+        <p class="validation-footnote">
+          veraPDF 1.30.3 · explicit profiles · selected profiles share one
+          veraPDF parse · isolated validator with a 45-second limit. Failure
+          details show up to 24 examples per profile; all checks still run.
+          Files the validator cannot open or finish receive “Unable to check”.
+        </p>
+      </section>
       <footer>
         <p>PDF structure &amp; rewriting by Kyo PDF. Previews by PDFBox.</p>
         <p id="sample-note">

@@ -125,7 +125,10 @@ lazy val paperMachine = (project in file("examples/paper-machine"))
   .settings(
     name := "paper-machine",
     publish / skip := true,
-    libraryDependencies += "org.apache.pdfbox" % "pdfbox" % "3.0.4",
+    libraryDependencies ++= List(
+      "org.apache.pdfbox" % "pdfbox" % "3.0.4",
+      "org.verapdf" % "validation-model" % "1.30.3"
+    ),
     Compile / mainClass := Some("io.github.adrielc.kyopdf.demo.PaperMachine")
   )
 

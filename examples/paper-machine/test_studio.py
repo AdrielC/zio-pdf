@@ -1,6 +1,8 @@
 """Live integration checks against the loopback studio; no external PDF fixtures."""
 
 import json
+import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -8,6 +10,7 @@ import tempfile
 import unittest
 import urllib.error
 import urllib.request
+import urllib.parse
 from pathlib import Path
 
 BASE = sys.argv.pop(1).rstrip("/") if len(sys.argv) > 1 else "http://127.0.0.1:8087"
@@ -16,7 +19,7 @@ BASE = sys.argv.pop(1).rstrip("/") if len(sys.argv) > 1 else "http://127.0.0.1:8
 def request(path, data=None, headers=None):
     req = urllib.request.Request(BASE + path, data=data, headers=headers or {})
     try:
-        with urllib.request.urlopen(req, timeout=45) as response:
+        with urllib.request.urlopen(req, timeout=65) as response:
             return response.status, response.read(), response.headers
     except urllib.error.HTTPError as error:
         return error.code, error.read(), error.headers
@@ -146,6 +149,204 @@ class StudioTest(unittest.TestCase):
                     capture_output=True, text=True, timeout=60,
                 )
                 self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+
+class ValidationTest(unittest.TestCase):
+    def sample(self, kind):
+        status, body, _ = request("/api/validation-samples/" + kind)
+        self.assertEqual(status, 200, body)
+        return body
+
+    def validate(self, pdf, profiles="3b"):
+        status, body, _ = request("/api/validate?profiles=" + profiles, pdf)
+        self.assertEqual(status, 200, body)
+        return json.loads(body)
+
+    def test_explicit_profiles_share_a_file_and_produce_independent_verdicts(self):
+        pdf = self.sample("valid")
+        report = self.validate(pdf, "3b,2b,3u")
+        self.assertEqual(report["sha256"], hashlib.sha256(pdf).hexdigest())
+        self.assertEqual(report["engine"], "veraPDF")
+        self.assertEqual(report["engineVersion"], "1.30.3")
+        self.assertTrue(report["identification"]["declares3b"])
+        results = {value["profile"]: value for value in report["validation"]["results"]}
+        self.assertEqual(set(results), {"3b", "2b", "3u"})
+        self.assertEqual(results["3b"]["status"], "passed")
+        self.assertEqual(results["2b"]["status"], "failed")
+        self.assertEqual(results["3u"]["status"], "failed")
+        self.assertGreater(results["3b"]["checks"], 0)
+        self.assertEqual(results["3b"]["failedRules"], 0)
+
+    def test_false_pdfa_claim_fails_with_rule_evidence(self):
+        report = self.validate(self.sample("false-claim"))
+        self.assertTrue(report["identification"]["declares3b"])
+        check = report["validation"]["results"][0]
+        self.assertEqual(check["status"], "failed")
+        self.assertGreater(check["failedRules"], 0)
+        self.assertTrue(any(item["clause"] and item["message"] for item in check["failures"]))
+        self.assertLessEqual(len(check["failures"]), 24)
+
+    def test_multiple_documents_have_distinct_receipts_and_do_not_stop_after_failure(self):
+        reports = [self.validate(self.sample(kind)) for kind in ["false-claim", "ordinary", "valid"]]
+        self.assertEqual([r["validation"]["results"][0]["status"] for r in reports], ["failed", "failed", "passed"])
+        self.assertEqual(len({r["sha256"] for r in reports}), 3)
+        self.assertEqual(reports[1]["identification"]["state"], "NotDeclared")
+
+    def test_rewrite_requires_a_fresh_fingerprint_and_validation(self):
+        pdf = self.sample("valid")
+        before = self.validate(pdf)
+        status, body, _ = request("/api/documents", pdf)
+        self.assertEqual(status, 200, body)
+        doc = json.loads(body)
+        self.assertTrue(doc["identification"]["declares3b"])
+        status, body, _ = request("/api/documents/" + doc["id"] + "/remix", b"1")
+        self.assertEqual(status, 200, body)
+        rewritten = json.loads(body)
+        self.assertNotEqual(rewritten["sha256"], before["sha256"])
+        status, output, _ = request("/api/documents/" + rewritten["id"] + "/file")
+        self.assertEqual(status, 200)
+        after = self.validate(output)
+        self.assertEqual(after["sha256"], rewritten["sha256"])
+        self.assertEqual(after["validation"]["results"][0]["status"], "passed")
+
+    def test_malformed_input_is_unable_to_check(self):
+        report = self.validate(b"This is not a PDF")
+        self.assertEqual(report["identification"]["state"], "Unreadable")
+        self.assertIn("error", report["validation"])
+        self.assertNotIn("results", report["validation"])
+
+    def test_profile_bounds_input_bounds_and_origin(self):
+        for query in ["", "profiles=", "profiles=3b,3b", "profiles=unknown", "profiles=1b"]:
+            self.assertEqual(request("/api/validate?" + query, b"pdf")[0], 400)
+        self.assertEqual(request("/api/validate?profiles=3b", b"")[0], 400)
+        self.assertEqual(request("/api/validate?profiles=3b", b"x" * (12 * 1024 * 1024 + 1))[0], 400)
+        self.assertEqual(request("/api/validate?profiles=3b", b"x", {"Origin": "https://example.org"})[0], 403)
+
+    def test_temporary_validation_files_are_removed(self):
+        root = Path(tempfile.gettempdir())
+        before = set(root.glob("paper-machine-validation-*"))
+        self.validate(self.sample("valid"))
+        self.assertEqual(set(root.glob("paper-machine-validation-*")) - before, set())
+
+    @unittest.skipUnless(os.environ.get("PAPER_MACHINE_SLOW_TESTS") == "1", "Set PAPER_MACHINE_SLOW_TESTS=1 for the 45-second process timeout test")
+    def test_busy_timeout_and_cleanup(self):
+        import concurrent.futures
+        import signal
+        import time
+        pdf = self.sample("valid")
+        root = Path(tempfile.gettempdir())
+        before = set(root.glob("paper-machine-validation-*"))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(self.validate, pdf)
+            pid = None
+            for _ in range(100):
+                lines = subprocess.check_output(["ps", "-axo", "pid,args"], text=True).splitlines()
+                line = next((line for line in lines if "io.github.adrielc.kyopdf.demo.ValidationWorker " in line and "paper-machine-validation-" in line), None)
+                if line:
+                    pid = int(line.split()[0])
+                    os.kill(pid, signal.SIGSTOP)
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(pid, "No validation worker started")
+            self.assertEqual(request("/api/validate?profiles=3b", pdf)[0], 429)
+            report = pending.result(timeout=55)
+            self.assertIn("45 seconds", report["validation"]["error"])
+        self.assertEqual(set(root.glob("paper-machine-validation-*")) - before, set())
+
+
+class PacketTest(unittest.TestCase):
+    def setUp(self):
+        status, body, _ = request("/api/sample", b"")
+        self.assertEqual(status, 200)
+        self.doc = json.loads(body)
+
+    def build(self, options, doc=None):
+        doc = doc or self.doc
+        return request(f"/api/documents/{doc['id']}/compose", urllib.parse.urlencode(options).encode())
+
+    def bookend(self, slot, pdf, name):
+        status, body, _ = request("/api/bookends/" + slot, pdf, {"X-File-Name": name})
+        self.assertEqual(status, 200, body)
+        return json.loads(body)
+
+    def output_text(self, report):
+        status, pdf, _ = request(f"/api/documents/{report['id']}/file")
+        self.assertEqual(status, 200)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "packet.pdf"
+            path.write_bytes(pdf)
+            if shutil.which("qpdf"):
+                subprocess.run(["qpdf", "--check", str(path)], check=True, capture_output=True)
+            if not shutil.which("pdftotext"):
+                self.skipTest("Install Poppler to verify searchable stamp and number text")
+            return subprocess.check_output(["pdftotext", "-layout", str(path), "-"], text=True).split("\f")[:-1]
+
+    def test_bookends_stamps_and_bates_numbers_share_final_page_order(self):
+        sample = request("/api/validation-samples/valid")[1]
+        head = self.bookend("head", sample, "Front.pdf")
+        tail = self.bookend("tail", sample, "Back.pdf")
+        status, raw, _ = self.build({"pages": "4,1", "head": head["id"], "tail": tail["id"], "stamp": "REVIEW (copy) \\ approved", "numbered": "true", "start": "7", "style": "bates", "prefix": "DOC-"})
+        self.assertEqual(status, 200, raw)
+        report = json.loads(raw)
+        self.assertEqual(len(report["pages"]), 4)
+        pages = self.output_text(report)
+        self.assertEqual(len(pages), 4)
+        self.assertIn("FORM", pages[1])
+        self.assertIn("ORBIT", pages[2])
+        for index, text in enumerate(pages):
+            self.assertIn("REVIEW (copy)", text)
+            self.assertIn("DOC-" + str(index + 7).zfill(6), text)
+        self.assertNotIn("Prev", report["trailer"])
+        self.assertNotEqual(report["sha256"], self.doc["sha256"])
+
+    def test_embedded_font_and_profiled_stamp_preserve_valid_3b_specimen(self):
+        sample = request("/api/validation-samples/valid")[1]
+        status, raw, _ = request("/api/documents", sample)
+        self.assertEqual(status, 200, raw)
+        status, raw, _ = self.build({"pages": "1", "stamp": "DRAFT", "numbered": "true"}, json.loads(raw))
+        self.assertEqual(status, 200, raw)
+        report = json.loads(raw)
+        self.assertIn("DRAFT", self.output_text(report)[0])
+        pdf = request(f"/api/documents/{report['id']}/file")[1]
+        status, raw, _ = request("/api/validate?profiles=3b", pdf)
+        self.assertEqual(status, 200, raw)
+        receipt = json.loads(raw)
+        self.assertEqual(receipt["validation"]["results"][0]["status"], "passed", receipt)
+        self.assertEqual(receipt["sha256"], report["sha256"])
+
+    def test_crop_rotation_unicode_and_numbering_survive_preview_and_write(self):
+        pdf = synthetic_pdf([
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Count 1 /Kids [3 0 R] /MediaBox [20 30 320 430] /Rotate 90 >>",
+            "<< /Type /Page /Parent 2 0 R /CropBox [-20 -30 500 600] /Resources << >> >>",
+        ], 1)
+        status, raw, _ = request("/api/documents", pdf)
+        self.assertEqual(status, 200, raw)
+        status, raw, _ = self.build({"pages": "1", "stamp": "Révisé", "placement": "center", "numbered": "true", "start": "9", "style": "number"}, json.loads(raw))
+        self.assertEqual(status, 200, raw)
+        report = json.loads(raw)
+        text = self.output_text(report)[0]
+        self.assertIn("Révisé", text)
+        self.assertIn("9", text)
+        self.assertEqual(request(f"/api/documents/{report['id']}/preview?page=1")[0], 200)
+
+    def test_packet_option_bounds_and_stale_bookends_fail_without_losing_source(self):
+        sample = request("/api/validation-samples/valid")[1]
+        stale = self.bookend("head", sample, "First.pdf")
+        self.bookend("head", sample, "Replacement.pdf")
+        invalid = [
+            {"pages": "1", "stamp": "x" * 81}, {"pages": "1", "prefix": "x" * 25},
+            {"pages": "1", "start": "0"}, {"pages": "1", "start": "1000000"},
+            {"pages": "1", "placement": "outside"}, {"pages": "1", "style": "unknown"},
+            {"pages": "1,1"}, {"pages": "1", "head": stale["id"]},
+            {"pages": "1", "stamp": "line\nbreak"}, {"pages": "1", "numbered": "yes"},
+        ]
+        for options in invalid:
+            self.assertEqual(self.build(options)[0], 400, options)
+        self.assertEqual(request(f"/api/documents/{self.doc['id']}/file")[0], 200)
+        self.assertEqual(request(f"/api/documents/{self.doc['id']}/compose", b"pages=1&pages=2")[0], 400)
+        self.assertEqual(request(f"/api/documents/{self.doc['id']}/compose", b"x" * 4097)[0], 400)
+        self.assertEqual(request(f"/api/documents/{self.doc['id']}/compose", b"pages=1", {"Origin": "https://example.com"})[0], 403)
 
 
 if __name__ == "__main__":

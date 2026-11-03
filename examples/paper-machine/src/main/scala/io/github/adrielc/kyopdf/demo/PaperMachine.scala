@@ -18,12 +18,13 @@ import scala.util.Using
 object PaperMachine:
   private val MaxInput = 12 * 1024 * 1024
   private val MaxPages = 64
-  private final case class Document(id: String, name: String, bytes: Array[Byte], value: PdfDocument, pages: Vector[ObjectRef])
+  private final case class Document(id: String, name: String, bytes: Array[Byte], value: PdfDocument, pages: Vector[ObjectRef], identification: PdfAIdentification, sha256: String)
   private final case class Reply(bytes: Array[Byte], mime: String = "application/json", status: Int = 200)
   private val documents = mutable.LinkedHashMap.empty[String, Document]
+  private val bookends = mutable.Map.empty[String, Document]
   private val previews = mutable.LinkedHashMap.empty[String, Array[Byte]]
 
-  private def evaluate[A](program: A < (Abort[PdfError] & Sync)): Either[String, A] =
+  private[demo] def evaluate[A](program: A < (Abort[PdfError] & Sync)): Either[String, A] =
     import kyo.AllowUnsafe.embrace.danger
     Abort.run[PdfError](Sync.Unsafe.run(program)).eval match
       case Result.Success(value) => Right(value)
@@ -33,7 +34,7 @@ object PaperMachine:
   private def edge[A](value: => A): Either[String, A] =
     evaluate(Abort.catching[Exception](error => PdfError.InvalidPdf(Option(error.getMessage).getOrElse("Request failed")))(Sync.defer(value)))
 
-  private def quote(value: String): String = "\"" + value.flatMap {
+  private[demo] def quote(value: String): String = "\"" + value.flatMap {
     case '"' => "\\\""
     case '\\' => "\\\\"
     case '\n' => "\\n"
@@ -69,7 +70,7 @@ object PaperMachine:
   private def report(doc: Document): String =
     val objects = doc.value.byRef.values.toVector.sortBy(obj => (obj.index.number, obj.index.generation))
     // Page dictionaries remain inspectable even when high object numbers exceed the graph cap.
-    val required = doc.pages.toSet ++ doc.value.root.toSet
+    val required = doc.pages.toSet ++ doc.value.root.toSet ++ doc.identification.metadata.toSet
     val visible = (objects.filter(obj => required(obj.index)) ++ objects.filterNot(obj => required(obj.index)))
       .take(180).sortBy(obj => (obj.index.number, obj.index.generation))
     val nodes = visible.map { obj =>
@@ -87,20 +88,20 @@ object PaperMachine:
     }.mkString("[", ",", "]")
     val pages = doc.pages.zipWithIndex.map((value, index) => s"{\"number\":${index + 1},\"ref\":${quote(ref(value))}}")
       .mkString("[", ",", "]")
-    s"{\"id\":${quote(doc.id)},\"name\":${quote(doc.name)},\"bytes\":${doc.bytes.length},\"version\":${quote(doc.value.version)},\"root\":${quote(doc.value.root.map(ref).getOrElse(""))},\"objectCount\":${objects.length},\"streamCount\":${objects.count(_.stream.nonEmpty)},\"objects\":$nodes,\"pages\":$pages,\"trailer\":${quote(syntax(doc.value.trailer))}}"
+    s"{\"id\":${quote(doc.id)},\"name\":${quote(doc.name)},\"bytes\":${doc.bytes.length},\"version\":${quote(doc.value.version)},\"root\":${quote(doc.value.root.map(ref).getOrElse(""))},\"objectCount\":${objects.length},\"streamCount\":${objects.count(_.stream.nonEmpty)},\"objects\":$nodes,\"pages\":$pages,\"trailer\":${quote(syntax(doc.value.trailer))},\"sha256\":${quote(doc.sha256)},\"identification\":${PdfValidation.declarationJson(doc.identification)}}"
 
-  private def admit(bytes: Array[Byte], name: String): Either[String, Document] =
+  private def admit(bytes: Array[Byte], name: String, retain: Boolean = true): Either[String, Document] =
     if bytes.length > MaxInput then Left("This studio accepts PDFs up to 12 MiB. Choose a smaller file.")
     else evaluate {
       ByteLimit.fromBytes(MaxInput).map { limit =>
         PdfDocument.decode(bytes, limit, RetentionLimits(maxObjects = 8000, maxNodes = 150000, maxDepth = 32, maxPayloadBytes = 32L * 1024 * 1024))
-          .map(value => PdfPages.pageRefs(value).map(pages => (value, pages)))
+          .map(value => PdfPages.pageRefs(value).map(pages => PdfAIdentification.inspect(value).map(found => (value, pages, found))))
       }
-    }.flatMap { (value, pages) =>
+    }.flatMap { (value, pages, found) =>
       if pages.isEmpty || pages.length > MaxPages then Left("Choose a PDF with 1 to 64 pages.")
       else
-        val doc = Document(UUID.randomUUID().toString, name.take(120), bytes, value, pages)
-        documents.synchronized {
+        val doc = Document(UUID.randomUUID().toString, name.take(120), bytes, value, pages, found, PdfValidation.sha256(bytes))
+        if retain then documents.synchronized {
           documents(doc.id) = doc
           while documents.size > 3 do
             val _ = documents.remove(documents.head._1)
@@ -144,12 +145,25 @@ object PaperMachine:
     if Option(exchange.getRequestHeaders.getFirst("Host")).exists(_ != origin.stripPrefix("http://")) ||
         Option(exchange.getRequestHeaders.getFirst("Origin")).exists(_ != origin) then
       error("Open the studio from its loopback URL.", 403)
-    else if method == "GET" && Set("/", "/app.js", "/style.css", "/chivo.ttf")(path) then
+    else if method == "GET" && Set("/", "/app.js", "/validation.js", "/style.css", "/chivo.ttf")(path) then
       val asset = if path == "/" then "index.html" else path.drop(1)
       val mime = if asset.endsWith(".js") then "text/javascript" else if asset.endsWith(".css") then "text/css" else if asset.endsWith(".ttf") then "font/ttf" else "text/html"
       Using.resource(getClass.getResourceAsStream(s"/paper-machine/$asset")) { stream =>
         Reply(stream.readNBytes(256 * 1024), mime)
       }
+    else if path == "/api/validate" && method == "POST" then
+      val profiles = Option(exchange.getRequestURI.getRawQuery).getOrElse("").stripPrefix("profiles=").split(',').toVector
+      if profiles.isEmpty || profiles.distinct != profiles || !profiles.forall(PdfValidation.Profiles.contains) then
+        error("Choose distinct profiles from 2b, 3b, and 3u")
+      else if !PdfValidation.slots.tryAcquire() then error("Another validation is running. Wait for it to finish.", 429)
+      else Using.resource(new AutoCloseable { def close(): Unit = PdfValidation.slots.release() }) { _ =>
+        ValidationPdf.from(read(exchange, ValidationPdf.MaxBytes)).fold(error(_), input => json(PdfValidation.run(input, profiles)))
+      }
+    else if method == "GET" && path.startsWith("/api/validation-samples/") then
+      val kind = path.stripPrefix("/api/validation-samples/")
+      if !Set("valid", "false-claim", "ordinary")(kind) then error("Not found", 404)
+      else evaluate(PdfWriter.write(if kind == "ordinary" then Sample.document else ValidationSamples.document(kind == "false-claim")))
+        .fold(error(_), bytes => Reply(bytes.toArray, "application/pdf"))
     else if path == "/api/sample" && method == "POST" then
       evaluate(PdfWriter.write(Sample.document)).flatMap(bytes => admit(bytes.toArray, "Field notes.pdf"))
         .fold(error(_), doc => json(report(doc)))
@@ -157,6 +171,12 @@ object PaperMachine:
       val bytes = read(exchange, MaxInput)
       val name = Option(exchange.getRequestHeaders.getFirst("X-File-Name")).map(value => URLDecoder.decode(value, UTF_8)).getOrElse("Untitled.pdf")
       admit(bytes, name).fold(error(_), doc => json(report(doc)))
+    else if method == "POST" && Set("/api/bookends/head", "/api/bookends/tail")(path) then
+      val bytes = read(exchange, MaxInput)
+      val name = Option(exchange.getRequestHeaders.getFirst("X-File-Name")).map(value => URLDecoder.decode(value, UTF_8)).getOrElse("Added pages.pdf")
+      admit(bytes, name, retain = false).fold(error(_), doc =>
+        bookends.synchronized { bookends(path.split('/').last) = doc }
+        json(report(doc)))
     else
       val parts = path.split('/').filter(_.nonEmpty).toVector
       if parts.length != 4 || parts.take(2) != Vector("api", "documents") then error("Not found", 404)
@@ -176,6 +196,34 @@ object PaperMachine:
             else evaluate(PdfPages.select(doc.value, numbers.flatten).map(PdfWriter.write))
               .flatMap(bytes => admit(bytes.toArray, doc.name.stripSuffix(".pdf") + " - remix.pdf"))
               .fold(error(_), result => json(report(result)))
+          case "compose" if method == "POST" =>
+            val body = read(exchange, 4096)
+            if body.length > 4096 then error("Packet options exceed their limit")
+            else
+              val entries = new String(body, UTF_8).split('&').toVector.map { field =>
+                val pair = field.split("=", 2)
+                URLDecoder.decode(pair(0), UTF_8) -> URLDecoder.decode(pair.lift(1).getOrElse(""), UTF_8)
+              }
+              val options = entries.toMap
+              val allowed = Set("pages", "head", "tail", "stamp", "placement", "numbered", "start", "style", "prefix")
+              val numbers = options.getOrElse("pages", "").split(",", -1).toVector.map(_.toIntOption)
+              val start = options.getOrElse("start", "1").toIntOption
+              if entries.length != options.size || !options.keySet.subsetOf(allowed) || numbers.exists(_.isEmpty) || start.isEmpty ||
+                  !Set("true", "false")(options.getOrElse("numbered", "false")) then error("Choose valid packet options")
+              else
+                val chosen = bookends.synchronized {
+                  Vector("head", "tail").map(slot => options.get(slot).filter(_.nonEmpty).map(id =>
+                    bookends.get(slot).filter(_.id == id).toRight(s"The $slot PDF expired. Choose it again.")))
+                }
+                val sources = chosen.foldLeft[Either[String, Vector[Option[Document]]]](Right(Vector.empty)) { (acc, value) =>
+                  acc.flatMap(found => value.fold[Either[String, Vector[Option[Document]]]](Right(found :+ None))(_.map(doc => found :+ Some(doc))))
+                }
+                sources.flatMap { sources =>
+                  val settings = PacketOptions(options.getOrElse("stamp", ""), options.getOrElse("placement", "top"),
+                    options.getOrElse("numbered", "false") == "true", start.get, options.getOrElse("style", "page"), options.getOrElse("prefix", ""))
+                  evaluate(PacketBuild.run(doc.value, numbers.flatten, sources(0).map(_.value), sources(1).map(_.value), settings))
+                    .flatMap(bytes => admit(bytes.toArray, doc.name.stripSuffix(".pdf") + " - packet.pdf"))
+                }.fold(error(_), result => json(report(result)))
           case _ => error("Not found", 404)
 
   def main(args: Array[String]): Unit =

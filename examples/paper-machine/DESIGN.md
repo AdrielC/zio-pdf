@@ -11,6 +11,30 @@ colors:
   line: "#cbd4da"
   field-muted: "#b4c9d5"
   trace: "#7290a3"
+  action-hover: "#31536a"
+  signal-hover: "#d0df42"
+  node: "#1c394b"
+  node-page: "#31566f"
+  node-hover: "#395972"
+  node-line: "#6d8899"
+  node-page-line: "#a0bccd"
+  bench: "#e8edf1"
+  assembly: "#f1f3e8"
+  assembly-line: "#c9cfbd"
+  assembly-hover: "#dce2c9"
+  syntax: "#26475d"
+  notice: "#e4eaf0"
+  checking: "#f3f5e6"
+  progress-track: "#486170"
+  queued-text: "#465b69"
+  passed-bg: "#e7f0e7"
+  passed-text: "#27542d"
+  passed-line: "#a9bfa7"
+  failed-bg: "#fbe9e2"
+  failed-text: "#8c301c"
+  failed-line: "#ba5a3e"
+  unable-bg: "#f6ecd8"
+  unable-text: "#6e4e1d"
 typography:
   display:
     fontFamily: "Chivo, Arial, sans-serif"
@@ -28,6 +52,36 @@ typography:
     fontFamily: "Chivo, Arial, sans-serif"
     fontSize: "14px"
     fontWeight: 400
+    lineHeight: 1.5
+  validation-headline:
+    fontFamily: "Chivo, Arial, sans-serif"
+    fontSize: "30px"
+    fontWeight: 700
+    lineHeight: 1.25
+    letterSpacing: "-0.035em"
+  packet-title:
+    fontFamily: "Chivo, Arial, sans-serif"
+    fontSize: "18px"
+    fontWeight: 700
+    lineHeight: 1.5
+  control:
+    fontFamily: "Chivo, Arial, sans-serif"
+    fontSize: "14px"
+    fontWeight: 600
+    lineHeight: 1.5
+  label:
+    fontFamily: "Chivo, Arial, sans-serif"
+    fontSize: "12px"
+    fontWeight: 600
+    lineHeight: 1.5
+  annotation:
+    fontFamily: "Chivo, Arial, sans-serif"
+    fontSize: "11px"
+    fontWeight: 400
+    lineHeight: 1.5
+  small-annotation:
+    fontFamily: "Chivo, Arial, sans-serif"
+    fontSize: "10px"
     lineHeight: 1.5
   mono:
     fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace"
@@ -71,6 +125,17 @@ components:
     textColor: "{colors.ink}"
     rounded: "{rounded.square}"
     padding: "24px"
+  packet-field:
+    backgroundColor: "{colors.white}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.square}"
+    padding: "8px"
+    height: "44px"
+  validation-file:
+    backgroundColor: "{colors.white}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.square}"
+    padding: "23px 24px"
   object-selected:
     backgroundColor: "{colors.signal}"
     textColor: "{colors.ink}"
@@ -86,7 +151,7 @@ components:
 
 Paper Machine treats PDF structure as something a person can probe. A navy measurement field, electric-yellow signals and a cool paper bench give the studio the character of a working instrument. The visual language belongs to this example; it does not define the PDF library's identity.
 
-Sturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork.
+Sturdy Chivo lettering makes actions and sections immediate. Monospace identifies actual syntax and addresses. Dense structural information sits beside calm document surfaces; previews are rendered PDF pages, including the example's synthetic vector artwork. Packet finishing and batch validation extend the same instrument through plain fields, contiguous rows and evidence attached to each file.
 
 **Key Characteristics:**
 
@@ -97,7 +162,7 @@ Sturdy Chivo lettering makes actions and sections immediate. Monospace identifie
 
 ## Colors
 
-The palette pairs a dark instrument with cool neutral surfaces and a single electric accent. The frontmatter is the normative palette; supplemental state colors remain in the source and component examples. The sidecar's synthesized tonal strips are previews, not additional application tokens.
+The palette pairs a dark instrument with cool neutral surfaces and a single electric action accent. The frontmatter is normative and includes the existing navy ramp and validation states. Sidecar tonal strips are previews, not additional application tokens; the navy strip reuses observed surface colors.
 
 ### Primary
 
@@ -113,6 +178,19 @@ The palette pairs a dark instrument with cool neutral surfaces and a single elec
 - **Panel Seam** (`line`): work-area boundaries and small control strokes.
 - **Field Readout** (`field-muted`): secondary text and addresses on navy.
 - **Idle Trace** (`trace`): visible, inactive connections in the graph.
+- **Navy Surface Ramp** (`node`, `node-page`, `node-hover`, `action-hover`): structural objects, pages and hover states, with `node-line` and `node-page-line` for their strokes.
+- **Page Bench and Assembly Ground** (`bench`, `assembly`): cool rendered-page bench and pale assembly area; assembly rules and hover use `assembly-line` and `assembly-hover`.
+- **Syntax Ink** (`syntax`): literal dictionary content on cool paper.
+
+### Status
+
+- **Queued / Checking** (`queued-text`, `checking`, `progress-track`): quiet queued readouts, a pale active-file wash and a dark progress track. The active badge and progress fill use Electric Signal.
+- **Verified** (`passed-bg`, `passed-text`, `passed-line`): green only for completed passing checks and the matching verified declaration label.
+- **Failed** (`failed-bg`, `failed-text`, `failed-line`): rust text on a pale warm field for completed failed checks and errors.
+- **Unable to Check** (`unable-bg`, `unable-text`): amber for checks that could not establish a verdict.
+- **Notice** (`notice`): a subdued blue-gray information strip.
+
+**The Verdict Evidence Rule.** A metadata claim never receives verified styling by itself. Pair every status color with a literal outcome label; verification belongs to completed checks of the exact bytes.
 
 **The Energized State Rule.** Yellow identifies an actionable or connected state. A selected object takes a solid yellow field; related objects retain their field and gain a yellow outline.
 
@@ -127,7 +205,10 @@ The hierarchy is compact and sturdy: a heavy, tightly spaced display line, stron
 - **Display:** The frontmatter records the wide-screen ramp. At compact widths it becomes a fixed size (40px); below the stacking breakpoint it uses `clamp(33px, 8.3vw, 48px)`.
 - **Title:** Section headings use the frontmatter role, reducing to (19px) below the stacking breakpoint.
 - **Body:** The frontmatter role establishes the default. Supporting descriptions use smaller sizes (11–15px) according to context.
-- **Mono:** The syntax well uses the frontmatter role. Graph addresses, references and page addresses use smaller monospace annotations (10–11px).
+- **Validation headline:** A subordinate heavy headline (30px, reducing to 27px when stacked). The queue empty-state title uses (22px); packet legends use the frontmatter packet-title role.
+- **Controls and labels:** Actions use the control role; compact actions and queue filenames use (13px). Labels and evidence use (12px), file metadata and receipts use the annotation role, and verdict badges reduce from (11px) to (10px) when stacked.
+- **Small annotations:** Graph keys, profile captions and supporting technical notes use (9–11px); the live marker reduces to (8px) on narrow screens. These are supporting readouts, not heading sizes.
+- **Mono:** The syntax well uses the frontmatter role. Graph addresses, references, fingerprints and page addresses use smaller monospace annotations (10–11px). Source PDF artwork retains its own real type; do not simulate it with a bitmap font.
 
 **The Literal Readout Rule.** Reserve monospace for PDF syntax and addresses; use Chivo for names, instructions and actions.
 
@@ -135,7 +216,9 @@ The hierarchy is compact and sturdy: a heavy, tightly spaced display line, stron
 
 Work areas share straight seams rather than floating as independent cards. The content has a maximum width (1680px) and proportional horizontal gutters (4%, increasing to 5% on small screens). Section padding steps from roomy (24px) to compact (20px).
 
-Density adjusts at (1050px); work areas stack at (760px). Long page sequences, source thumbnails and dense object maps scroll inside their own regions. Small graphs fit their viewport vertically; taller graphs retain their natural height. The narrow-screen map preserves a readable minimum width (650px) and scrolls horizontally. First-surface composition and workflow strategy remain in `.impeccable/surface.md`.
+Density adjusts at (1050px); work areas stack at (760px). Long page sequences, source thumbnails and dense object maps scroll inside their own regions. Small graphs fit their viewport vertically; taller graphs retain their natural height. The narrow-screen map preserves a readable minimum width (650px) and scrolls horizontally. Packet bookends and finishing operations use two equal columns with a gap (24px), stacking into one column with a gap (8px) at (760px). Each revealed field group keeps two shrinkable columns with a gap (12px); text inputs and selects are at least (44px) high.
+
+The validation controls, navy run bar and file queue share one continuous width. Queue rows use padding (23px 24px), becoming (20px 18px) when stacked. Outcome groups wrap; the identification claim takes a full row on small screens while profile verdicts retain a readable minimum width (93px). Filenames and hashes wrap anywhere. Receipts use a narrow label column (110px, reducing to 75px) beside a shrinkable value column. Progress is a thin rule (5px) with a maximum width (440px); the narrow run bar wraps progress above its actions. The interface is reviewed at wide (1440px) and narrow (390px and 535px) CSS widths. First-surface composition and workflow strategy remain in `.impeccable/surface.md`.
 
 ## Elevation & Depth
 
@@ -151,7 +234,7 @@ Controls, selectors, thumbnails, work areas and graph nodes use square corners. 
 
 ### Buttons
 
-Primary actions are navy with white text; assembly uses the yellow build variant. Both are square and use a brief background transition (0.2s), with a pressed offset (1px). Primary hover lightens the navy; build hover deepens the yellow. Text actions have no filled enclosure and underline on hover. Disabled buttons reduce opacity (0.4; build uses 0.5).
+Primary actions are navy with white text; assembly uses the yellow build variant. Both are square and use a brief background transition (0.2s), with a pressed offset (1px). Primary hover uses action-hover; build hover uses signal-hover. Text actions have no filled enclosure and underline on hover. Disabled buttons reduce opacity (0.4; build uses 0.5).
 
 ### Page navigation and assembly controls
 
@@ -163,11 +246,25 @@ Object addresses appear as compact, square outline buttons in monospace. Hover f
 
 ### Inspector and selector
 
-A white work area holds metadata, an ordinary native select and a cool-paper syntax well. The select has a thin seam border and square corners. The syntax region preserves whitespace and scrolls in both axes when needed. Buttons, links, selects and the syntax region share a visible slate-blue outline (3px, offset 4px).
+A white work area holds metadata, an ordinary native select and a cool-paper syntax well. The select has a thin seam border and square corners. The syntax region preserves whitespace and scrolls in both axes when needed. Buttons, links, selects and the syntax region share a visible slate-blue outline (3px, offset 4px). Packet text inputs and profile checkboxes use the same treatment. Buttons in the navy validation run bar switch the outline to Electric Signal for contrast.
 
 ### Object graph
 
 Nodes pair a readable kind with a monospace address. Pages use a lighter navy fill; streams use a dashed stroke. Selection, related state and hover are distinct. Keyboard focus thickens the node stroke. Idle traces remain visible; active traces become yellow and animate dashed current (1.2s, linear). Nodes expose button semantics and pressed state, with Enter and Space activation in `app.js`.
+
+### Studio tabs
+
+Two text tabs sit on a shared seam; the active tab gains a navy underline (3px) and darker text. The desktop gap (26px) becomes (20px) when stacked and the small batch note disappears. Tab state, associated panels and focus order are explicit; Left and Right arrows activate and focus the other tab. The open-file action and skip-link destination follow the active tool.
+
+### Packet finishing
+
+A ruled fieldset belongs to the assembly area. Front/back slots expose filename and page count, then text actions at least (44px) high. Each Choose and Remove action has a unique accessible name identifying its front or back slot; Remove stays disabled until a PDF is present. Native checkboxes reveal stamp or numbering fields only when enabled. The controls specify actual searchable stamp text, placement, page/number/Bates format, start and optional prefix. One Build PDF action applies the sequence and finishing; the result updates the real preview, graph and direct download. Activation of the built document clears bookends and disables finishing choices, hiding their fields so another build cannot silently apply them again. Optional validation sends the exact built output through the chosen profiles while retaining other queued receipts.
+
+### Validation queue and evidence
+
+A white control area holds native profile checkboxes with (44px) label targets, then Add PDFs and Clear queue. The navy run bar carries live progress, a stop-after-current-file action and the signal-filled run action. Queue rows identify each file before showing its XMP claim and separate profile outcomes: Queued, Checking, Verified, Failed or Unable to check. Inspect PDF returns to the explorer; the removal icon has a filename-specific accessible name. Row actions and profile changes are disabled during a run.
+
+Evidence stays behind a native disclosure. Its receipt shows engine, checked time, fingerprint and readability; each profile's failures carry clause/test, message and literal context. Completed keyed rows remain mounted while other files advance, preserving open disclosures, text selection and keyboard focus. Profile changes clear earlier verdicts until rechecked. JSON and CSV exports become available for completed files. Never substitute a metadata declaration for a verified result, or label an interrupted/unreadable check as passed or failed.
 
 ### Feedback
 
@@ -181,6 +278,9 @@ Loading and errors occupy a bordered status strip with live announcements. Succe
 - **Do** distinguish a solid selected node from outlined related nodes.
 - **Do** preserve local scrolling, keyboard focus and reduced-motion behavior when extending a work area.
 - **Do** use the larger narrow-screen assembly controls with their established spacing.
+- **Do** keep queue outcomes labeled, receipts tied to exact bytes and completed disclosures stable while a batch advances.
+- **Do** reveal finishing fields progressively and clear enabled finishing choices after a successful build.
+- **Do** use real PDF renders for every preview; no generated raster artwork ships with the studio.
 
 ### Don't:
 
@@ -188,3 +288,5 @@ Loading and errors occupy a bordered status strip with live announcements. Succe
 - **Don't** use monospace for display headlines or action labels.
 - **Don't** add ambient shadows to ordinary controls or panel seams.
 - **Don't** turn sample artwork colors or tiny technical annotations into a general palette or heading scale.
+- **Don't** apply verified styling to an XMP claim, stale fingerprint or unfinished check.
+- **Don't** use a low-contrast focus outline on the navy run bar.
