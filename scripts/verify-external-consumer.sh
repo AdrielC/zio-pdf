@@ -2,6 +2,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Run each build in a fresh JVM rather than reusing a native-client server.
+PROOF_SBT=(sbt --server -J-Xms256m -J-Xmx2g -Dsbt.server.autostart=false)
 CONSUMER_ROOT="${REPO_ROOT}/tests/consumer"
 PROOF_ROOT="$(mktemp -d)"
 PUBLISH_REPO="${PROOF_ROOT}/repo"
@@ -11,7 +14,7 @@ cd "${REPO_ROOT}"
 VERSION=""
 VERSION_OUTPUT=""
 for attempt in 1 2 3; do
-  if VERSION_OUTPUT="$(sbt -batch -no-colors 'show root / version' 2>&1)"; then
+  if VERSION_OUTPUT="$("${PROOF_SBT[@]}" -batch -no-colors 'show root / version' 2>&1)"; then
     candidate="$(
       printf '%s\n' "${VERSION_OUTPUT}" |
         grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)*' |
@@ -34,8 +37,10 @@ if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)*$ ]]; then
   exit 1
 fi
 
-sbt -batch ";set root / publishTo := Some(Resolver.file(\"consumer-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));root/publish"
+# Dirty snapshot versions include a timestamp; reapplying settings may otherwise
+# change the version between discovery, publication, and consumer resolution.
+"${PROOF_SBT[@]}" -batch ";set ThisBuild / version := \"${VERSION}\";set root / publishTo := Some(Resolver.file(\"consumer-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));root/publish"
 
 cd "${CONSUMER_ROOT}"
-sbt -batch -Dzio.pdf.local.repo="${PUBLISH_REPO}" -Dzio.pdf.version="${VERSION}" run
+"${PROOF_SBT[@]}" -batch -Dzio.pdf.local.repo="${PUBLISH_REPO}" -Dzio.pdf.version="${VERSION}" run
 echo "External consumer resolved and executed zio-pdf ${VERSION}."

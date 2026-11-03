@@ -4,38 +4,60 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# Isolate proof builds from native-client servers retained by earlier CI steps.
+PROOF_SBT=(sbt --server -J-Xms256m -J-Xmx2g -Dsbt.server.autostart=false)
+
 ARTIFACT_ROOT="$(mktemp -d)"
 PUBLISH_REPO="${ARTIFACT_ROOT}/repo"
 JAR_LIST="$(mktemp)"
 JS_JAR_LIST="$(mktemp)"
+JS_SOURCE_LIST="$(mktemp)"
 CLASS_STRINGS="$(mktemp)"
 JS_CLASS_STRINGS="$(mktemp)"
-trap 'rm -rf "${ARTIFACT_ROOT}"; rm -f "${JAR_LIST}" "${JS_JAR_LIST}" "${CLASS_STRINGS}" "${JS_CLASS_STRINGS}"' EXIT
+trap 'rm -rf "${ARTIFACT_ROOT}"; rm -f "${JAR_LIST}" "${JS_JAR_LIST}" "${JS_SOURCE_LIST}" "${CLASS_STRINGS}" "${JS_CLASS_STRINGS}"' EXIT
 
-sbt -batch ";set root / publishTo := Some(Resolver.file(\"artifact-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));set scalaJs / publishTo := Some(Resolver.file(\"artifact-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));root/publish;scalaJs/publish"
+"${PROOF_SBT[@]}" -batch ";set root / publishTo := Some(Resolver.file(\"artifact-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));set scalaJs / publishTo := Some(Resolver.file(\"artifact-proof\", file(\"${PUBLISH_REPO}\"))(Resolver.mavenStylePatterns));root/publish;scalaJs/publish"
 
 JAR_PATH="$(find "${ARTIFACT_ROOT}" -type f -name 'zio-pdf_3*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort | tail -n 1)"
 POM_PATH="$(find "${ARTIFACT_ROOT}" -type f -name 'zio-pdf_3*.pom' | sort | tail -n 1)"
 JS_JAR_PATH="$(find "${ARTIFACT_ROOT}" -type f -name 'zio-pdf_sjs1_3*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort | tail -n 1)"
 JS_POM_PATH="$(find "${ARTIFACT_ROOT}" -type f -name 'zio-pdf_sjs1_3*.pom' | sort | tail -n 1)"
+JS_SOURCE_PATH="$(find "${ARTIFACT_ROOT}" -type f -name 'zio-pdf_sjs1_3*-sources.jar' | sort | tail -n 1)"
 
-if [[ -z "${JAR_PATH}" || -z "${POM_PATH}" || -z "${JS_JAR_PATH}" || -z "${JS_POM_PATH}" ]]; then
+if [[ -z "${JAR_PATH}" || -z "${POM_PATH}" || -z "${JS_JAR_PATH}" || -z "${JS_POM_PATH}" || -z "${JS_SOURCE_PATH}" ]]; then
   echo "JVM or Scala.js release artifact was not generated." >&2
   exit 1
 fi
 
 jar tf "${JAR_PATH}" > "${JAR_LIST}"
 jar tf "${JS_JAR_PATH}" > "${JS_JAR_LIST}"
+jar tf "${JS_SOURCE_PATH}" > "${JS_SOURCE_LIST}"
 
 for entry in \
   'zio/pdf/PdfObjectScanner$.class' \
   'zio/pdf/StreamingDecode$.class' \
-  'zio/pdf/PdfEngine$.class'; do
+  'zio/pdf/PdfEngine$.class' \
+  'volga/free/FreeProp$.class'; do
   if ! grep -Fqx "${entry}" "${JAR_LIST}"; then
     echo "Published JAR is missing ${entry}." >&2
     exit 1
   fi
 done
+
+for entry in \
+  'zio/pdf/XrefStream.scala' \
+  'zio/pdf/PdfSource.scala' \
+  'zio/pdf/schema/package.scala'; do
+  if ! grep -Fqx "${entry}" "${JS_SOURCE_LIST}"; then
+    echo "Scala.js source JAR is missing package-relative source ${entry}." >&2
+    exit 1
+  fi
+done
+
+if grep -Eq '^[^/]+\.scala$' "${JS_SOURCE_LIST}"; then
+  echo "Scala.js source JAR contains flattened source paths." >&2
+  exit 1
+fi
 
 for entry in \
   'zio/pdf/ByteLimit$.class' \
@@ -81,6 +103,10 @@ for pom in "${POM_PATH}" "${JS_POM_PATH}"; do
   grep -Fq 'https://github.com/AdrielC/zio-pdf' "${pom}"
   if grep -Eqi '<repositories>|<pluginRepositories>' "${pom}"; then
     echo "Release POM contains a repository override." >&2
+    exit 1
+  fi
+  if grep -Eq '<artifactId>volga-core(_[^<]+)?</artifactId>' "${pom}"; then
+    echo "Release POM depends on an unpublished helper module." >&2
     exit 1
   fi
 done

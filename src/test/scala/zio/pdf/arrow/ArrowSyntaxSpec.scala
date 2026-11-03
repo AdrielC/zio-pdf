@@ -84,6 +84,20 @@ object ArrowSyntaxSpec extends ZIOSpecDefault {
         formats.plantUml.contains("@startuml")
       )
     },
+    test("identity, swap and disconnected outputs remain visible in graph renderings") {
+      val identity = wiringProp.of1((x: WiringV1) => x)
+      val swap = wiringProp.of2((a: WiringV1, b: WiringV1) => (b, a))
+      val identityFormats = ArrowSyntax.render("identity", identity, Tuple1("input"))
+      val swapFormats = ArrowSyntax.render("swap", swap, ("first", "second"))
+      val mixed = (Vector("output", "output", "pass"), Vector("input" -> "output"))
+      assertTrue(
+        identityFormats.mermaid.linesIterator.contains("  input"),
+        identityFormats.dot.linesIterator.contains("  \"input\";"),
+        swapFormats.mermaid.linesIterator.toVector.takeRight(2) == Vector("  second", "  first"),
+        GraphRender.mermaid("mixed", mixed).linesIterator.toVector.takeRight(2) == Vector("  pass", "  input --> output"),
+        GraphRender.dot("mixed", mixed).linesIterator.toVector.slice(1, 3) == Vector("  \"pass\";", "  \"input\" -> \"output\";")
+      )
+    },
     test("FreeArrow folds FnArrow spines") {
       given Category[FnArrow] = FnArrowCat.fnCategory
       val f                   = FnArrow[Int, Int](_ + 1)

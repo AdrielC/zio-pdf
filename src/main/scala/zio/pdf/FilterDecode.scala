@@ -6,7 +6,7 @@
 package zio.pdf
 
 import _root_.scodec.{Attempt, Err}
-import _root_.scodec.bits.BitVector
+import _root_.scodec.bits.{BitVector, ByteVector}
 
 private[pdf] object FilterDecode {
 
@@ -46,8 +46,8 @@ private[pdf] object FilterDecode {
       case "FlateDecode" =>
         // Wrap DecodeParms so FlateDecode.handleParams finds them.
         FlateDecode(stream, Prim.dict("DecodeParms" -> parms), maxOutputBytes)
-      case "ASCIIHexDecode"  => AsciiHexDecode(stream)
-      case "ASCII85Decode"   => Ascii85Decode(stream)
+      case "ASCIIHexDecode"  => AsciiHexDecode(stream, maxOutputBytes)
+      case "ASCII85Decode"   => Ascii85Decode(stream, maxOutputBytes)
       case "RunLengthDecode" => RunLengthDecode(stream, maxOutputBytes)
       case "LZWDecode"       => LzwDecode(stream, parms, maxOutputBytes)
       case other if passthrough.contains(other) =>
@@ -80,17 +80,20 @@ private[pdf] object FilterDecode {
 }
 
 private[pdf] object AsciiHexDecode {
-  def apply(stream: BitVector): Attempt[BitVector] = {
-    val in     = stream.toByteArray
-    val out    = new Array[Byte]((in.length + 1) / 2)
+  def apply(stream: BitVector, maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization): Attempt[BitVector] = {
+    val in     = ByteVector.viewAt(stream.getByte, stream.size / 8 + (if stream.size % 8 == 0 then 0 else 1))
+    val out    = new Array[Byte](math.min((in.size + 1L) / 2L, maxOutputBytes.toLong).toInt)
     var nibble = -1
     var o      = 0
-    var i      = 0
-    while i < in.length do
+    var i      = 0L
+    def limitError: Attempt[BitVector] =
+      Attempt.failure(Err(FilterDecode.OutputLimitExceeded("ASCIIHexDecode", maxOutputBytes.bytes, o.toLong + 1L).getMessage))
+    while i < in.size do
       val b = in(i)
       i += 1
       if b == '>'.toByte then
         if nibble >= 0 then
+          if o >= maxOutputBytes.bytes then return limitError
           out(o) = (nibble << 4).toByte
           o += 1
         return Attempt.successful(BitVector(java.util.Arrays.copyOf(out, o)))
@@ -104,12 +107,14 @@ private[pdf] object AsciiHexDecode {
           else return Attempt.failure(Err(s"ASCIIHexDecode: bad nibble ${b.toInt & 0xff}"))
         if nibble < 0 then nibble = v
         else {
+          if o >= maxOutputBytes.bytes then return limitError
           out(o) = ((nibble << 4) | v).toByte
           o += 1
           nibble = -1
         }
       }
     if nibble >= 0 then
+      if o >= maxOutputBytes.bytes then return limitError
       out(o) = (nibble << 4).toByte
       o += 1
     Attempt.successful(BitVector(java.util.Arrays.copyOf(out, o)))
@@ -117,13 +122,17 @@ private[pdf] object AsciiHexDecode {
 }
 
 private[pdf] object Ascii85Decode {
-  def apply(stream: BitVector): Attempt[BitVector] = {
-    val in  = stream.toByteArray
-    val out = new scala.collection.mutable.ArrayBuffer[Byte](in.length)
+  def apply(stream: BitVector, maxOutputBytes: ByteLimit = ByteLimit.DefaultStreamMaterialization): Attempt[BitVector] = {
+    val in  = ByteVector.viewAt(stream.getByte, stream.size / 8 + (if stream.size % 8 == 0 then 0 else 1))
+    val out = new scala.collection.mutable.ArrayBuffer[Byte](math.min(8192L, math.min(in.size, maxOutputBytes.toLong)).toInt)
     val tup = new Array[Byte](5)
     var n   = 0
-    var i   = 0
-    def flush(count: Int): Unit = {
+    var i   = 0L
+    def limitError(extra: Int): Attempt[Nothing] =
+      Attempt.failure(Err(FilterDecode.OutputLimitExceeded("ASCII85Decode", maxOutputBytes.bytes, out.size.toLong + extra).getMessage))
+    def flush(count: Int): Attempt[Unit] = {
+      if count == 1 then return Attempt.failure(Err("ASCII85Decode: incomplete one-digit tuple"))
+      if count - 1 > maxOutputBytes.bytes - out.size then return limitError(count - 1)
       var value = 0L
       var k     = 0
       while k < count do
@@ -132,6 +141,7 @@ private[pdf] object Ascii85Decode {
       while k < 5 do
         value = value * 85L + 84
         k += 1
+      if value > 0xffffffffL then return Attempt.failure(Err("ASCII85Decode: tuple exceeds unsigned 32-bit range"))
       val bytes = count - 1
       var shift = 24
       var b     = 0
@@ -139,15 +149,18 @@ private[pdf] object Ascii85Decode {
         out += ((value >> shift) & 0xff).toByte
         shift -= 8
         b += 1
+      Attempt.successful(())
     }
-    while i < in.length do
+    def finish: Attempt[BitVector] =
+      (if n > 0 then flush(n) else Attempt.successful(())).map(_ => BitVector(out.toArray))
+    while i < in.size do
       val b = in(i)
       i += 1
       if b == '~'.toByte then
-        if i < in.length && in(i) == '>'.toByte then i += 1
-        if n > 0 then flush(n)
-        return Attempt.successful(BitVector(out.toArray))
+        if i >= in.size || in(i) != '>'.toByte then return Attempt.failure(Err("ASCII85Decode: invalid end marker"))
+        return finish
       else if b == 'z'.toByte && n == 0 then
+        if 4 > maxOutputBytes.bytes - out.size then return limitError(4)
         out += 0; out += 0; out += 0; out += 0
       else if b == ' '.toByte || b == '\n'.toByte || b == '\r'.toByte || b == '\t'.toByte || b == '\f'.toByte || b == 0.toByte then
         ()
@@ -155,12 +168,14 @@ private[pdf] object Ascii85Decode {
         tup(n) = b
         n += 1
         if n == 5 then
-          flush(5)
+          flush(5) match {
+            case failure: Attempt.Failure => return failure
+            case _ => ()
+          }
           n = 0
       else
         return Attempt.failure(Err(s"ASCII85Decode: bad byte ${b.toInt & 0xff}"))
-    if n > 0 then flush(n)
-    Attempt.successful(BitVector(out.toArray))
+    finish
   }
 }
 
