@@ -1,5 +1,6 @@
 import org.scalajs.linker.interface.ModuleKind
 import org.scalajs.sbtplugin.ScalaJSPlugin
+import scala.scalanative.sbtplugin.ScalaNativePlugin
 
 val zioVersion                 = "2.1.26"
 val zioPreludeVersion          = "1.0.0-RC47"
@@ -99,6 +100,42 @@ lazy val kyoPdf = (project in file("kyo-pdf-core"))
     ),
     Test / unmanagedResourceDirectories += (LocalRootProject / Test / resourceDirectory).value,
     Test / mainClass := Some("io.github.adrielc.kyopdf.PdfParserSpec"),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+/** Scala Native artifact: same core with an Expat-backed XMP reader. */
+lazy val kyoPdfNative = (project in file("kyo-pdf-native"))
+  .enablePlugins(ScalaNativePlugin)
+  .settings(
+    name := "kyo-pdf",
+    Compile / packageDoc / publishArtifact := true,
+    Test / packageBin / publishArtifact := false,
+    Test / packageSrc / publishArtifact := false,
+    Test / packageDoc / publishArtifact := false,
+    Compile / unmanagedSources ++= {
+      val shared = (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "main" / "scala"
+      (shared ** "*.scala").get().filterNot(_.getName == "XmpReader.scala")
+    },
+    Compile / packageSrc / mappings := {
+      val repo = (LocalRootProject / baseDirectory).value
+      val converter = fileConverter.value
+      val roots = Seq(repo / "kyo-pdf-core" / "src" / "main" / "scala", baseDirectory.value / "src" / "main" / "scala")
+      (Compile / unmanagedSources).value.map { source =>
+        converter.toVirtualFile(source.toPath) -> roots.iterator.flatMap(root => IO.relativize(root, source)).next()
+      }
+    },
+    Test / unmanagedSources +=
+      (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
+        "io" / "github" / "adrielc" / "kyopdf" / "PdfAIdentificationSpec.scala",
+    libraryDependencies ++= List(
+      "io.getkyo" % "kyo-core_native0.5_3"    % kyoVersion,
+      "io.getkyo" % "kyo-parse_native0.5_3"   % kyoVersion,
+      "io.getkyo" % "kyo-schema_native0.5_3"  % kyoVersion,
+      "dev.zio"   % "zio-test_native0.5_3"     % zioVersion % Test,
+      "dev.zio"   % "zio-test-sbt_native0.5_3" % zioVersion % Test
+    ),
+    libraryDependencySchemes += "org.scala-native" % "test-interface_native0.5_3" % VersionScheme.EarlySemVer,
+    Test / fork := false,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 
