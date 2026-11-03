@@ -9,6 +9,14 @@ All notable changes to this project are documented here.
 - Internal `0.1.0-internal.2` artifacts create a fresh `kyo-parse` effect for
   every scan, making repeated and ZIO-lifted parser runs independent.
 
+### Fixed
+
+- Kyo content parsing charges nested operands against the token budget before
+  parsing them and counts every array and literal-string nesting level.
+- Full PDF rewrites discard obsolete revision and xref-stream trailer fields,
+  regenerate `/Size`, and preserve and remap retained trailer metadata when
+  selecting pages.
+
 ### Added
 
 - Internal `com.tybera:kyo-pdf_3:0.1.0-internal.1` artifact with a ZIO-free
