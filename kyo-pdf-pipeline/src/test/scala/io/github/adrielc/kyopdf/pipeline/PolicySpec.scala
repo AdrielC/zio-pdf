@@ -28,6 +28,23 @@ object PolicySpec extends ZIOSpecDefault:
         result(loaded, Map.empty) == Vector("needs-review")
       )
     },
+    test("earlier profiles and saved pipelines load using generic metadata") {
+      import PdfArrow.*
+      val original = profile(rule)
+      val legacy = encode(original).replace("\"authority\"", "\"court\"").replace("\"documentType\"", "\"filingType\"")
+      val plan = checked(original)
+      val recipe = PdfArrow.recipe("Legacy profile", input("body") >>> write >>> preflight(original))
+        .flatMap(PdfPipeline.check).fold(e => throw AssertionError(e.toString), identity)
+      val saved = PdfPipelineJson.encode(recipe).replace("\"authority\"", "\"court\"")
+        .replace("\"documentType\"", "\"filingType\"")
+      val mixed = legacy.dropRight(1) + ""","authority":"Different"}"""
+      assertTrue(
+        decode(legacy).toOption.get.profile == original,
+        result(decode(legacy).toOption.get, Map(Metric.FileBytes -> 200)) == result(plan, Map(Metric.FileBytes -> 200)),
+        PdfPipelineJson.decode(saved).toOption.get.recipe == recipe.recipe,
+        decode(mixed).isLeft
+      )
+    },
     test("logic preserves unknowns and independent findings while resolving definite outcomes") {
       val small = rule.condition
       val unknown = Condition.Review

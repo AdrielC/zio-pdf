@@ -113,8 +113,19 @@ object Policy:
           case Json.Array(values) => values.size <= 256 && values.forall(bounded(_, depth + 1))
           case _ => true)
         if !bounded(value, 0) then Left(Vector(Issue("profile", Code.Limit, "Use bounded profile JSON with unique fields")))
-        else profileCodec.decode(json).left.map(error => Vector(Issue("profile", Code.Structure, error.toString))).flatMap(compile)
+        else profileCodec.decode(normalizeProfile(value).print).left.map(error => Vector(Issue("profile", Code.Structure, error.toString))).flatMap(compile)
       }
+
+  /** Migrate the first profile field names while rejecting ambiguous mixed input. */
+  private[pipeline] def normalizeProfile(value: Json): Json = value match
+    case obj: Json.Object =>
+      val names = obj.value.map(_._1).toSet
+      obj.copy(value = obj.value.map {
+        case ("court", value) if !names("authority") => "authority" -> value
+        case ("filingType", value) if !names("documentType") => "documentType" -> value
+        case field => field
+      })
+    case other => other
 
   private def boundedJsonText(json: String): Boolean =
     var depth = 0

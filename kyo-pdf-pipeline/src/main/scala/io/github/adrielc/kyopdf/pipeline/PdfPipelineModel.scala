@@ -162,6 +162,7 @@ object PdfPipelineModel:
           case Str(name) => Str(name.capitalize)
           case other => other
         field.name -> (field.name match
+          case "rules" => Policy.normalizeProfile(value)
           case "kind" => kind(value)
           case "kinds" => value match
             case Arr(values) => Arr(values.iterator.map(kind).toSeq*)

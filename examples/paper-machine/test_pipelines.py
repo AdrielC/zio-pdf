@@ -319,6 +319,12 @@ class PipelineTest(unittest.TestCase):
         status, compiled = request('/api/policies/check', profile)
         self.assertEqual(status, 200, compiled)
         self.assertEqual(json.loads(compiled), profile)
+        legacy = copy.deepcopy(profile)
+        legacy['court'] = legacy.pop('authority')
+        legacy['filingType'] = legacy.pop('documentType')
+        status, migrated = request('/api/policies/check', legacy)
+        self.assertEqual(status, 200, migrated)
+        self.assertEqual(json.loads(migrated), profile)
         status, report = request('/api/documents/' + self.doc['id'] + '/policy-preflight', profile)
         self.assertEqual(status, 200, report)
         failed = json.loads(report)
@@ -342,6 +348,14 @@ class PipelineTest(unittest.TestCase):
         checked = self.rpc('tools/call', {'name': 'check_pdf_pipeline', 'arguments': {'recipe': recipe}})
         self.assertFalse(checked['isError'], checked)
         self.assertEqual(checked['structuredContent']['recipe'], recipe)
+        operation['rules'] = legacy
+        migrated = self.rpc('tools/call', {'name': 'check_pdf_pipeline', 'arguments': {'recipe': recipe}})
+        self.assertFalse(migrated['isError'], migrated)
+        operation['rules'] = profile
+        # Legacy was captured before the threshold changed from three to four.
+        migrated_rules = next(n['rules'] for n in migrated['structuredContent']['recipe']['nodes']
+                              if n['op'] == 'preflight-rules')
+        self.assertEqual(migrated_rules['authority'], profile['authority'])
         result = self.rpc('tools/call', {'name': 'run_pdf_pipeline',
                                         'arguments': {'recipe': recipe, 'files': {'body': self.doc['id']}}})
         self.assertFalse(result['isError'], result)
