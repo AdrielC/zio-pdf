@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## [0.4.0] — 2026-11-03
+
+- Publish the JVM Kyo core, ZIO adapter, and pipeline module with the generic
+  `Policy` API, versioned JSON, SchemaExpr conditions, and reusable PDF arrows.
+- Add policy preflight with source citations, page evidence, exact-byte hashes,
+  three-way decisions, and saved-profile metadata compatibility.
+- Expose pipeline schema, check, explain, and audited run tools in Paper Machine.
+- Compose PDF/A-3b conversion and exact-output validation through Gotenberg.
+- Gate releases on Gotenberg tool tests and independent Policy consumers, then
+  verify all six public artifacts and execute the Policy API from Maven Central.
+
+## [0.3.0] — 2026-11-03
+
 - Kyo parsing accepts a binary-marker comment directly
   after the PDF version, matching zio-pdf writer output.
 - Kyo parsing creates a fresh `kyo-parse` effect for
@@ -16,8 +29,7 @@ All notable changes to this project are documented here.
   imports and dependency organization and recompile; this is a source and
   binary compatibility change. Existing `zio.pdf` APIs are unchanged.
 - Kyo modules inherit the public project organization and source build version.
-  Removed the company-specific publishing configuration. The existing release
-  workflow still publishes only the JVM and Scala.js `zio-pdf` artifacts.
+  Publishing uses the public project organization and source build version.
 
 ### Fixed
 
