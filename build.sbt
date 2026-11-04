@@ -83,8 +83,11 @@ lazy val volgaCore = (project in file("modules/volga-core"))
   )
 
 private def kyoPdfArtifactSettings = Seq(
-  Compile / packageDoc / publishArtifact := false,
-  Compile / packageSrc / publishArtifact := true
+  Compile / packageDoc / publishArtifact := true,
+  Compile / packageSrc / publishArtifact := true,
+  Test / packageBin / publishArtifact := false,
+  Test / packageSrc / publishArtifact := false,
+  Test / packageDoc / publishArtifact := false
 )
 
 /** Kyo-native PDF core. Main sources intentionally have no ZIO dependency. */

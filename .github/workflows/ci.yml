@@ -75,7 +75,9 @@ jobs:
         run: bash scripts/audit-published-artifact.sh
 
       - name: Prove external consumption
-        run: bash scripts/verify-external-consumer.sh
+        run: |
+          bash scripts/verify-external-consumer.sh
+          bash scripts/verify-policy-consumer.sh
 
   native:
     name: Scala Native
