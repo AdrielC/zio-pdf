@@ -1,4 +1,5 @@
 ThisBuild / scalaVersion := "3.8.4"
+Compile / unmanagedSources += baseDirectory.value.getParentFile / "policy-shared" / "PolicyConsumerChecks.scala"
 
 resolvers ++= sys.props.get("zio.pdf.local.repo")
   .map(path => "policy-proof" at file(path).toURI.toString).toList

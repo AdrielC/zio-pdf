@@ -174,17 +174,68 @@ lazy val kyoPdfPipeline = (project in file("kyo-pdf-pipeline"))
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 
-/** Opt-in Native pipeline build using locally supplied ZIO Blocks Native jars. */
+/** Public-source Native backport of the ZIO Blocks runtime used by pipelines. */
+private def blocksNativeLegalMappings = Def.task {
+  val root = (LocalRootProject / baseDirectory).value / "modules" / "zio-blocks-native"
+  val converter = fileConverter.value
+  Seq("LICENSE", "NOTICE", "UPSTREAM.json").map(name =>
+    converter.toVirtualFile((root / name).toPath) -> s"META-INF/zio-blocks-native/$name")
+}
+
+private def blocksNativeSettings(module: String) = Seq(
+  name := s"kyo-pdf-blocks-$module",
+  description := s"Public-source ZIO Blocks 0.0.56 $module runtime for Kyo PDF on Scala Native",
+  Compile / unmanagedSourceDirectories := Seq("shared", "native").flatMap(platform =>
+    Seq("scala", "scala-3").map(kind => baseDirectory.value / platform / "src" / "main" / kind)),
+  Test / unmanagedSourceDirectories := Seq(baseDirectory.value / "shared" / "src" / "test" / "scala"),
+  Compile / packageSrc / mappings := {
+    val roots = (Compile / unmanagedSourceDirectories).value
+    val converter = fileConverter.value
+    (Compile / unmanagedSources).value.map(source =>
+      converter.toVirtualFile(source.toPath) -> roots.iterator.flatMap(root => IO.relativize(root, source)).next())
+  },
+  Compile / packageBin / mappings ++= blocksNativeLegalMappings.value,
+  Compile / packageSrc / mappings ++= blocksNativeLegalMappings.value,
+  Compile / packageDoc / mappings ++= blocksNativeLegalMappings.value,
+  scalacOptions := Seq("-deprecation", "-feature", "-unchecked"),
+  Test / fork := false,
+  libraryDependencies ++= List(
+    "dev.zio" % "zio-test_native0.5_3" % zioVersion % Test,
+    "dev.zio" % "zio-test-sbt_native0.5_3" % zioVersion % Test
+  ),
+  libraryDependencySchemes += "org.scala-native" % "test-interface_native0.5_3" % VersionScheme.EarlySemVer,
+  testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+)
+
+lazy val blocksChunkNative = (project in file("modules/zio-blocks-native/chunk"))
+  .enablePlugins(ScalaNativePlugin).settings(kyoPdfArtifactSettings).settings(blocksNativeSettings("chunk"))
+lazy val blocksTypeIdNative = (project in file("modules/zio-blocks-native/typeid"))
+  .enablePlugins(ScalaNativePlugin).dependsOn(blocksChunkNative)
+  .settings(kyoPdfArtifactSettings).settings(blocksNativeSettings("typeid"))
+lazy val blocksMaybeNative = (project in file("modules/zio-blocks-native/maybe"))
+  .enablePlugins(ScalaNativePlugin).dependsOn(blocksTypeIdNative)
+  .settings(kyoPdfArtifactSettings).settings(blocksNativeSettings("maybe"))
+lazy val blocksMarkdownNative = (project in file("modules/zio-blocks-native/markdown"))
+  .enablePlugins(ScalaNativePlugin).dependsOn(blocksChunkNative)
+  .settings(kyoPdfArtifactSettings).settings(blocksNativeSettings("markdown"))
+lazy val blocksSchemaNative = (project in file("modules/zio-blocks-native/schema"))
+  .enablePlugins(ScalaNativePlugin).dependsOn(blocksTypeIdNative, blocksChunkNative, blocksMarkdownNative, blocksMaybeNative)
+  .settings(kyoPdfArtifactSettings).settings(blocksNativeSettings("schema"))
+  .settings(libraryDependencies ++= List(
+    "io.github.cquiroz" % "scala-java-time_native0.5_3" % scalaJavaTimeVersion,
+    "io.github.cquiroz" % "scala-java-time-tzdb_native0.5_3" % scalaJavaTimeVersion
+  ))
+
+/** Native pipelines use only public-source, published dependencies. */
 lazy val kyoPdfPipelineNative = (project in file("kyo-pdf-pipeline-native"))
   .enablePlugins(ScalaNativePlugin)
-  .dependsOn(kyoPdfNative)
+  .dependsOn(kyoPdfNative, blocksSchemaNative)
+  .settings(kyoPdfArtifactSettings)
   .settings(
-    name := "kyo-pdf-pipeline-native",
-    publish / skip := true,
+    name := "kyo-pdf-pipeline",
     Compile / scalaSource := (kyoPdfPipeline / Compile / scalaSource).value,
     Test / scalaSource := (kyoPdfPipeline / Test / scalaSource).value,
-    unmanagedBase := sys.props.get("kyo.pdf.native.schemaJars").fold(baseDirectory.value / "lib")(file),
-    scalacOptions += "-experimental",
+    Test / unmanagedSourceDirectories += baseDirectory.value / "src" / "test" / "scala",
     libraryDependencies ++= List(
       "io.github.cquiroz" % "scala-java-time_native0.5_3" % scalaJavaTimeVersion,
       "dev.zio" % "zio-test_native0.5_3" % zioVersion % Test,

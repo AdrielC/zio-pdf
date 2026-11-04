@@ -1,0 +1,810 @@
+/*
+ * Copyright 2024-2026 John A. De Goes and the ZIO Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package zio.blocks.schema.binding
+
+import zio.blocks.chunk.{Chunk, ChunkMap}
+import zio.blocks.maybe.Maybe
+import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.binding.RegisterOffset.RegisterOffset
+import scala.annotation.unchecked.uncheckedVariance
+import java.time._
+import java.util.{Currency, UUID}
+
+/**
+ * A binding is used to attach non-serializable Scala functions, such as
+ * constructors, deconstructors, and matchers, to a reflection type.
+ *
+ * The `Binding` type is indexed by `T`, which is a phantom type that represents
+ * the type of binding. The type `A` represents the type of the reflection type.
+ *
+ * So, for example, `Binding[BindingType.Record, Int]` represents a binding for
+ * the reflection type `Int` that has a record binding (and therefore, both a
+ * constructor and a deconstructor).
+ */
+sealed trait Binding[T, +A]
+
+object Binding extends BindingCompanionVersionSpecific {
+  final case class Primitive[A]() extends Binding[BindingType.Primitive, A]
+
+  object Primitive {
+    val unit: Primitive[Unit] = new Primitive[Unit]()
+
+    val boolean: Primitive[Boolean] = new Primitive[Boolean]()
+
+    val byte: Primitive[Byte] = new Primitive[Byte]()
+
+    val short: Primitive[Short] = new Primitive[Short]()
+
+    val int: Primitive[Int] = new Primitive[Int]()
+
+    val long: Primitive[Long] = new Primitive[Long]()
+
+    val float: Primitive[Float] = new Primitive[Float]()
+
+    val double: Primitive[Double] = new Primitive[Double]()
+
+    val char: Primitive[Char] = new Primitive[Char]()
+
+    val string: Primitive[String] = new Primitive[String]()
+
+    val bigInt: Primitive[BigInt] = new Primitive[BigInt]()
+
+    val bigDecimal: Primitive[BigDecimal] = new Primitive[BigDecimal]()
+
+    val dayOfWeek: Primitive[DayOfWeek] = new Primitive[DayOfWeek]()
+
+    val duration: Primitive[Duration] = new Primitive[Duration]()
+
+    val instant: Primitive[Instant] = new Primitive[Instant]()
+
+    val localDate: Primitive[LocalDate] = new Primitive[LocalDate]()
+
+    val localDateTime: Primitive[LocalDateTime] = new Primitive[LocalDateTime]()
+
+    val localTime: Primitive[LocalTime] = new Primitive[LocalTime]()
+
+    val month: Primitive[Month] = new Primitive[Month]()
+
+    val monthDay: Primitive[MonthDay] = new Primitive[MonthDay]()
+
+    val offsetDateTime: Primitive[OffsetDateTime] = new Primitive[OffsetDateTime]()
+
+    val offsetTime: Primitive[OffsetTime] = new Primitive[OffsetTime]()
+
+    val period: Primitive[Period] = new Primitive[Period]()
+
+    val year: Primitive[Year] = new Primitive[Year]()
+
+    val yearMonth: Primitive[YearMonth] = new Primitive[YearMonth]()
+
+    val zoneId: Primitive[ZoneId] = new Primitive[ZoneId]()
+
+    val zoneOffset: Primitive[ZoneOffset] = new Primitive[ZoneOffset]()
+
+    val zonedDateTime: Primitive[ZonedDateTime] = new Primitive[ZonedDateTime]()
+
+    val currency: Primitive[Currency] = new Primitive[Currency]()
+
+    val uuid: Primitive[UUID] = new Primitive[UUID]()
+  }
+
+  final case class Record[A](
+    constructor: Constructor[A],
+    deconstructor: Deconstructor[A]
+  ) extends Binding[BindingType.Record, A]
+
+  object Record {
+    def some[A <: AnyRef]: Record[Some[A]] = new Record(
+      constructor = new Constructor[Some[A]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(objects = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[A] = new Some(in.getObject(offset).asInstanceOf[A])
+      },
+      deconstructor = new Deconstructor[Some[A]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(objects = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[A]): Unit = out.setObject(offset, in.get)
+      }
+    )
+
+    val someDouble: Record[Some[Double]] = new Record(
+      constructor = new Constructor[Some[Double]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(doubles = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Double] = new Some(in.getDouble(offset))
+      },
+      deconstructor = new Deconstructor[Some[Double]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(doubles = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Double]): Unit = out.setDouble(offset, in.get)
+      }
+    )
+
+    val someLong: Record[Some[Long]] = new Record(
+      constructor = new Constructor[Some[Long]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(longs = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Long] = new Some(in.getLong(offset))
+      },
+      deconstructor = new Deconstructor[Some[Long]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(longs = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Long]): Unit = out.setLong(offset, in.get)
+      }
+    )
+
+    val someFloat: Record[Some[Float]] = new Record(
+      constructor = new Constructor[Some[Float]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(floats = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Float] = new Some(in.getFloat(offset))
+      },
+      deconstructor = new Deconstructor[Some[Float]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(floats = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Float]): Unit = out.setFloat(offset, in.get)
+      }
+    )
+
+    val someInt: Record[Some[Int]] = new Record(
+      constructor = new Constructor[Some[Int]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(ints = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Int] = new Some(in.getInt(offset))
+      },
+      deconstructor = new Deconstructor[Some[Int]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(ints = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Int]): Unit = out.setInt(offset, in.get)
+      }
+    )
+
+    val someChar: Record[Some[Char]] = new Record(
+      constructor = new Constructor[Some[Char]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(chars = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Char] = new Some(in.getChar(offset))
+      },
+      deconstructor = new Deconstructor[Some[Char]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(chars = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Char]): Unit = out.setChar(offset, in.get)
+      }
+    )
+
+    val someShort: Record[Some[Short]] = new Record(
+      constructor = new Constructor[Some[Short]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(shorts = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Short] = new Some(in.getShort(offset))
+      },
+      deconstructor = new Deconstructor[Some[Short]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(shorts = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Short]): Unit = out.setShort(offset, in.get)
+      }
+    )
+
+    val someBoolean: Record[Some[Boolean]] = new Record(
+      constructor = new Constructor[Some[Boolean]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(booleans = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Boolean] = new Some(in.getBoolean(offset))
+      },
+      deconstructor = new Deconstructor[Some[Boolean]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(booleans = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Boolean]): Unit =
+          out.setBoolean(offset, in.get)
+      }
+    )
+
+    val someByte: Record[Some[Byte]] = new Record(
+      constructor = new Constructor[Some[Byte]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(bytes = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Byte] = new Some(in.getByte(offset))
+      },
+      deconstructor = new Deconstructor[Some[Byte]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(bytes = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Byte]): Unit = out.setByte(offset, in.get)
+      }
+    )
+
+    val someUnit: Record[Some[Unit]] = new Record(
+      constructor = new Constructor[Some[Unit]] {
+        def usedRegisters: RegisterOffset = 0L
+
+        def construct(in: Registers, offset: RegisterOffset): Some[Unit] = new Some(())
+      },
+      deconstructor = new Deconstructor[Some[Unit]] {
+        def usedRegisters: RegisterOffset = 0L
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Some[Unit]): Unit = ()
+      }
+    )
+
+    val none: Record[None.type] = new Record(
+      constructor = new Constructor[None.type] {
+        def usedRegisters: RegisterOffset = 0L
+
+        def construct(in: Registers, offset: RegisterOffset): None.type = None
+      },
+      deconstructor = new Deconstructor[None.type] {
+        def usedRegisters: RegisterOffset = 0L
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: None.type): Unit = ()
+      }
+    )
+
+    val absent: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = 0L
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef = null
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = 0L
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit = ()
+      }
+    )
+
+    def present[A <: AnyRef]: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(objects = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef = in.getObject(offset)
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(objects = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit = out.setObject(offset, in)
+      }
+    )
+
+    val presentDouble: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(doubles = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          java.lang.Double.valueOf(in.getDouble(offset))
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(doubles = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit =
+          out.setDouble(offset, in.asInstanceOf[java.lang.Double].doubleValue())
+      }
+    )
+
+    val presentLong: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(longs = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          java.lang.Long.valueOf(in.getLong(offset))
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(longs = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit =
+          out.setLong(offset, in.asInstanceOf[java.lang.Long].longValue())
+      }
+    )
+
+    val presentFloat: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(floats = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          java.lang.Float.valueOf(in.getFloat(offset))
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(floats = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit =
+          out.setFloat(offset, in.asInstanceOf[java.lang.Float].floatValue())
+      }
+    )
+
+    val presentInt: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(ints = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          java.lang.Integer.valueOf(in.getInt(offset))
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(ints = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit =
+          out.setInt(offset, in.asInstanceOf[java.lang.Integer].intValue())
+      }
+    )
+
+    val presentChar: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(chars = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          java.lang.Character.valueOf(in.getChar(offset))
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(chars = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit =
+          out.setChar(offset, in.asInstanceOf[java.lang.Character].charValue())
+      }
+    )
+
+    val presentShort: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(shorts = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          java.lang.Short.valueOf(in.getShort(offset))
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(shorts = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit =
+          out.setShort(offset, in.asInstanceOf[java.lang.Short].shortValue())
+      }
+    )
+
+    val presentBoolean: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(booleans = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          java.lang.Boolean.valueOf(in.getBoolean(offset))
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(booleans = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit =
+          out.setBoolean(offset, in.asInstanceOf[java.lang.Boolean].booleanValue())
+      }
+    )
+
+    val presentByte: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(bytes = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          java.lang.Byte.valueOf(in.getByte(offset))
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = RegisterOffset(bytes = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit =
+          out.setByte(offset, in.asInstanceOf[java.lang.Byte].byteValue())
+      }
+    )
+
+    val presentUnit: Record[AnyRef] = new Record(
+      constructor = new Constructor[AnyRef] {
+        def usedRegisters: RegisterOffset = 0L
+
+        def construct(in: Registers, offset: RegisterOffset): AnyRef =
+          ().asInstanceOf[AnyRef]
+      },
+      deconstructor = new Deconstructor[AnyRef] {
+        def usedRegisters: RegisterOffset = 0L
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: AnyRef): Unit = ()
+      }
+    )
+
+    def left[A, B]: Record[Left[A, B]] = new Record(
+      constructor = new Constructor[Left[A, B]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(objects = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Left[A, B] =
+          new Left(in.getObject(offset).asInstanceOf[A])
+      },
+      deconstructor = new Deconstructor[Left[A, B]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(objects = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[A, B]): Unit =
+          out.setObject(offset, in.value.asInstanceOf[AnyRef])
+      }
+    )
+
+    def right[A, B]: Record[Right[A, B]] = new Record(
+      constructor = new Constructor[Right[A, B]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(objects = 1)
+
+        def construct(in: Registers, offset: RegisterOffset): Right[A, B] =
+          new Right(in.getObject(offset).asInstanceOf[B])
+      },
+      deconstructor = new Deconstructor[Right[A, B]] {
+        def usedRegisters: RegisterOffset = RegisterOffset(objects = 1)
+
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, B]): Unit =
+          out.setObject(offset, in.value.asInstanceOf[AnyRef])
+      }
+    )
+
+    private[schema] def left[A, B](register: Register[A]): Record[Left[A, B]] =
+      (register match {
+        case _: Register.Int       => leftInt[B]
+        case _: Register.Long      => leftLong[B]
+        case _: Register.Float     => leftFloat[B]
+        case _: Register.Double    => leftDouble[B]
+        case _: Register.Boolean   => leftBoolean[B]
+        case _: Register.Byte      => leftByte[B]
+        case _: Register.Short     => leftShort[B]
+        case _: Register.Char      => leftChar[B]
+        case Register.Unit         => leftUnit[B]
+        case _: Register.Object[?] => left[A, B]
+      }).asInstanceOf[Record[Left[A, B]]]
+
+    private[schema] def right[A, B](register: Register[B]): Record[Right[A, B]] =
+      (register match {
+        case _: Register.Int       => rightInt[A]
+        case _: Register.Long      => rightLong[A]
+        case _: Register.Float     => rightFloat[A]
+        case _: Register.Double    => rightDouble[A]
+        case _: Register.Boolean   => rightBoolean[A]
+        case _: Register.Byte      => rightByte[A]
+        case _: Register.Short     => rightShort[A]
+        case _: Register.Char      => rightChar[A]
+        case Register.Unit         => rightUnit[A]
+        case _: Register.Object[?] => right[A, B]
+      }).asInstanceOf[Record[Right[A, B]]]
+
+    def leftInt[B]: Record[Left[Int, B]] = new Record(
+      constructor = new Constructor[Left[Int, B]] {
+        def usedRegisters: RegisterOffset                                  = RegisterOffset(ints = 1)
+        def construct(in: Registers, offset: RegisterOffset): Left[Int, B] = new Left(in.getInt(offset))
+      },
+      deconstructor = new Deconstructor[Left[Int, B]] {
+        def usedRegisters: RegisterOffset                                               = RegisterOffset(ints = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Int, B]): Unit = out.setInt(offset, in.value)
+      }
+    )
+
+    def leftLong[B]: Record[Left[Long, B]] = new Record(
+      constructor = new Constructor[Left[Long, B]] {
+        def usedRegisters: RegisterOffset                                   = RegisterOffset(longs = 1)
+        def construct(in: Registers, offset: RegisterOffset): Left[Long, B] = new Left(in.getLong(offset))
+      },
+      deconstructor = new Deconstructor[Left[Long, B]] {
+        def usedRegisters: RegisterOffset                                                = RegisterOffset(longs = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Long, B]): Unit = out.setLong(offset, in.value)
+      }
+    )
+
+    def leftFloat[B]: Record[Left[Float, B]] = new Record(
+      constructor = new Constructor[Left[Float, B]] {
+        def usedRegisters: RegisterOffset                                    = RegisterOffset(floats = 1)
+        def construct(in: Registers, offset: RegisterOffset): Left[Float, B] = new Left(in.getFloat(offset))
+      },
+      deconstructor = new Deconstructor[Left[Float, B]] {
+        def usedRegisters: RegisterOffset                                                 = RegisterOffset(floats = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Float, B]): Unit =
+          out.setFloat(offset, in.value)
+      }
+    )
+
+    def leftDouble[B]: Record[Left[Double, B]] = new Record(
+      constructor = new Constructor[Left[Double, B]] {
+        def usedRegisters: RegisterOffset                                     = RegisterOffset(doubles = 1)
+        def construct(in: Registers, offset: RegisterOffset): Left[Double, B] = new Left(in.getDouble(offset))
+      },
+      deconstructor = new Deconstructor[Left[Double, B]] {
+        def usedRegisters: RegisterOffset                                                  = RegisterOffset(doubles = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Double, B]): Unit =
+          out.setDouble(offset, in.value)
+      }
+    )
+
+    def leftBoolean[B]: Record[Left[Boolean, B]] = new Record(
+      constructor = new Constructor[Left[Boolean, B]] {
+        def usedRegisters: RegisterOffset                                      = RegisterOffset(booleans = 1)
+        def construct(in: Registers, offset: RegisterOffset): Left[Boolean, B] = new Left(in.getBoolean(offset))
+      },
+      deconstructor = new Deconstructor[Left[Boolean, B]] {
+        def usedRegisters: RegisterOffset                                                   = RegisterOffset(booleans = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Boolean, B]): Unit =
+          out.setBoolean(offset, in.value)
+      }
+    )
+
+    def leftByte[B]: Record[Left[Byte, B]] = new Record(
+      constructor = new Constructor[Left[Byte, B]] {
+        def usedRegisters: RegisterOffset                                   = RegisterOffset(bytes = 1)
+        def construct(in: Registers, offset: RegisterOffset): Left[Byte, B] = new Left(in.getByte(offset))
+      },
+      deconstructor = new Deconstructor[Left[Byte, B]] {
+        def usedRegisters: RegisterOffset                                                = RegisterOffset(bytes = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Byte, B]): Unit = out.setByte(offset, in.value)
+      }
+    )
+
+    def leftShort[B]: Record[Left[Short, B]] = new Record(
+      constructor = new Constructor[Left[Short, B]] {
+        def usedRegisters: RegisterOffset                                    = RegisterOffset(shorts = 1)
+        def construct(in: Registers, offset: RegisterOffset): Left[Short, B] = new Left(in.getShort(offset))
+      },
+      deconstructor = new Deconstructor[Left[Short, B]] {
+        def usedRegisters: RegisterOffset                                                 = RegisterOffset(shorts = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Short, B]): Unit =
+          out.setShort(offset, in.value)
+      }
+    )
+
+    def leftChar[B]: Record[Left[Char, B]] = new Record(
+      constructor = new Constructor[Left[Char, B]] {
+        def usedRegisters: RegisterOffset                                   = RegisterOffset(chars = 1)
+        def construct(in: Registers, offset: RegisterOffset): Left[Char, B] = new Left(in.getChar(offset))
+      },
+      deconstructor = new Deconstructor[Left[Char, B]] {
+        def usedRegisters: RegisterOffset                                                = RegisterOffset(chars = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Char, B]): Unit = out.setChar(offset, in.value)
+      }
+    )
+
+    def leftUnit[B]: Record[Left[Unit, B]] = new Record(
+      constructor = new Constructor[Left[Unit, B]] {
+        def usedRegisters: RegisterOffset                                   = 0L
+        def construct(in: Registers, offset: RegisterOffset): Left[Unit, B] = new Left(())
+      },
+      deconstructor = new Deconstructor[Left[Unit, B]] {
+        def usedRegisters: RegisterOffset                                                = 0L
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Left[Unit, B]): Unit = ()
+      }
+    )
+
+    def rightInt[A]: Record[Right[A, Int]] = new Record(
+      constructor = new Constructor[Right[A, Int]] {
+        def usedRegisters: RegisterOffset                                   = RegisterOffset(ints = 1)
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Int] = new Right(in.getInt(offset))
+      },
+      deconstructor = new Deconstructor[Right[A, Int]] {
+        def usedRegisters: RegisterOffset                                                = RegisterOffset(ints = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Int]): Unit = out.setInt(offset, in.value)
+      }
+    )
+
+    def rightLong[A]: Record[Right[A, Long]] = new Record(
+      constructor = new Constructor[Right[A, Long]] {
+        def usedRegisters: RegisterOffset                                    = RegisterOffset(longs = 1)
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Long] = new Right(in.getLong(offset))
+      },
+      deconstructor = new Deconstructor[Right[A, Long]] {
+        def usedRegisters: RegisterOffset                                                 = RegisterOffset(longs = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Long]): Unit =
+          out.setLong(offset, in.value)
+      }
+    )
+
+    def rightFloat[A]: Record[Right[A, Float]] = new Record(
+      constructor = new Constructor[Right[A, Float]] {
+        def usedRegisters: RegisterOffset                                     = RegisterOffset(floats = 1)
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Float] = new Right(in.getFloat(offset))
+      },
+      deconstructor = new Deconstructor[Right[A, Float]] {
+        def usedRegisters: RegisterOffset                                                  = RegisterOffset(floats = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Float]): Unit =
+          out.setFloat(offset, in.value)
+      }
+    )
+
+    def rightDouble[A]: Record[Right[A, Double]] = new Record(
+      constructor = new Constructor[Right[A, Double]] {
+        def usedRegisters: RegisterOffset                                      = RegisterOffset(doubles = 1)
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Double] = new Right(in.getDouble(offset))
+      },
+      deconstructor = new Deconstructor[Right[A, Double]] {
+        def usedRegisters: RegisterOffset                                                   = RegisterOffset(doubles = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Double]): Unit =
+          out.setDouble(offset, in.value)
+      }
+    )
+
+    def rightBoolean[A]: Record[Right[A, Boolean]] = new Record(
+      constructor = new Constructor[Right[A, Boolean]] {
+        def usedRegisters: RegisterOffset                                       = RegisterOffset(booleans = 1)
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Boolean] = new Right(in.getBoolean(offset))
+      },
+      deconstructor = new Deconstructor[Right[A, Boolean]] {
+        def usedRegisters: RegisterOffset                                                    = RegisterOffset(booleans = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Boolean]): Unit =
+          out.setBoolean(offset, in.value)
+      }
+    )
+
+    def rightByte[A]: Record[Right[A, Byte]] = new Record(
+      constructor = new Constructor[Right[A, Byte]] {
+        def usedRegisters: RegisterOffset                                    = RegisterOffset(bytes = 1)
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Byte] = new Right(in.getByte(offset))
+      },
+      deconstructor = new Deconstructor[Right[A, Byte]] {
+        def usedRegisters: RegisterOffset                                                 = RegisterOffset(bytes = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Byte]): Unit =
+          out.setByte(offset, in.value)
+      }
+    )
+
+    def rightShort[A]: Record[Right[A, Short]] = new Record(
+      constructor = new Constructor[Right[A, Short]] {
+        def usedRegisters: RegisterOffset                                     = RegisterOffset(shorts = 1)
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Short] = new Right(in.getShort(offset))
+      },
+      deconstructor = new Deconstructor[Right[A, Short]] {
+        def usedRegisters: RegisterOffset                                                  = RegisterOffset(shorts = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Short]): Unit =
+          out.setShort(offset, in.value)
+      }
+    )
+
+    def rightChar[A]: Record[Right[A, Char]] = new Record(
+      constructor = new Constructor[Right[A, Char]] {
+        def usedRegisters: RegisterOffset                                    = RegisterOffset(chars = 1)
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Char] = new Right(in.getChar(offset))
+      },
+      deconstructor = new Deconstructor[Right[A, Char]] {
+        def usedRegisters: RegisterOffset                                                 = RegisterOffset(chars = 1)
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Char]): Unit =
+          out.setChar(offset, in.value)
+      }
+    )
+
+    def rightUnit[A]: Record[Right[A, Unit]] = new Record(
+      constructor = new Constructor[Right[A, Unit]] {
+        def usedRegisters: RegisterOffset                                    = 0L
+        def construct(in: Registers, offset: RegisterOffset): Right[A, Unit] = new Right(())
+      },
+      deconstructor = new Deconstructor[Right[A, Unit]] {
+        def usedRegisters: RegisterOffset                                                 = 0L
+        def deconstruct(out: Registers, offset: RegisterOffset, in: Right[A, Unit]): Unit = ()
+      }
+    )
+  }
+
+  final case class Variant[A](
+    discriminator: Discriminator[A],
+    matchers: Matchers[A]
+  ) extends Binding[BindingType.Variant, A]
+
+  object Variant {
+    def option[A]: Variant[Option[A]] = new Variant(
+      discriminator = new Discriminator[Option[A]] {
+        def discriminate(a: Option[A]): Int =
+          if (a eq None) 0
+          else 1
+      },
+      matchers = Matchers(
+        new Matcher[None.type] {
+          override def downcastOrNull(any: Any): None.type = any match {
+            case _: None.type => None
+            case _            => null.asInstanceOf[None.type]
+          }
+        },
+        new Matcher[Some[A]] {
+          override def downcastOrNull(any: Any): Some[A] = any match {
+            case x: Some[A] @scala.unchecked => x
+            case _                           => null.asInstanceOf[Some[A]]
+          }
+        }
+      )
+    )
+
+    /**
+     * Creates the runtime discriminator and case matchers for `Either[A, B]`.
+     *
+     * @tparam A
+     *   the left value type
+     * @tparam B
+     *   the right value type
+     * @return
+     *   a variant binding whose cases are ordered as `Left`, then `Right`
+     */
+    def either[A, B]: Variant[Either[A, B]] = new Variant(
+      discriminator = new Discriminator[Either[A, B]] {
+        def discriminate(a: Either[A, B]): Int = if (a.isLeft) 0 else 1
+      },
+      matchers = Matchers(
+        new Matcher[Left[A, B]] {
+          override def downcastOrNull(any: Any): Left[A, B] = any match {
+            case x: Left[A, B] @scala.unchecked => x
+            case _                              => null.asInstanceOf[Left[A, B]]
+          }
+        },
+        new Matcher[Right[A, B]] {
+          override def downcastOrNull(any: Any): Right[A, B] = any match {
+            case x: Right[A, B] @scala.unchecked => x
+            case _                               => null.asInstanceOf[Right[A, B]]
+          }
+        }
+      )
+    )
+
+    private[this] val absentSentinel: AnyRef = new AnyRef {}
+
+    def maybe[A]: Variant[AnyRef] = new Variant(
+      discriminator = new Discriminator[AnyRef] {
+        def discriminate(a: AnyRef): Int =
+          if (Maybe.unsafeIsAbsent(a.asInstanceOf[Maybe[Any]])) 0
+          else 1
+      },
+      matchers = Matchers(
+        new Matcher[AnyRef] {
+          override def downcastOrNull(any: Any): AnyRef =
+            if (Maybe.unsafeIsAbsent(any.asInstanceOf[Maybe[Any]])) absentSentinel
+            else null
+        },
+        new Matcher[AnyRef] {
+          override def downcastOrNull(any: Any): AnyRef =
+            if (!Maybe.unsafeIsAbsent(any.asInstanceOf[Maybe[Any]]))
+              Maybe.unsafeGet(any.asInstanceOf[Maybe[Any]]).asInstanceOf[AnyRef]
+            else null
+        }
+      )
+    )
+  }
+
+  final case class Seq[C[_], +A](
+    constructor: SeqConstructor[C],
+    deconstructor: SeqDeconstructor[C]
+  ) extends Binding[BindingType.Seq[C], C[A @uncheckedVariance]]
+
+  object Seq {
+    def set[A]: Seq[Set, A] = new Seq(SeqConstructor.setConstructor, SeqDeconstructor.setDeconstructor)
+
+    def list[A]: Seq[List, A] = new Seq(SeqConstructor.listConstructor, SeqDeconstructor.listDeconstructor)
+
+    def vector[A]: Seq[Vector, A] = new Seq(SeqConstructor.vectorConstructor, SeqDeconstructor.vectorDeconstructor)
+
+    def indexedSeq[A]: Seq[IndexedSeq, A] =
+      new Seq(SeqConstructor.indexedSeqConstructor, SeqDeconstructor.indexedSeqDeconstructor)
+
+    def seq[A]: Seq[collection.immutable.Seq, A] =
+      new Seq(SeqConstructor.seqConstructor, SeqDeconstructor.seqDeconstructor)
+
+    def chunk[A]: Seq[Chunk, A] = new Seq(SeqConstructor.chunkConstructor, SeqDeconstructor.chunkDeconstructor)
+  }
+
+  final case class Map[M[_, _], +K, +V](
+    constructor: MapConstructor[M],
+    deconstructor: MapDeconstructor[M]
+  ) extends Binding[BindingType.Map[M], M[K @uncheckedVariance, V @uncheckedVariance]]
+
+  object Map {
+    def chunkMap[K, V]: Map[ChunkMap, K, V] = new Map(MapConstructor.chunkMap, MapDeconstructor.chunkMap)
+
+    def map[K, V]: Map[Predef.Map, K, V] = new Map(MapConstructor.map, MapDeconstructor.map)
+  }
+
+  final case class Wrapper[A, B](wrap: B => A, unwrap: A => B) extends Binding[BindingType.Wrapper[A, B], A]
+
+  final case class Dynamic() extends Binding[BindingType.Dynamic, DynamicValue]
+
+  implicit val bindingHasBinding: HasBinding[Binding] = new HasBinding[Binding] {
+    def binding[T, A](fa: Binding[T, A]): Binding[T, A] = fa
+
+    def updateBinding[T, A](fa: Binding[T, A], f: Binding[T, A] => Binding[T, A]): Binding[T, A] = f(fa)
+  }
+
+  implicit val bindingFromBinding: FromBinding[Binding] = new FromBinding[Binding] {
+    def fromBinding[T, A](binding: Binding[T, A]): Binding[T, A] = binding
+  }
+}

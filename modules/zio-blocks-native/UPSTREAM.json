@@ -1,0 +1,906 @@
+{
+  "repository": "https://github.com/zio/zio-blocks",
+  "tag": "v0.0.56",
+  "commit": "b4523963f2981c15f15d0afa05b33a1ff0cf38a9",
+  "files": [
+    {
+      "path": "chunk/shared/src/main/scala/zio/blocks/chunk/Chunk.scala",
+      "upstream": "chunk/shared/src/main/scala/zio/blocks/chunk/Chunk.scala",
+      "sha256": "3e16e987a40a603e6dcb6bad99450258edb4e7ce81e1f9b7bff7cd787c707119"
+    },
+    {
+      "path": "chunk/shared/src/main/scala/zio/blocks/chunk/ChunkMap.scala",
+      "upstream": "chunk/shared/src/main/scala/zio/blocks/chunk/ChunkMap.scala",
+      "sha256": "6694eb7a33fbfc3edcf413587bc5f0995c672fffff51afbbf3f9e1cc0c0d7862"
+    },
+    {
+      "path": "chunk/native/src/main/scala/zio/blocks/chunk/ChunkBuilderPlatformSpecific.scala",
+      "upstream": "chunk/js/src/main/scala/zio/blocks/chunk/ChunkBuilderPlatformSpecific.scala",
+      "sha256": "1996f6a02101107667438d916f0bcbcd56649735214ef9f8d34976b3ef370bc5"
+    },
+    {
+      "path": "chunk/native/src/main/scala/zio/blocks/chunk/ChunkPlatformSpecific.scala",
+      "upstream": "chunk/js/src/main/scala/zio/blocks/chunk/ChunkPlatformSpecific.scala",
+      "sha256": "d35edf2a2413e066756ea35b140b89249a83f168859ea262872e97cb629a79c1"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/Annotation.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/Annotation.scala",
+      "sha256": "4c06909e57d641fb47805b39865fd5d10bf70740287bb685195895a66cb37e56"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/IsNominalIntersection.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/IsNominalIntersection.scala",
+      "sha256": "eec5dc0702f35634cd4db0234e7f542c7b1f7ca3b16533c31acbe6dc082363d7"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/IsNominalType.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/IsNominalType.scala",
+      "sha256": "8b039759ecfe5a17f9665852044ee169295d4d37224e3ec5599551313ecad7dd"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/Kind.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/Kind.scala",
+      "sha256": "55d73b0220b1083c1c0c2dbdd4b26b12ac4398eeec24e3e642fa07a4b8ee2c8d"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/Member.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/Member.scala",
+      "sha256": "7e83cae687326008b16d9760d489cef9a47694aa50b1b66152c0d1f81b8eec20"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/Owner.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/Owner.scala",
+      "sha256": "a12e8cefdbcb80c86b70af179c5eb5c0d59d27f6eb456213558e417adc33a84d"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/TermPath.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/TermPath.scala",
+      "sha256": "71697dbfa8080e130c24dde7e0895049969a693bb5d216803e8feb97d5cd4e95"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeBounds.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeBounds.scala",
+      "sha256": "6f220ce034ea60d6be3b9ba6c1bc6271e9a53e7a96f494a3fec53bd2f4f12ca3"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeDefKind.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeDefKind.scala",
+      "sha256": "3551015a242030b6924dcaacce00350ee50ee7767e638a2291e74c2cf862e825"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeIdInstances.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeIdInstances.scala",
+      "sha256": "b50ffdacb73190ecbfce0a827f96dcba41c229a4b28ec1c0fed6a0ea121a528d"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeIdOps.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeIdOps.scala",
+      "sha256": "dddd59275feb67203d0335dda3a392f83720a1bfdfd96a639a99248042a652a0"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeIdPrinter.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeIdPrinter.scala",
+      "sha256": "3dbe7aa464190fad35fc554d621df995fd748f60b20259e484914b372f2c05e6"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeParam.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeParam.scala",
+      "sha256": "4b5e0bf9c3aa2066cbea8378ce9a835660ed4a19f317ab6e69da13ec9e491eeb"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeRepr.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/TypeRepr.scala",
+      "sha256": "fe4840343363e6cf6308a1abb4ae6a4afe6d60bdef27e72b293dd8ffb38fd853"
+    },
+    {
+      "path": "typeid/shared/src/main/scala/zio/blocks/typeid/Variance.scala",
+      "upstream": "typeid/shared/src/main/scala/zio/blocks/typeid/Variance.scala",
+      "sha256": "e1d60e5eee2da4c7532c0a48335efd3e18791a13972b8785a811f72ad3b19461"
+    },
+    {
+      "path": "typeid/shared/src/main/scala-3/zio/blocks/typeid/IsNominalIntersectionVersionSpecific.scala",
+      "upstream": "typeid/shared/src/main/scala-3/zio/blocks/typeid/IsNominalIntersectionVersionSpecific.scala",
+      "sha256": "dfe7b278828c4e9f898b57bf863f726cb297df95fea8c04753887a4751951496"
+    },
+    {
+      "path": "typeid/shared/src/main/scala-3/zio/blocks/typeid/IsNominalTypeVersionSpecific.scala",
+      "upstream": "typeid/shared/src/main/scala-3/zio/blocks/typeid/IsNominalTypeVersionSpecific.scala",
+      "sha256": "e633f89f7aca0df2199e80dd8752d3cf91377a0367f12f8f5f6b93287d765d82"
+    },
+    {
+      "path": "typeid/shared/src/main/scala-3/zio/blocks/typeid/TypeId.scala",
+      "upstream": "typeid/shared/src/main/scala-3/zio/blocks/typeid/TypeId.scala",
+      "sha256": "33b4fdd6a9cf187be999fab841f057d01f9c040aa18fe72aa6a848b119fdb7bc"
+    },
+    {
+      "path": "typeid/shared/src/main/scala-3/zio/blocks/typeid/TypeIdLowPriority.scala",
+      "upstream": "typeid/shared/src/main/scala-3/zio/blocks/typeid/TypeIdLowPriority.scala",
+      "sha256": "19ec7bb0f6702e421f2adcba45e659e6fa9beedb3e3877dcda589472c9f78fda"
+    },
+    {
+      "path": "typeid/shared/src/main/scala-3/zio/blocks/typeid/TypeIdMacros.scala",
+      "upstream": "typeid/shared/src/main/scala-3/zio/blocks/typeid/TypeIdMacros.scala",
+      "sha256": "1bac7c43d84048da1b8042dc1428ef5d9df67d589020141f66376715e54b216d"
+    },
+    {
+      "path": "typeid/shared/src/main/scala-3/zio/blocks/typeid/TypeIdPlatformSpecific.scala",
+      "upstream": "typeid/shared/src/main/scala-3/zio/blocks/typeid/TypeIdPlatformSpecific.scala",
+      "sha256": "800aab68833719b034ae90ac283a2a1a7250a6d6fccc049791f8a1dbf6d114d1"
+    },
+    {
+      "path": "typeid/native/src/main/scala/zio/blocks/typeid/TypeIdPlatformMethods.scala",
+      "upstream": "typeid/js/src/main/scala/zio/blocks/typeid/TypeIdPlatformMethods.scala",
+      "sha256": "12907ca66176e2c1bc85cc699eec9b142de1151bb4001fb3aa2333f2a13f9dbf",
+      "adaptedSha256": "a163516ae36a96938f80c868db184c8ccde4273ef184d8db230c43a1efa59172"
+    },
+    {
+      "path": "maybe/shared/src/main/scala/zio/blocks/maybe/MaybeSyntax.scala",
+      "upstream": "maybe/shared/src/main/scala/zio/blocks/maybe/MaybeSyntax.scala",
+      "sha256": "5c6f5e24e502524ec10d5f7eb460efa800e5d86a698353a95d9ee94746e82d7c"
+    },
+    {
+      "path": "maybe/shared/src/main/scala/zio/blocks/maybe/package.scala",
+      "upstream": "maybe/shared/src/main/scala/zio/blocks/maybe/package.scala",
+      "sha256": "a1e923d9b9325633175967927f40ea05c644e887c348f2c4f9960d119ae7bd3c"
+    },
+    {
+      "path": "maybe/shared/src/main/scala-3/zio/blocks/maybe/Maybe.scala",
+      "upstream": "maybe/shared/src/main/scala-3/zio/blocks/maybe/Maybe.scala",
+      "sha256": "946d581dcb89ea446347169dfad39d9dca934669e7ea54c2a8b7971fffca0774"
+    },
+    {
+      "path": "maybe/shared/src/main/scala-3/zio/blocks/maybe/MaybeCompat.scala",
+      "upstream": "maybe/shared/src/main/scala-3/zio/blocks/maybe/MaybeCompat.scala",
+      "sha256": "782462d381b31ab512b7a86ed3cc8f6f7dd22feb3cf802b522e5353f0863accf"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/Alignment.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/Alignment.scala",
+      "sha256": "7c15a1a75be0644ad8c0e168a8a715d660658c5df63e8d573328212817e9e611"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/Block.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/Block.scala",
+      "sha256": "b113f90232e7fcc323c719c17c056a05fbba0af9c89b68fba407ebbf3900ac6f"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/Doc.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/Doc.scala",
+      "sha256": "c407a5b43e2fc5f66287e9ac3b1e85b446bf24c718f61f9f864845150b4085a7"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/HeadingLevel.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/HeadingLevel.scala",
+      "sha256": "d9a866bf7906e6236e8675493ef9324c1dbe720f2231ef5e773a989e3c59a902"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/HtmlRenderer.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/HtmlRenderer.scala",
+      "sha256": "49a04465748bea2d5f6c7fd0e896bf98bc500bd2f7d7a2973cc920d3d72c00e3"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/Inline.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/Inline.scala",
+      "sha256": "adae29e92f41b78075777fe40e34423c86145df29ecdc749539e3f311503f2f2"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/MdInterpolatorRuntime.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/MdInterpolatorRuntime.scala",
+      "sha256": "87a83c0f2bb907f38b052039aa594632bcf627cbdad4341b89c244791aee6d47"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/ParseError.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/ParseError.scala",
+      "sha256": "25bcaaa3457c475d6a722ed289588657fc02d40e9a2c3d69c4efe9cafcdb0af2"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/Parser.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/Parser.scala",
+      "sha256": "945f269bc43b07843a01c18d1632d3920bc7460ac8ce412da6c51eab0f750f6f"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/Renderer.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/Renderer.scala",
+      "sha256": "364842edd454ae082be5b9a7257f92f66032fea9ca84be8bf8baa3d480f558a0"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/TableRow.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/TableRow.scala",
+      "sha256": "5b8fbe443d7a9c1bddeb01ad32f035355efc1ba57df04bbfcd7d8eb7a803cd96"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/TerminalRenderer.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/TerminalRenderer.scala",
+      "sha256": "8421ef143cc08776387b7f474417eae16468691b77c2ba776382b78cc579fe71"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/ToMarkdown.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/ToMarkdown.scala",
+      "sha256": "167ae637ad97b50bb35a6b685cf5531992d000705786c0042d498e3cefc151d9"
+    },
+    {
+      "path": "markdown/shared/src/main/scala/zio/blocks/docs/package.scala",
+      "upstream": "markdown/shared/src/main/scala/zio/blocks/docs/package.scala",
+      "sha256": "e7c0797f481cef06605c168bc1c9568643e5b36dbf35f7ad436c4c21e9a6d7fe"
+    },
+    {
+      "path": "markdown/shared/src/main/scala-3/zio/blocks/docs/MdInterpolator.scala",
+      "upstream": "markdown/shared/src/main/scala-3/zio/blocks/docs/MdInterpolator.scala",
+      "sha256": "703aedaf4ed5ac52f7d7b229c5b634728e2bf2347fd8846ba26d164e2715ae71"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/As.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/As.scala",
+      "sha256": "9ce0465eb3d91a62090945e57479542a262784c5936cb01ff2a462c8a1725ca5"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/DocsSchemas.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/DocsSchemas.scala",
+      "sha256": "893fe1468d60a6dc0de36ad1a3a825c8efea7b6eb62a98c381820ce9370b05e8"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/DynamicOptic.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/DynamicOptic.scala",
+      "sha256": "faebdc326af39b95e163e7e54b05faf3488816f28bfb294d258e2575aedfd9f8"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/DynamicSchema.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/DynamicSchema.scala",
+      "sha256": "be6f6333944bf11b6f0f90a6b52ba042593039c30953b17d81214ef8dfb0d400"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/DynamicSchemaExpr.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/DynamicSchemaExpr.scala",
+      "sha256": "f2706de6ae2e324bd7e152a034ec0255fa2f65c37a32658aeefb2b8b45f57881"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/DynamicValue.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/DynamicValue.scala",
+      "sha256": "9496896353bf5008210c24d51d309934ba0f5f63de982c585acc18d7b43b5557"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/DynamicValueMergeStrategy.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/DynamicValueMergeStrategy.scala",
+      "sha256": "a5d9ddb721a308c91690cc5b136b74123548ee9c5603f40a316d16a2c04aae99"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/DynamicValueSelection.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/DynamicValueSelection.scala",
+      "sha256": "0a07f29051b0950edf0a33b57d30bb581f98edcd06a4fdd8c72dd7d41f031beb"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/DynamicValueType.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/DynamicValueType.scala",
+      "sha256": "9c785da5f99895c1efbf506a76edf7b4471d98467f9c3c49fc54a10d5153ce62"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Into.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Into.scala",
+      "sha256": "b323af92dcff68f5e6a8a38b000fd911cb62dc34e7a8e68503ab756632e85531"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/IsCollection.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/IsCollection.scala",
+      "sha256": "ba792248577e825bc655a9766f8d9c5e3e5ba8a0f7b66fc36e8f5a41d197ffcc"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/IsIntegral.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/IsIntegral.scala",
+      "sha256": "b66fddf231fd2600febe40fe3a3135e6548f568c92f834b3427d6cfa11db94ac"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/IsMap.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/IsMap.scala",
+      "sha256": "b960827850535f264a33f022c8c66152e94d58b7d6ae37f1cd8619b72a7e9ca5"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/IsNumeric.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/IsNumeric.scala",
+      "sha256": "e28dcb1fafe404a2334b63fecf00000a4b4310f7bbbd6ce6894904d6ba3faa4e"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Lazy.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Lazy.scala",
+      "sha256": "c435ea0379d85f56c6cc4f90f36812e16172765449346481b269abbe2ec21cc0"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Modifier.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Modifier.scala",
+      "sha256": "b401f07747b527f8256bc020b5ef2329e15eea0c803c6942102d2c6f03cd5e7e"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/NameMapper.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/NameMapper.scala",
+      "sha256": "c54756b950d36bdb11af4b53e009f73ab298051355af47c2caf5c40301ecbd0b"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Optic.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Optic.scala",
+      "sha256": "50328e496e9205cb35eabb8feda73481887fac91624a1a493b6cb1c449581d59"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/OpticCheck.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/OpticCheck.scala",
+      "sha256": "271a4c802f588756d4725891d162226ae44edc2ba8aff544da6b3b922db63681"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/PathParser.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/PathParser.scala",
+      "sha256": "13de4ce14c97210ebf9abceeaa8894c2167d7ba50f4020686f8642b70dbedd51"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Platform.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Platform.scala",
+      "sha256": "2f1d29c774d0bb3b9b99ec74cbb51a60240500fc6385569b4cb4a3abf191574b"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/PrimitiveType.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/PrimitiveType.scala",
+      "sha256": "15d7d64803b99dcaf91eb81b1ebca1c82089bcdfeb627083e336c972c5b81143"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/PrimitiveValue.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/PrimitiveValue.scala",
+      "sha256": "244f5419e4f55dd95def83d109de251174e16225ece329d7fb23a4dec4f036de"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/RebindTransformer.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/RebindTransformer.scala",
+      "sha256": "2938325f599d513a7af821ede97f4300e80f70f1752afdc28a90f0da48b1178e"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Reflect.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Reflect.scala",
+      "sha256": "b5240cd475856cd18b37f70e9d2a0acc3b8f021a161cf9d1add38865bb0898be"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/ReflectPrinter.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/ReflectPrinter.scala",
+      "sha256": "2456a051b0074c1e99c18db79c7f03379e5d15e4a3536a641b19eebbfadf1c5b"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/ReflectTransformer.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/ReflectTransformer.scala",
+      "sha256": "0b1f5a378bf92675697c5e2669aeb761ec026534ad9db7f76861e0e5459be522"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Reflectable.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Reflectable.scala",
+      "sha256": "76b90658b7064e2d755107291ea9c791d9d63f0f83aa62fda2c3997e607324fb"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Schema.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Schema.scala",
+      "sha256": "c06086f644fd673d78fe51372d9a0e570cf008d490841c966545d8b706fa3c76"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/SchemaAspect.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/SchemaAspect.scala",
+      "sha256": "307196d235b20d9cd457a24a04a58c5adaee3d79bd517fc104fbfc5f9c6f2436"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/SchemaError.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/SchemaError.scala",
+      "sha256": "0728bb03aae0767dc94eb22d3d3c99889dfe167c5519395f6e90e4c4c8861706"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/SchemaExpr.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/SchemaExpr.scala",
+      "sha256": "a5234b7d5c8d8ad66fc6daad74c859dcc9ebfa48cf425e8bd1b449b992062fcf"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/SchemaMatch.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/SchemaMatch.scala",
+      "sha256": "82a4f71da72e83842b0c62f96e8327e0bcef9b457d1d3fb1fe6c5f97148b0253"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/SchemaMetadata.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/SchemaMetadata.scala",
+      "sha256": "865b2e03c7b7e147debffefb46740aa380df020f424ebf605511d8a4a03bdfa3"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/SchemaParser.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/SchemaParser.scala",
+      "sha256": "294713cf24f7eb871f246480a5a4e09d9fc631b612a64027fccdbe2957ff5c3b"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/SchemaRepr.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/SchemaRepr.scala",
+      "sha256": "51695859757a5fb25f69a1d7c9e393b051c1bbc7061649298da3583b81ff7bbb"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Term.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Term.scala",
+      "sha256": "258da0bfd77eb05674d67714983376242135cb8b054d66b417ac7832d056d4c3"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/ToStructural.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/ToStructural.scala",
+      "sha256": "bee1bdcce8ca5b106e1706f3a5bfb2127f3d21f1c12cdce072174d6abc9fb77b"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/TypeIdSchemas.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/TypeIdSchemas.scala",
+      "sha256": "6e80e8ec5720f76eb3853e69dd026a5ce9c2cbd1f95bb91fb5bd633da324656b"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/Validation.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/Validation.scala",
+      "sha256": "cf81634c3c2ad5027dac1a7b798098d54822827a3f09984ce798b8fbaa019713"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/Binding.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/Binding.scala",
+      "sha256": "eda4978a790f0a41a4a070adeae8b7143a2c7971da3e12b3766cd7a5df915910"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/BindingResolver.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/BindingResolver.scala",
+      "sha256": "7fe89c7b81fd588e1d9cd48e83e5530420f96dd9d38488746a0c1d267f0c5221"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/BindingType.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/BindingType.scala",
+      "sha256": "04a9c5b4567af1309397f14d6f26bcf68e1abe78243bfa6383217a1aac4c2ea9"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/Constructor.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/Constructor.scala",
+      "sha256": "372b88bfaa6a91116153247ff0182ebb6b689346e649d16e5ba94b91f1ed817f"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/Deconstructor.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/Deconstructor.scala",
+      "sha256": "f868e0be4dcdeffb6b25cea75fbb07cef2db741f4862a865b5f9cd2320f5d15a"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/Discriminator.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/Discriminator.scala",
+      "sha256": "7e7280b1766bcd0a911eab5417a5059260a0ff64fa182ace6f8ffd3ce0ad451c"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/FromBinding.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/FromBinding.scala",
+      "sha256": "fc6325a1a4e41b526daff892e9dbaf949666165f30bd1fa75eea087080a3c053"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/HasBinding.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/HasBinding.scala",
+      "sha256": "ffdaf189b2397f2bcad87cd05eece9cedb65aed992456f38e36ed9452e535347"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/MapConstructor.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/MapConstructor.scala",
+      "sha256": "a24fd6a7836bb4e76221e07b6cb3111ca5bf53c2200ac2672bbfd41ad3ce85ff"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/MapDeconstructor.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/MapDeconstructor.scala",
+      "sha256": "820283f9667b2298436d3f4e42097c8f2386f474108e4d313ab305ef863f8da5"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/Matcher.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/Matcher.scala",
+      "sha256": "64e9297abc3aaba8bcbf9e1f9e033578df133d85f7b0f27d80b7078d70b32cf1"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/Matchers.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/Matchers.scala",
+      "sha256": "98e1e24ad8b8267158b2e2c6e38aa2d73a1abc29d321c6e47b341fe7f942ed09"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/NoBinding.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/NoBinding.scala",
+      "sha256": "92ccc0d30fb9d90601359b48db17d456033fc4253ef6f271b3ee810f1a33f429"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/Register.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/Register.scala",
+      "sha256": "2631a19f026b1a1032189384b29f0b2d9c9960227e78947f639145067d194526"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/RegisterType.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/RegisterType.scala",
+      "sha256": "e0b75352878e268cdfed74fb311c011473ec3cee25b64e719a6342a2ad880f92"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/binding/Unapply.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/binding/Unapply.scala",
+      "sha256": "a1fa91d751c79b03566ecb871bde35d3777c15ccdb3fc6dfb4bb5866ff2d643c"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/codec/BinaryCodec.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/codec/BinaryCodec.scala",
+      "sha256": "78c4e24a736953b440068ce1d7bbdd418389f47657d58008422cef4c707c4965"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/codec/Codec.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/codec/Codec.scala",
+      "sha256": "e46d69170cd2c81d211c62b7b4f68bd60d0f6118e1ee8ab5c4fb95e71bc864ec"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/codec/Format.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/codec/Format.scala",
+      "sha256": "608fb44edf6c47edb5711f4098030e094a95a8de87707326c7ae6fdba8b42a29"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/codec/TextCodec.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/codec/TextCodec.scala",
+      "sha256": "57d642a610907f0b8c73ecad0f1080c35c1b511b7ac27c1ccb5a457907a301c9"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/comptime/Allows.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/comptime/Allows.scala",
+      "sha256": "19cfa8a1726b7d3e3108447f2c4a291c1bce7a3762ddc048eddc71c3891933c4"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/comptime/internal/AllowsErrorMessages.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/comptime/internal/AllowsErrorMessages.scala",
+      "sha256": "63612776820dbfe32df76bcb91517d1efd5a41fb42d7b27ce8b3aa3ddd6d5808"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/BindingInstance.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/BindingInstance.scala",
+      "sha256": "6d37f1ae7ad52dc1aeb28522e402788aac524628c7b601c68bc52051f5aab1ab"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/Derivable.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/Derivable.scala",
+      "sha256": "a8d41fe651c61d0081d599b1f177b9751fd682f354a284176db9a5579a061e42"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/DerivationBuilder.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/DerivationBuilder.scala",
+      "sha256": "c86319e1a94ffe15c84858f9b6efe09f714206a8d0c87144fe8df94047694e7d"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/Deriver.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/Deriver.scala",
+      "sha256": "394f3024a082c67aeaf4ddc5b4475e51279437db53c0ba22ce0942aec7122c93"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/DeriverWithOverrides.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/DeriverWithOverrides.scala",
+      "sha256": "232877b946a6722e8771471b238b3d47ec712776c8758cd4e741404220462574"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/HasInstance.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/HasInstance.scala",
+      "sha256": "ea14ba6ceca4077368d434e246765c42ace8b48ffffe0e51adbc144f901d80f2"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/HasInstances.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/HasInstances.scala",
+      "sha256": "2b484e552b3072f95711435df53b22544bf9639a37d3995bd13e4b56d9fa69f7"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/InstanceOverride.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/InstanceOverride.scala",
+      "sha256": "c273261620321664bfb15d2a95792b4c623854475090a339f27418b4205f452e"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/Instances.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/Instances.scala",
+      "sha256": "9da060c699ec2cc4643b90e70cdcc447aa0c66a0aaee9216d5b703f265362bda"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/derive/ModifierOverride.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/derive/ModifierOverride.scala",
+      "sha256": "06b06f9c694fb03d706421f5c539ab02e16955567df0a7886c46840b0b10efda"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/ContextDetector.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/ContextDetector.scala",
+      "sha256": "0350b58ae2abf7fad8e96fb85cf1e9fd74c7c94efa5b908d91c7de2ecb9f92c8"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/DiscriminatorKind.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/DiscriminatorKind.scala",
+      "sha256": "7a23a016b765049fc1010a1834c97b54092ff334f7f8c9e3514258f650e33b20"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/InterpolationContext.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/InterpolationContext.scala",
+      "sha256": "55f45b1b5bdc4d436842a448a07556c77dde2b0d73085684564cab12403bf388"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/Json.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/Json.scala",
+      "sha256": "a1f25045ff39a6a8e5ca5a9058ec2dccc68d17ae13337352cc3555a342d52ad6"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonCodec.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonCodec.scala",
+      "sha256": "0fd6c3732a40de262e37be77fffe62f3931a968eb274c930085c157677693956"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonCodecDeriver.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonCodecDeriver.scala",
+      "sha256": "3d4243f7ae31d9c503f4392f476143682a3da8d3477cbf126eda85f6e5d57c02"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonCodecError.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonCodecError.scala",
+      "sha256": "bfec2498afc246acdc23d3bf88dbd93b75bd3170471abf09d7bbd904de355af6"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonDiffer.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonDiffer.scala",
+      "sha256": "22cc8666761aaf926aa610cf4485c3a5882b600d974c7b9f9444b0057b1dc4a7"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonInterpolatorRuntime.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonInterpolatorRuntime.scala",
+      "sha256": "2eb89b259134442c4c0814a445de795450729c0d837cc015e287406247499e2e"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonMatch.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonMatch.scala",
+      "sha256": "b930fd212549f60f0079b7b67fef2435311255939913473766381992dc4e6998"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonPatch.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonPatch.scala",
+      "sha256": "379dc60601fbd5495e3cd777c917365a662b9b36120e6518d5789e83376c5864"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonSchema.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonSchema.scala",
+      "sha256": "25d56621a93f819822df0a346df2bbbfe9642e2bc6347cd24f93688378c1875a"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonSchemaToReflect.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonSchemaToReflect.scala",
+      "sha256": "a6d473160661ece14818e121fd012b3b12fb5977f8dbace72769205a17a1ff8b"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonSchemaType.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonSchemaType.scala",
+      "sha256": "cb541fe268c7529e707211d9d308151ce5f97c6df0d8e28a9f9804d46d00fcb7"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonSelection.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonSelection.scala",
+      "sha256": "b73ad0cfd864570f62e1c89361169f369ad75322137aea197d0fd9c2a164f039"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonType.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/JsonType.scala",
+      "sha256": "0d0bf6d99f0adca919d2c98d9f450eedee7d48a554ffaa43f312a2730534a939"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/MergeStrategy.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/MergeStrategy.scala",
+      "sha256": "a4547eebf9a50af7bb8e199e6045101a232a51d60e6ec783a85d9371a4f7284b"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/ReaderConfig.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/ReaderConfig.scala",
+      "sha256": "04e2a78f68f1f7dc6413a0f49df34c749794dde55c8dd1da8efee508672ea99a"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/json/WriterConfig.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/json/WriterConfig.scala",
+      "sha256": "05e31ab6d56710470f363ab56125d84ade0f2da9abc619cf91991629dfa441e5"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/migration/DynamicMigration.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/migration/DynamicMigration.scala",
+      "sha256": "35b48abc0ca18e034537e95d1e371f81cf8d71e4b090a50c00b5c47108e4744e"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/migration/Migration.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/migration/Migration.scala",
+      "sha256": "a0c59e6d22e7552032d3dac073bb96607d37c982fd7992f0ccd36881f9f8c368"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/migration/MigrationAction.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/migration/MigrationAction.scala",
+      "sha256": "93108667f2826a1ae92e4341409f664b89be6de4119543a737cee3b3fb2cb4d5"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/package.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/package.scala",
+      "sha256": "eb0a3f28ef50d1b89e5fd88f8a5a7b966f072ff2b530110986eeaf64a1756cf6"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/patch/Differ.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/patch/Differ.scala",
+      "sha256": "aa03a4c135ea38356dbbfebdd441c0d5253af6f30ffe0a370a327452d2519075"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/patch/DynamicPatch.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/patch/DynamicPatch.scala",
+      "sha256": "bcb60b0ed6e9fe1df59e14a3c92726b38528e146b4941b7fe2480645526413b7"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/patch/LCS.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/patch/LCS.scala",
+      "sha256": "1e1b9c87dce0b99679ed20593eff553834865c603f4d31a69aa31b46e50dfe85"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/patch/Patch.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/patch/Patch.scala",
+      "sha256": "a141648d6dc8a1d40019bde4a62e9b8e9390ee525a36b888b967a72ce59a95d3"
+    },
+    {
+      "path": "schema/shared/src/main/scala/zio/blocks/schema/patch/PatchMode.scala",
+      "upstream": "schema/shared/src/main/scala/zio/blocks/schema/patch/PatchMode.scala",
+      "sha256": "a29d92b9d328b9650f9745a24aade09209dd0536309f371dfc4844c2d1c4b4e0"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/AsVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/AsVersionSpecific.scala",
+      "sha256": "184bea4ee77276c673035d412a8b2b6b531321c680355926d03ef72aad568a2a"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/CommonMacroOps.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/CommonMacroOps.scala",
+      "sha256": "9ff7e66c7ca9f0f5ad93fdbf28fef7caf3654dd817a54c82c4fa83297454d733"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/CompanionOptics.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/CompanionOptics.scala",
+      "sha256": "a1d1cd752a94d7a8d5f2d0184855f2ab81eb3a3713ad400e40019ec515c20c46"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/DerivedOptics.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/DerivedOptics.scala",
+      "sha256": "bfdaed6dbfc92ae090013ce4a318acafc9bf2145591c25256060a0d6ccfe6739"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/IntoVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/IntoVersionSpecific.scala",
+      "sha256": "bfb71ecce0e8af1dc8ed7ac1aaf4ae8c3e3883e6d6495f7ddd6163273fec560d"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/MacroUtils.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/MacroUtils.scala",
+      "sha256": "8eeb76205b5a939159ae56104fc8d1922b28ba1018ed78d1abfccc72ea6d4895"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/PathInterpolator.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/PathInterpolator.scala",
+      "sha256": "4732172a3446a3a567994ad9985b0baa8306c10fe71dcd29c5bc030e2acb1052"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/PathMacros.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/PathMacros.scala",
+      "sha256": "cf740c109ae4c12066eead108a5c321e6ad02c9ea57aeb84a56b650d4cc2f76f"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/SchemaCompanionVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/SchemaCompanionVersionSpecific.scala",
+      "sha256": "5fe15faa929d2a5ef85a77b45a340957797122f426ea9c9e1d58e83c908dff25"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/SchemaVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/SchemaVersionSpecific.scala",
+      "sha256": "e7b322a4e6662626ee53863423009e147c9975d65427441180f7628213eabe3e"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/ToStructuralVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/ToStructuralVersionSpecific.scala",
+      "sha256": "d4d6c3528fdeb6bbcae96fdcb09c97120854950604653867cd732783fd7badab"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/binding/BindingCompanionVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/binding/BindingCompanionVersionSpecific.scala",
+      "sha256": "a8edc7223e1029689bf81d4f27eb7e67e482f07f535df37e35b11e0ee52b4e12"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/binding/RegisterOffset.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/binding/RegisterOffset.scala",
+      "sha256": "3e415695c0486cdaa0e6a827ccb47a36ac4f46446d1b8ab7a5b47e57396e7f6c"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/binding/SeqConstructor.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/binding/SeqConstructor.scala",
+      "sha256": "9942dc66da8e03d04bea21275678f585c34e02d5fe218ac27532fd74cebeb99a"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/binding/SeqDeconstructor.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/binding/SeqDeconstructor.scala",
+      "sha256": "5d7e9ec54fb2b4e5390d420af98efacde1f4ff5afd4bd87da1aed208fa754a33"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/comptime/AllowsCompanionVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/comptime/AllowsCompanionVersionSpecific.scala",
+      "sha256": "99479a083ca938e9809c34141581a1b7437ff45ec9bdc09218c3952fc987af0a"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/json/NonNegativeIntCompanionVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/json/NonNegativeIntCompanionVersionSpecific.scala",
+      "sha256": "e1d3ae1f2963c5af925dc45a7eefdc320ab76c65718335b27473a162d2471b4f"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/json/PositiveNumberCompanionVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/json/PositiveNumberCompanionVersionSpecific.scala",
+      "sha256": "20609ac780263760c56a310e1b9be9da8b29449c864f8214fe27673f657aca14"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/json/package.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/json/package.scala",
+      "sha256": "edc7699cd00ac9c356843aea0a5df8bc56418022101e76c94fdf5bde5b5445d6"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationBuilder.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationBuilder.scala",
+      "sha256": "b92248047f5013185724107c42262b8bf5d73d17b4d175fdf4f55dcea8eedfa2"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationBuilderMacros.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationBuilderMacros.scala",
+      "sha256": "dd1eecb24cf48a9ce0ce191a847c4d3292d8efd3ac8516281a1d93d652027f58"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationCompanionVersionSpecific.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationCompanionVersionSpecific.scala",
+      "sha256": "f484f48fe6cf1ec337f2e419837713bdccbf7f697f1ff66d0d43a545570a426f"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationSelectorSyntax.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationSelectorSyntax.scala",
+      "sha256": "e708b67d50396dec81e2d3f6f43f4a8be399cb3707d47bf3a81d1697818c3d4e"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationValidationMacros.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/MigrationValidationMacros.scala",
+      "sha256": "c7daed2ea146ccb698c56f2d1a317add6291a910ed7ec7117e8263ebfd16267e"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/SelectorMacros.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/SelectorMacros.scala",
+      "sha256": "2fb6db4fb4661d617ad6d3b733c6733cb5f1f5c3ee1ad1e9cfa748880fa47721"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/package.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/migration/package.scala",
+      "sha256": "c54685192291f43ba141a650933b73cb94ceaeedac20378191afb76fa02e7a24"
+    },
+    {
+      "path": "schema/shared/src/main/scala-3/zio/blocks/schema/syntax.scala",
+      "upstream": "schema/shared/src/main/scala-3/zio/blocks/schema/syntax.scala",
+      "sha256": "7240c0f30336476fd339f7993dbda1a7e6d6cff504d77c248b76ead636675737"
+    },
+    {
+      "path": "schema/native/src/main/scala/zio/blocks/schema/PlatformSpecific.scala",
+      "upstream": "schema/js/src/main/scala/zio/blocks/schema/PlatformSpecific.scala",
+      "sha256": "d87dd5aa4d9797b63ebdffcace6fe10a998bc16c8bf823c62ccca59153f561b8",
+      "adaptedSha256": "61560af4b61925bf52ea0edb2f3b9cbb785ed635221978bd01b8707ff0ec6af3"
+    },
+    {
+      "path": "schema/native/src/main/scala/zio/blocks/schema/binding/BindingResolverPlatformSpecific.scala",
+      "upstream": "schema/js/src/main/scala/zio/blocks/schema/binding/BindingResolverPlatformSpecific.scala",
+      "sha256": "05c671d38ebba8849f57b8349e2c62fd97d1a280cc88e4ac6f3a2891aa84892c",
+      "adaptedSha256": "1a9c8b061cd1d5e02a1a9b11cd892d2a07106c043517016518cb2f5437183636"
+    },
+    {
+      "path": "schema/native/src/main/scala/zio/blocks/schema/binding/Registers.scala",
+      "upstream": "schema/js/src/main/scala/zio/blocks/schema/binding/Registers.scala",
+      "sha256": "b772d0f6cfa716839a07353148cefacebad053115b540a2e43f0f2d080f42b50"
+    },
+    {
+      "path": "schema/native/src/main/scala/zio/blocks/schema/json/JsonReader.scala",
+      "upstream": "schema/js/src/main/scala/zio/blocks/schema/json/JsonReader.scala",
+      "sha256": "87f2b74541c4b53063b5e45cc06fac15a4b31c20d065425c69d1a2b10cd570fb"
+    },
+    {
+      "path": "schema/native/src/main/scala/zio/blocks/schema/json/JsonWriter.scala",
+      "upstream": "schema/js/src/main/scala/zio/blocks/schema/json/JsonWriter.scala",
+      "sha256": "0a294eeaaeb519edaea9f062a67bc469e1d8c4ecaf5287fa613e9ee58e92071c"
+    },
+    {
+      "path": "schema/shared/src/test/scala/zio/blocks/schema/SchemaExprSpec.scala",
+      "upstream": "schema/shared/src/test/scala/zio/blocks/schema/SchemaExprSpec.scala",
+      "sha256": "82239c7fb71528969a5217b8a89c7a3539736de878a24e3f246bf8b708764cb2"
+    },
+    {
+      "path": "schema/native/src/main/scala/zio/blocks/schema/binding/StructuralBindingMacros.scala",
+      "upstream": "schema/shared/src/main/scala-3.5-/zio/blocks/schema/binding/StructuralBindingMacros.scala",
+      "sha256": "5bf0bfcea85f9e2add83665bc5785199fc98873faa8df295ad966abacdf0c949",
+      "adaptedSha256": "eeebf3d57ddf5b3558a16c7984ff1686f56f6ef8256304885dcc8d2bb37ddd6a"
+    }
+  ]
+}

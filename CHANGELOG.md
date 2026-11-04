@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## [0.5.0] — 2026-11-03
+
+- Publish `kyo-pdf-pipeline_native0.5_3` with the shared Policy API, JSON formats,
+  SchemaExpr evaluation and composable conditional arrows.
+- Build five Native Schema support modules from pinned public ZIO Blocks
+  v0.0.56 sources, preserving provenance, licenses and source hashes.
+- Replace supplied Native JAR settings with ordinary public dependencies.
+- Test the public-source runtime and shared pipelines, then link an independent
+  Native consumer from packaged artifacts and Maven Central. Consumer recipes
+  exercise yes, no and unknown branches and write an independently checked PDF.
+
 ## [0.4.0] — 2026-11-03
 
 - Publish the JVM Kyo core, ZIO adapter, and pipeline module with the generic

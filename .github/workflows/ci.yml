@@ -91,7 +91,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Install Native build dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libexpat1-dev zlib1g-dev
+        run: sudo apt-get update && sudo apt-get install -y clang libexpat1-dev zlib1g-dev qpdf poppler-utils
       - name: Install sbt
         run: |
           if ! command -v sbt >/dev/null 2>&1; then
@@ -102,8 +102,10 @@ jobs:
           echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
       - name: Test and consume the Scala Native package
         run: |
-          sbt --server -J-Xms256m -J-Xmx2g -Dsbt.server.autostart=false -batch kyoPdfNative/testFull
+          python3 scripts/verify-native-provenance.py
+          sbt --server -J-Xms128m -J-Xmx3g -J-XX:ActiveProcessorCount=4 -Dsbt.server.autostart=false -batch ";kyoPdfNative/testFull;blocksSchemaNative/testFull;kyoPdfPipelineNative/testFull"
           bash scripts/verify-native-consumer.sh
+          bash scripts/verify-native-policy-consumer.sh
 
   gotenberg-tool:
     name: Gotenberg and policy tools
