@@ -277,11 +277,16 @@ object PdfWriter:
           case Null => add(4)
           case Bool(v) => add(if v then 4 else 5)
           case Number(v) =>
-            val decimal = v.bigDecimal.stripTrailingZeros
-            val precision = decimal.precision.toLong
-            val scale = decimal.scale.toLong
-            val digits = if scale <= 0 then precision - scale else if scale >= precision then scale + 2 else precision + 1
-            add(digits + (if decimal.signum < 0 then 1 else 0))
+            val raw = v.bigDecimal
+            if raw.signum == 0 then add(1)
+            else
+              // Normalizing an extreme negative scale can itself overflow.
+              // Its plain integer width is unchanged by stripping zeroes.
+              val decimal = if raw.scale <= 0 then raw else raw.stripTrailingZeros
+              val precision = decimal.precision.toLong
+              val scale = decimal.scale.toLong
+              val digits = if scale <= 0 then precision - scale else if scale >= precision then scale + 2 else precision + 1
+              add(digits + (if decimal.signum < 0 then 1 else 0))
           case Name(v) =>
             add(1)
             v.foreach { c => add(if c.isWhitespace || "#/%()<>[]{}".contains(c) then 1 + math.max(2, Integer.toHexString(c.toInt).length) else 1) }

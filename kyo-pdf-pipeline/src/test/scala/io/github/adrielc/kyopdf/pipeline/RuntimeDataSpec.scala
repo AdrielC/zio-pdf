@@ -57,11 +57,13 @@ object RuntimeDataSpec extends ZIOSpecDefault:
       val limit = result(ByteLimit.fromBytes(4096)).toOption.get
       val sparse = document.copy(objects = document.objects :+ PdfObject(ObjectRef(Int.MaxValue), PdfValue.Null))
       val expanded = document.copy(objects = document.objects :+ PdfObject(ObjectRef(4), PdfValue.Number(BigDecimal("1e2147483647"))))
+      val overflowing = document.copy(objects = document.objects :+ PdfObject(ObjectRef(4), PdfValue.Number(BigDecimal("100e2147483647"))))
       val original = result(PdfWriter.write(document)).toOption.get
       val exact = result(ByteLimit.fromBytes(original.length.toLong)).toOption.get
       val short = result(ByteLimit.fromBytes(original.length.toLong - 1)).toOption.get
       assertTrue(result(PdfWriter.write(sparse, limit)).left.toOption.get.isInstanceOf[PdfError.TooLarge],
         result(PdfWriter.write(expanded, limit)).left.toOption.get.isInstanceOf[PdfError.TooLarge],
+        result(PdfWriter.write(overflowing, limit)).left.toOption.get.isInstanceOf[PdfError.TooLarge],
         result(PdfWriter.write(document, exact)) == Right(original), result(PdfWriter.write(document, short)).isLeft)
     },
     test("validation receipts retain their exact subject and reject unrequested verdicts") {
