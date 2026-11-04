@@ -95,6 +95,7 @@ object PipelineJson:
       val kind = string(test, "kind", path)
       val (result, fields): (Predicate, Set[String]) = kind match
         case "page-count" => (Predicate.PageCount(integer(test, "min", path), integer(test, "max", path)), Set("min", "max"))
+        case "has-page-numbers" => (Predicate.HasPageNumbers, Set.empty)
         case "declares-3b" => (Predicate.Declares3b, Set.empty)
         case "validation" => (Predicate.Validation(string(test, "profile", path)), Set("profile"))
         case _ => errors += issue(s"$path.kind", "Choose page-count, declares-3b or validation"); (Predicate.Declares3b, Set.empty)
@@ -121,6 +122,7 @@ object PipelineJson:
         case "assemble" => (Op.Assemble(integer(node, "catalog", path, Some(0))), Set("catalog"))
         case "stamp" => (Op.Stamp(string(node, "text", path), string(node, "placement", path, Some("top"))), Set("text", "placement"))
         case "number" => (Op.NumberPages(integer(node, "start", path, Some(1)), string(node, "style", path, Some("page")), string(node, "prefix", path, Some(""))), Set("start", "style", "prefix"))
+        case "convert-pdfa-3b" => (Op.ConvertPdfA3b, Set.empty)
         case "write" => (Op.Write, Set.empty)
         case "validate" => (Op.Validate(strings(node, "profiles", path)), Set("profiles"))
         case "choose" => (Op.Choose(predicate(node.get("test"), s"$path.test"), portKind(node, path)), Set("test", "kind"))
@@ -139,6 +141,7 @@ object PipelineJson:
     def strings(values: Vector[String]): String = values.map(PaperMachine.quote).mkString("[", ",", "]")
     def predicate(value: Predicate): String = value match
       case Predicate.PageCount(min, max) => s"{\"kind\":\"page-count\",\"min\":$min,\"max\":$max}"
+      case Predicate.HasPageNumbers => "{\"kind\":\"has-page-numbers\"}"
       case Predicate.Declares3b => "{\"kind\":\"declares-3b\"}"
       case Predicate.Validation(profile) => s"{\"kind\":\"validation\",\"profile\":${PaperMachine.quote(profile)}}"
     val nodes = recipe.nodes.map { node =>
@@ -148,6 +151,7 @@ object PipelineJson:
         case Op.Assemble(catalog) => ("assemble", s",\"catalog\":$catalog")
         case Op.Stamp(text, placement) => ("stamp", s",\"text\":${PaperMachine.quote(text)},\"placement\":${PaperMachine.quote(placement)}")
         case Op.NumberPages(start, style, prefix) => ("number", s",\"start\":$start,\"style\":${PaperMachine.quote(style)},\"prefix\":${PaperMachine.quote(prefix)}")
+        case Op.ConvertPdfA3b => ("convert-pdfa-3b", "")
         case Op.Write => ("write", "")
         case Op.Validate(profiles) => ("validate", s",\"profiles\":${strings(profiles)}")
         case Op.Choose(test, kind) => ("choose", s",\"test\":${predicate(test)},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")

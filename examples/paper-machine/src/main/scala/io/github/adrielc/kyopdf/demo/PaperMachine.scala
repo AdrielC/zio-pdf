@@ -2,7 +2,7 @@ package io.github.adrielc.kyopdf.demo
 
 import io.github.adrielc.kyopdf.*
 import kyo.*
-import io.github.adrielc.kyopdf.pipeline.PdfPipeline
+import io.github.adrielc.kyopdf.pipeline.{PdfPipeline, PdfPipelineModel}
 import scala.jdk.CollectionConverters.*
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.io.ByteArrayOutputStream
@@ -155,6 +155,18 @@ object PaperMachine:
       Using.resource(getClass.getResourceAsStream(s"/paper-machine/$asset")) { stream =>
         Reply(stream.readNBytes(256 * 1024), mime)
       }
+    else if path == "/mcp" then
+      if method != "POST" then Reply(Array.emptyByteArray, status = 405)
+      else
+        val (status, body) = PipelineTool.handle(read(exchange, PipelineJson.MaxBytes), origin) { (tool, plan, files) =>
+          val response = tool match
+            case "check_pdf_pipeline" =>
+              json(s"""{"recipe":${PdfPipelineModel.encode(plan)},"order":${plan.order.map(n => quote(n.id)).mkString("[", ",", "]")}}""")
+            case "explain_pdf_pipeline" => explainPipeline(plan, files)
+            case _ => runPipeline(plan, files)
+          (response.status, String(response.bytes, UTF_8))
+        }
+        json(body, status)
     else if path.startsWith("/api/pipeline-inputs/") && method == "POST" then
       val slot = path.stripPrefix("/api/pipeline-inputs/")
       if !slot.matches("[A-Za-z][A-Za-z0-9_-]{0,47}") then error("Choose a valid input slot")
@@ -175,12 +187,16 @@ object PaperMachine:
               val _ = pipelineInputs.remove(pipelineInputs.head._1)
           }
           json(report(doc)))
-    else if path == "/api/pipelines/example" && method == "GET" then
+    else if Set("/api/pipelines/example", "/api/pipelines/model-example")(path) && method == "GET" then
       val example = Option(exchange.getRequestURI.getRawQuery).getOrElse("") match
         case "pages" => PipelineExamples.pages
         case "validation" => PipelineExamples.validation
+        case "packet" | "bookended" => PipelineExamples.packet
+        case "archive-packet" => PipelineExamples.archivePacket
         case _ => PipelineWiring.example
-      json(PipelineJson.encode(example))
+      if path.endsWith("/model-example") then
+        PdfPipeline.check(example).fold(issues => error(PipelineJson.issues(issues)), plan => json(PdfPipelineModel.encode(plan)))
+      else json(PipelineJson.encode(example))
     else if Set("/api/pipelines/check", "/api/pipelines/run")(path) && method == "POST" then
       val parsed = PipelineJson.parse(read(exchange, PipelineJson.MaxBytes))
       val envelope = parsed.flatMap { value =>
@@ -277,10 +293,31 @@ object PaperMachine:
                 }.fold(error(_), result => json(report(result)))
           case _ => error("Not found", 404)
 
+  private def documentSnapshot: Map[String, Document] =
+    documents.synchronized(documents.toMap) ++
+      bookends.synchronized(bookends.values.map(doc => doc.id -> doc).toMap) ++
+      pipelineInputs.synchronized(pipelineInputs.values.map(doc => doc.id -> doc).toMap)
+
+  private def decisionsJson(decisions: Vector[PdfPipeline.Decision]): String =
+    decisions.map(d => s"""{"node":${quote(d.node)},"outcome":${quote(d.outcome.toString.toLowerCase(java.util.Locale.ROOT))},"selected":${quote(d.selected)},"reason":${quote(d.reason)}}""").mkString("[", ",", "]")
+
+  private def explainPipeline(plan: PdfPipeline.Checked, bindings: Map[String, String]): Reply =
+    val snapshot = documentSnapshot
+    val bound = bindings.flatMap((slot, id) => snapshot.get(id).map(slot -> _))
+    val services = new PipelineServices(Vector.empty, bound.valuesIterator.map(doc => doc.value -> doc.bytes).toVector)
+    if !pipelineSlots.tryAcquire() then error("Another pipeline is running. Wait for it to finish.", 429)
+    else Using.resource(new AutoCloseable { def close(): Unit = pipelineSlots.release() }) { _ =>
+      evaluate(PdfPipeline.explain(plan, bound.view.mapValues(_.value).toMap, services)).fold(error(_), explanation =>
+        val outputs = explanation.outputs.map((node, kind) => s"""{"node":${quote(node)},"kind":${quote(kind.toString.toLowerCase(java.util.Locale.ROOT))}}""").mkString("[", ",", "]")
+        val deferred = explanation.deferred.map(d => s"""{"node":${quote(d.node)},"reason":${quote(d.reason)}}""").mkString("[", ",", "]")
+        json(s"""{"recipeVersion":${plan.recipe.version},"decisions":${decisionsJson(explanation.decisions)},"deferred":$deferred,"outputs":$outputs}"""))
+    }
+
   private def runPipeline(plan: PdfPipeline.Checked, bindings: Map[String, String]): Reply =
     import PdfPipeline.*
     val slots = plan.recipe.nodes.collect { case Node(_, Op.Input(slot), _) => slot }.toSet
-    val snapshot = documents.synchronized(documents.toMap) ++ bookends.synchronized(bookends.values.map(doc => doc.id -> doc).toMap) ++ pipelineInputs.synchronized(pipelineInputs.values.map(doc => doc.id -> doc).toMap)
+    val snapshot = documentSnapshot
+    val bound = bindings.flatMap((slot, id) => snapshot.get(id).map(slot -> _))
     if !bindings.keySet.subsetOf(slots) then
       error("Bind only input slots named by the recipe")
     else if !pipelineSlots.tryAcquire() then error("Another pipeline is running. Wait for it to finish.", 429)
@@ -289,8 +326,19 @@ object PaperMachine:
         case Op.Validate(profiles) => profiles
         case _ => Vector.empty
       }.distinct
-      val services = new PipelineServices(if plan.order.exists(_.op.isInstanceOf[Op.Choose]) then Vector.empty else profiles)
-      evaluate(PdfPipeline.run(plan, bindings.flatMap((slot, id) => snapshot.get(id).map(doc => slot -> doc.value)), services))
+      val services = new PipelineServices(if plan.order.exists(_.op.isInstanceOf[Op.Choose]) then Vector.empty else profiles,
+        bound.valuesIterator.map(doc => doc.value -> doc.bytes).toVector)
+      val inputHashes = bindings.toVector.sortBy(_._1).map { (slot, id) =>
+        val digest = bound.get(slot).map(doc => quote(doc.sha256)).getOrElse("null")
+        s"""{"slot":${quote(slot)},"documentId":${quote(id)},"sha256":$digest}"""
+      }.mkString("[", ",", "]")
+      var observedNodes = Vector.empty[String]
+      var observedDecisions = Vector.empty[Decision]
+      val program = PdfPipeline.runObserved(plan, bound.view.mapValues(_.value).toMap, services) { (nodes, decisions) =>
+        observedNodes = nodes
+        observedDecisions = decisions
+      }
+      evaluate(program)
         .flatMap { run =>
           val outputs = run.outputs.foldLeft[Either[String, Vector[String]]](Right(Vector.empty)) { case (acc, (id, value)) => acc.flatMap { found => value match
             case Value.File(bytes) =>
@@ -300,10 +348,15 @@ object PaperMachine:
             case Value.Receipt(receipt, _) => Right(found :+ s"{\"node\":${quote(id)},\"kind\":\"receipt\",\"report\":$receipt}")
             case _ => Left("A pipeline output must be a PDF file or validation receipt")
           }}
-          val decisions = run.decisions.map(d => s"{\"node\":${quote(d.node)},\"outcome\":${quote(d.outcome.toString.toLowerCase)},\"selected\":${quote(d.selected)},\"reason\":${quote(d.reason)}}").mkString("[", ",", "]")
+          val decisions = decisionsJson(run.decisions)
+          val validations = services.validationEvidence.mkString("[", ",", "]")
           val validationRuns = services.validationRuns.map((hash, profiles) => s"{\"sha256\":${quote(hash)},\"profiles\":${profiles.map(quote).mkString("[", ",", "]")}}").mkString("[", ",", "]")
-          outputs.map(values => s"{\"validationRuns\":$validationRuns,\"decisions\":$decisions,\"skipped\":${run.skipped.map(quote).mkString("[", ",", "]")},\"validatorPasses\":${services.validationPasses},\"recipe\":${PipelineJson.encode(plan.recipe)},\"executed\":${run.executed.map(quote).mkString("[", ",", "]")},\"outputs\":${values.mkString("[", ",", "]")}}")
-        }.fold(message => error(message, if message == PipelineServices.BusyMessage then 429 else 400), json(_))
+          outputs.map(values => s"{\"recipeVersion\":${plan.recipe.version},\"inputs\":$inputHashes,\"validationEvidence\":$validations,\"validationRuns\":$validationRuns,\"decisions\":$decisions,\"skipped\":${run.skipped.map(quote).mkString("[", ",", "]")},\"validatorPasses\":${services.validationPasses},\"recipe\":${PipelineJson.encode(plan.recipe)},\"executed\":${run.executed.map(quote).mkString("[", ",", "]")},\"outputs\":${values.mkString("[", ",", "]")}}")
+        }.fold(message =>
+          val executed = observedNodes.map(quote).mkString("[", ",", "]")
+          val validations = services.validationEvidence.mkString("[", ",", "]")
+          json(s"""{"error":${quote(message)},"recipeVersion":${plan.recipe.version},"inputs":$inputHashes,"executed":$executed,"decisions":${decisionsJson(observedDecisions)},"validationEvidence":$validations,"outputs":[]}""",
+            if message == PipelineServices.BusyMessage then 429 else 400), json(_))
     }
 
   def main(args: Array[String]): Unit =

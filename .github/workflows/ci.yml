@@ -103,3 +103,34 @@ jobs:
         run: |
           sbt --server -J-Xms256m -J-Xmx2g -Dsbt.server.autostart=false -batch kyoPdfNative/testFull
           bash scripts/verify-native-consumer.sh
+
+  gotenberg-tool:
+    name: Gotenberg MCP tool
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      gotenberg:
+        # Gotenberg 8.36.0 multi-platform image.
+        image: gotenberg/gotenberg@sha256:87c16b9f364279d321bc9772d31fa58aa6abe036423c270698bd636c3a8e9466
+        ports:
+          - 3000/tcp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install PDF inspection tools
+        run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils
+      - name: Install sbt
+        run: |
+          if ! command -v sbt >/dev/null 2>&1; then
+            curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
+            chmod +x /usr/local/bin/cs
+            cs install sbt
+          fi
+          echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
+      - name: Convert and verify a packet through MCP
+        env:
+          KYO_PDF_GOTENBERG_PORT: ${{ job.services.gotenberg.ports['3000'] }}
+        run: bash scripts/verify-gotenberg-tool.sh

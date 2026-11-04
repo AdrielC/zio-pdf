@@ -4,6 +4,7 @@ import scala.scalanative.sbtplugin.ScalaNativePlugin
 
 val zioVersion                 = "2.1.26"
 val zioPreludeVersion          = "1.0.0-RC47"
+val pipelineSchemaVersion      = "0.0.56"
 val zioBlocksSchemaVersion     = "0.0.51"
 val zioBlocksMediaTypeVersion  = "0.0.51"
 val zioBlocksRingbufferVersion = "0.0.51"
@@ -163,9 +164,30 @@ lazy val kyoPdfPipeline = (project in file("kyo-pdf-pipeline"))
   .settings(
     name := "kyo-pdf-pipeline",
     libraryDependencies ++= List(
+      "dev.zio" %% "zio-blocks-schema" % pipelineSchemaVersion,
       "dev.zio" %% "zio-test" % zioVersion % Test,
       "dev.zio" %% "zio-test-sbt" % zioVersion % Test
     ),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+/** Opt-in Native pipeline build using locally supplied ZIO Blocks Native jars. */
+lazy val kyoPdfPipelineNative = (project in file("kyo-pdf-pipeline-native"))
+  .enablePlugins(ScalaNativePlugin)
+  .dependsOn(kyoPdfNative)
+  .settings(
+    name := "kyo-pdf-pipeline-native",
+    publish / skip := true,
+    Compile / scalaSource := (kyoPdfPipeline / Compile / scalaSource).value,
+    Test / scalaSource := (kyoPdfPipeline / Test / scalaSource).value,
+    unmanagedBase := sys.props.get("kyo.pdf.native.schemaJars").fold(baseDirectory.value / "lib")(file),
+    scalacOptions += "-experimental",
+    libraryDependencies ++= List(
+      "io.github.cquiroz" % "scala-java-time_native0.5_3" % scalaJavaTimeVersion,
+      "dev.zio" % "zio-test_native0.5_3" % zioVersion % Test,
+      "dev.zio" % "zio-test-sbt_native0.5_3" % zioVersion % Test
+    ),
+    libraryDependencySchemes += "org.scala-native" % "test-interface_native0.5_3" % VersionScheme.EarlySemVer,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 

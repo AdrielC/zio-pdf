@@ -48,6 +48,7 @@ object PdfArrow:
     def on[Z](before: PdfArrow[Z, A]): Condition[Z] = new Condition(before >>> source, test)
 
   def pages(min: Int, max: Int): Condition[Document] = new Condition(id[Document], Predicate.PageCount(min, max))
+  val hasPageNumbers: Condition[Document] = new Condition(id[Document], Predicate.HasPageNumbers)
   val declares3b: Condition[Document] = new Condition(id[Document], Predicate.Declares3b)
   def verified(profile: String): Condition[Receipt] = new Condition(id[Receipt], Predicate.Validation(profile))
   def choose[A, B: Scalar](condition: Condition[A])(yes: PdfArrow[A, B], no: PdfArrow[A, B], unknown: PdfArrow[A, B]): PdfArrow[A, B] =
@@ -79,6 +80,18 @@ object PdfArrow:
   def stamp(text: String, placement: String = "top"): PdfArrow[Document, Document] = step(Op.Stamp(text, placement), "stamp")
   def number(start: Int = 1, style: String = "page", prefix: String = ""): PdfArrow[Document, Document] = step(Op.NumberPages(start, style, prefix), "numbers")
   val write: PdfArrow[Document, File] = step(Op.Write, "pdf")
+  val convertPdfA3b: PdfArrow[File, File] = step(Op.ConvertPdfA3b, "convert-3b")
+
+  /** Convert and expose the result only when the validator passes the converted bytes. */
+  def archivePdfA3b: PdfArrow[File, (File, Receipt)] =
+    val receipt = keepRight[File, Receipt]
+    val reject = stop[(File, Receipt), File]("Converted PDF did not pass PDF/A-3b validation")
+    val unable = stop[(File, Receipt), File]("Converted PDF could not be validated as PDF/A-3b")
+    val verifiedFile = choose(verified("3b").on(receipt))(
+      keepLeft[File, Receipt], reject, unable
+    ).named("archive-check")
+    convertPdfA3b >>> (id[File] &&& validate("3b").named("archive-validation")) >>> (verifiedFile &&& receipt)
+
   def validate(profiles: String*): PdfArrow[File, Receipt] = step(Op.Validate(profiles.toVector), "checks")
   def assemble(catalog: Int = 0): PdfArrow[(Document, Document), Document] = step(Op.Assemble(catalog), "assembled")
   def assemble3(catalog: Int = 0): PdfArrow[((Document, Document), Document), Document] = step(Op.Assemble(catalog), "assembled")

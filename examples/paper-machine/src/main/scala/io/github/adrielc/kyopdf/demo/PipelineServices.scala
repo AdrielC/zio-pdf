@@ -12,10 +12,19 @@ import scala.jdk.CollectionConverters.*
 object PipelineServices:
   val BusyMessage = "Another validation is running. Wait for it to finish."
 
-final class PipelineServices(profiles: Vector[String]) extends Services:
+final class PipelineServices(profiles: Vector[String], originals: Vector[(PdfDocument, Array[Byte])] = Vector.empty) extends Services:
   private val receipts = scala.collection.mutable.ArrayBuffer.empty[(String, Set[String], String)]
+  def validationEvidence: Vector[String] = receipts.toVector.map(_._3)
   def validationPasses: Int = receipts.size
   def validationRuns: Vector[(String, Vector[String])] = receipts.toVector.map((hash, checked, _) => hash -> checked.toVector.sorted)
+  override def pageNumberEvidence(document: PdfDocument): (Outcome, String) < (Abort[PdfError] & Sync) =
+    originals.find((source, _) => source eq document) match
+      case Some((_, bytes)) => Sync.defer(PageNumberEvidence.inspect(bytes))
+      case None => PdfWriter.write(document).map(bytes => Sync.defer(PageNumberEvidence.inspect(bytes.toArray)))
+  override def convertPdfA3b(bytes: Vector[Byte]): Vector[Byte] < (Abort[PdfError] & Sync) =
+    Abort.catching[Exception](error => PdfError.InvalidPdf(Option(error.getMessage).getOrElse("PDF/A-3b conversion failed")))(
+      Sync.defer(GotenbergArchive.convert(bytes))
+    )
   def stamp(document: PdfDocument, text: String, placement: String): PdfDocument < (Abort[PdfError] & Sync) =
     PacketBuild.finish(document, PacketOptions(stamp = text, placement = placement))
   def number(document: PdfDocument, start: Int, style: String, prefix: String): PdfDocument < (Abort[PdfError] & Sync) =
