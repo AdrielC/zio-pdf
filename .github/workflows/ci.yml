@@ -7,8 +7,7 @@ permissions:
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  pull_request: {}
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -105,7 +104,7 @@ jobs:
           bash scripts/verify-native-consumer.sh
 
   gotenberg-tool:
-    name: Gotenberg MCP tool
+    name: Gotenberg and court tools
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -130,7 +129,7 @@ jobs:
             cs install sbt
           fi
           echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
-      - name: Convert and verify a packet through MCP
+      - name: Verify archival packets and court rules through MCP
         env:
           KYO_PDF_GOTENBERG_PORT: ${{ job.services.gotenberg.ports['3000'] }}
         run: |

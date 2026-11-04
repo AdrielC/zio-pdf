@@ -273,3 +273,37 @@ Run the end-to-end test against the configured studio.
 KYO_PDF_TEST_GOTENBERG=1 python3 examples/paper-machine/test_pipelines.py \
   http://127.0.0.1:8087 PipelineTest.test_gotenberg_archive_packet_passes_3b_through_tool
 ```
+
+### California Second District petition preflight
+
+Choose **California Second District petition preflight** in Pipelines.
+The example returns the PDF and a receipt with the court profile, effective
+date, source rules, SHA-256, and findings. Open a page from the receipt to
+inspect a finding. Use `/api/pipelines/model-example?court-preflight` for the
+same recipe in the MCP format.
+
+The example checks the bytes emitted by its write step. To inspect an uploaded
+PDF byte for byte, upload it to `/api/documents` and POST an empty body to
+`/api/documents/{id}/court-preflight`. The receipt hash identifies the file that
+was checked.
+
+The profile checks file size, extractable text, page labels and visible
+pagination evidence, and bookmark destinations. It can flag a likely exhibit
+bookmark mismatch when it finds a unique matching heading. Confirm bookmark
+coverage and zoom, text quality, formatting, and sensitive information by
+review. This pilot covers single PDFs within the studio limits of 12 MiB and
+64 pages.
+
+### Load another court's rules
+
+GET `/api/court-profiles/example` returns the California rules as editable JSON.
+GET `/api/court-profiles/schema` exports the authoring schema. POST a profile
+to `/api/court-profiles/check` to compile and validate it, then POST that same
+JSON to `/api/documents/{id}/court-preflight` to inspect an uploaded PDF.
+
+A pipeline can carry the entire profile in a `preflight-rules` node's
+`rules` field. Save, load, and compose it through the ordinary arrows and
+the MCP tools. Receipts include both the PDF SHA-256 and a SHA-256 of the
+canonical profile, so changes to a rule produce distinguishable receipts.
+Review source rules when authoring a profile. Requirements that depend on
+human judgment remain explicit review conditions.

@@ -5,6 +5,7 @@ import com.google.gson.stream.{JsonReader, JsonToken}
 import java.io.StringReader
 import java.nio.charset.StandardCharsets.UTF_8
 import io.github.adrielc.kyopdf.pipeline.PdfPipeline.*
+import io.github.adrielc.kyopdf.pipeline.{CourtRules, CourtProfile}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
@@ -124,6 +125,14 @@ object PipelineJson:
         case "number" => (Op.NumberPages(integer(node, "start", path, Some(1)), string(node, "style", path, Some("page")), string(node, "prefix", path, Some(""))), Set("start", "style", "prefix"))
         case "convert-pdfa-3b" => (Op.ConvertPdfA3b, Set.empty)
         case "write" => (Op.Write, Set.empty)
+        case "preflight-rules" =>
+          val rules = CourtRules.decode(Option(node.get("rules")).fold("null")(_.toString)) match
+            case Right(plan) => plan.profile
+            case Left(issues) =>
+              issues.foreach(issue => errors += issue.copy(path = s"$path.rules." + issue.path.stripPrefix("profile.")))
+              CourtProfile.CaliforniaSecondDistrictPetition.rules
+          (Op.PreflightRules(rules), Set("rules"))
+        case "preflight" => (Op.Preflight(string(node, "profile", path)), Set("profile"))
         case "validate" => (Op.Validate(strings(node, "profiles", path)), Set("profiles"))
         case "choose" => (Op.Choose(predicate(node.get("test"), s"$path.test"), portKind(node, path)), Set("test", "kind"))
         case "stop" => (Op.Stop(string(node, "message", path), portKind(node, path)), Set("message", "kind"))
@@ -153,6 +162,8 @@ object PipelineJson:
         case Op.NumberPages(start, style, prefix) => ("number", s",\"start\":$start,\"style\":${PaperMachine.quote(style)},\"prefix\":${PaperMachine.quote(prefix)}")
         case Op.ConvertPdfA3b => ("convert-pdfa-3b", "")
         case Op.Write => ("write", "")
+        case Op.PreflightRules(rules) => ("preflight-rules", s",\"rules\":${CourtRules.encode(rules)}")
+        case Op.Preflight(profile) => ("preflight", s",\"profile\":${PaperMachine.quote(profile)}")
         case Op.Validate(profiles) => ("validate", s",\"profiles\":${strings(profiles)}")
         case Op.Choose(test, kind) => ("choose", s",\"test\":${predicate(test)},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")
         case Op.Stop(message, kind) => ("stop", s",\"message\":${PaperMachine.quote(message)},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")

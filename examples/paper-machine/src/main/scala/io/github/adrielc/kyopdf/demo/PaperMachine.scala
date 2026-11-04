@@ -2,7 +2,7 @@ package io.github.adrielc.kyopdf.demo
 
 import io.github.adrielc.kyopdf.*
 import kyo.*
-import io.github.adrielc.kyopdf.pipeline.{PdfPipeline, PdfPipelineModel}
+import io.github.adrielc.kyopdf.pipeline.{CourtProfile, CourtRules, PdfPipeline, PdfPipelineModel}
 import scala.jdk.CollectionConverters.*
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.io.ByteArrayOutputStream
@@ -155,6 +155,13 @@ object PaperMachine:
       Using.resource(getClass.getResourceAsStream(s"/paper-machine/$asset")) { stream =>
         Reply(stream.readNBytes(256 * 1024), mime)
       }
+    else if path == "/api/court-profiles/schema" && method == "GET" then json(CourtRules.jsonSchema.print)
+    else if path == "/api/court-profiles/example" && method == "GET" then
+      json(CourtRules.encode(CourtProfile.CaliforniaSecondDistrictPetition.rules))
+    else if path == "/api/court-profiles/check" && method == "POST" then
+      CourtRules.decode(String(read(exchange, CourtRules.MaxJsonChars), UTF_8)).fold(
+        issues => json(s"""{"issues":${PipelineJson.issues(issues)}}""", 400),
+        plan => json(CourtRules.encode(plan.profile)))
     else if path == "/mcp" then
       if method != "POST" then Reply(Array.emptyByteArray, status = 405)
       else
@@ -193,6 +200,7 @@ object PaperMachine:
         case "validation" => PipelineExamples.validation
         case "packet" | "bookended" => PipelineExamples.packet
         case "archive-packet" => PipelineExamples.archivePacket
+        case "court-preflight" => PipelineExamples.courtPreflight
         case _ => PipelineWiring.example
       if path.endsWith("/model-example") then
         PdfPipeline.check(example).fold(issues => error(PipelineJson.issues(issues)), plan => json(PdfPipelineModel.encode(plan)))
@@ -250,6 +258,16 @@ object PaperMachine:
       else documents.synchronized(documents.get(parts(2))) match
         case None => error("This document has expired. Open the PDF again.", 404)
         case Some(doc) => parts(3) match
+          case "court-preflight" if method == "POST" =>
+            val body = read(exchange, CourtRules.MaxJsonChars)
+            val parsed = if body.isEmpty then CourtRules.compile(CourtProfile.CaliforniaSecondDistrictPetition.rules)
+              else CourtRules.decode(String(body, UTF_8))
+            parsed.fold(issues => json(s"""{"issues":${PipelineJson.issues(issues)}}""", 400), plan =>
+              if !pipelineSlots.tryAcquire() then error("Another pipeline is running. Wait for it to finish.", 429)
+              else
+                try json(CourtPreflight.inspect(doc.bytes, plan))
+                finally pipelineSlots.release())
+
           case "file" if method == "GET" => Reply(doc.bytes, "application/pdf")
           case "preview" if method == "GET" =>
             val page = Option(exchange.getRequestURI.getQuery).getOrElse("").stripPrefix("page=").toIntOption

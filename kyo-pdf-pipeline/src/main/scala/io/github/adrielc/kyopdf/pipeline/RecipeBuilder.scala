@@ -20,6 +20,8 @@ final class RecipeBuilder:
   def number(input: Wire[DocumentPort], start: Int = 1, style: String = "page", prefix: String = ""): Wire[DocumentPort] =
     node(Op.NumberPages(start, style, prefix), Vector(input.id))
   def write(input: Wire[DocumentPort]): Wire[FilePort] = node(Op.Write, Vector(input.id))
+  def preflight(input: Wire[FilePort], rules: CourtRules.Profile): Wire[ReceiptPort] =
+    node(Op.PreflightRules(rules), Vector(input.id))
   def validate(input: Wire[FilePort], profiles: String*): Wire[ReceiptPort] = node(Op.Validate(profiles.toVector), Vector(input.id))
   def stopDocument(message: String): Wire[DocumentPort] = node(Op.Stop(message, Kind.Document), Vector.empty)
   def stopFile(message: String): Wire[FilePort] = node(Op.Stop(message, Kind.File), Vector.empty)
