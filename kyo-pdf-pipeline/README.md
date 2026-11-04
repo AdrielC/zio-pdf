@@ -141,7 +141,7 @@ Use the published Native module, which brings its public-source Schema runtime
 and Kyo core as transitive dependencies:
 
 ```scala
-libraryDependencies += "io.github.adrielc" % "kyo-pdf-pipeline_native0.5_3" % "0.5.0"
+libraryDependencies += "io.github.adrielc" % "kyo-pdf-pipeline_native0.5_3" % "0.6.0"
 ```
 
 ```sh
@@ -187,7 +187,7 @@ profile and compiles its comparisons into ZIO Blocks `SchemaExpr` expressions.
 `Policy.Checked.run` evaluates the plan against observations supplied by
 an inspector and accumulates findings.
 
-### Runtime results (unreleased)
+### Runtime results (v0.6.0)
 
 Runtime output payloads now carry checked domain types:
 
@@ -210,8 +210,8 @@ data and cannot supply archival verdicts. Both retain the exact `PdfFile`
 provided to the interpreter. The live-value budget counts that subject even
 when only a receipt is returned, and deduplicates shared subjects.
 
-`ReportJson.parse` produces an object-shaped report with limits of 1 MiB of
-characters, 64 levels and 32,768 JSON nodes. It rejects duplicate object fields.
+`ReportJson.parse` produces an object-shaped report with limits of 1,048,576
+UTF-16 code units, 64 levels and 32,768 JSON nodes. It rejects duplicate fields.
 The typed `Services.verify`, `convert` and `inspect` entry points use these
 payloads. Existing string/byte callbacks remain compatibility adapters; malformed
 reports, unknown profiles and unrequested verdicts fail at that boundary.
@@ -220,7 +220,8 @@ This changes the Scala runtime-result API. Read `file.bytes` and
 `receipt.report.value` (or `.encoded`) explicitly. Typed service implementations
 can override `verify(file, profiles)` and return `VerificationResult` directly.
 Saved recipe JSON, model-facing schemas and the studio result envelope retain
-their existing format. These changes are not part of the published v0.5.0 API.
+their existing format. Recompile callers migrating from v0.5.0 and follow the
+[v0.6.0 migration notes](../release-notes/v0.6.0.md).
 
 Rules select document, page, or bookmark scope. Conditions support comparisons
 between facts and numbers, `All`, `Any`, `Not`, and `Review`. The optional

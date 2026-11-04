@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## [0.6.0] — 2026-11-04
 
 - Replace pipeline byte-vector and string-receipt payloads with checked
   `PdfFile`, parsed `ReportJson`, typed `PdfAProfile` verdicts, and validation or
@@ -11,6 +11,8 @@ All notable changes to this project are documented here.
 - Bound writer output before rendering, including decimal expansion and sparse
   xref tables. Count receipt-retained files in the live-value budget without
   double-counting shared payloads.
+- Publish the checked result API for both JVM and Scala Native. Recompile Scala
+  callers migrating from 0.5.0; existing service callbacks remain checked adapters.
 
 ## [0.5.0] — 2026-11-03
 
