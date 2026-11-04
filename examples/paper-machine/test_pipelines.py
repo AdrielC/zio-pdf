@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,7 @@ BASE = sys.argv.pop(1).rstrip('/') if len(sys.argv) > 1 else 'http://127.0.0.1:8
 
 def request(path, value=None, raw=None):
     data = raw if raw is not None else json.dumps(value).encode() if value is not None else None
-    req = urllib.request.Request(BASE + path, data=data, headers={'Content-Type': 'application/json'})
+    req = urllib.request.Request(BASE + path, data=data, headers={'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'})
     try:
         with urllib.request.urlopen(req, timeout=180) as response:
             return response.status, response.read()
@@ -55,6 +56,193 @@ class PipelineTest(unittest.TestCase):
                 result = subprocess.run(['qpdf', '--check', str(path)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return subprocess.check_output(['pdftotext', str(path), '-'], text=True)
+
+    def rpc(self, method, params=None, request_id=1):
+        call = {'jsonrpc': '2.0', 'method': method, 'params': params or {}}
+        if request_id is not None:
+            call['id'] = request_id
+        status, data = request('/mcp', call)
+        if request_id is None:
+            self.assertEqual((status, data), (202, b''))
+            return None
+        self.assertEqual(status, 200, data)
+        response = json.loads(data)
+        self.assertEqual(response['id'], request_id)
+        self.assertIn('result', response, response)
+        return response['result']
+
+    def test_mcp_tool_returns_pdf_and_named_branch_decision(self):
+        initialized = self.rpc('initialize', {'protocolVersion': '2025-06-18', 'capabilities': {},
+                                         'clientInfo': {'name': 'pipeline-test', 'version': '1'}})
+        self.assertEqual(initialized['protocolVersion'], '2025-06-18')
+        self.rpc('notifications/initialized', request_id=None)
+        tools = {tool['name']: tool for tool in self.rpc('tools/list', request_id=2)['tools']}
+        self.assertEqual(set(tools), {'run_pdf_pipeline', 'check_pdf_pipeline', 'explain_pdf_pipeline'})
+        tool = tools['run_pdf_pipeline']
+        variants = tool['inputSchema']['properties']['recipe']['properties']['nodes']['items']['oneOf']
+        branches = next(v['required'] for v in variants if v['properties']['op']['const'] == 'choose')
+        self.assertTrue({'test', 'source', 'yes', 'no', 'unknown'}.issubset(branches))
+        self.assertNotIn('inputs', branches)
+
+        status, data = request('/api/pipelines/model-example?pages')
+        self.assertEqual(status, 200, data)
+        recipe = json.loads(data)
+        choose = next(node for node in recipe['nodes'] if node['op'] == 'choose')
+        checked = self.rpc('tools/call', {'name': 'check_pdf_pipeline', 'arguments': {'recipe': recipe}})
+        self.assertFalse(checked['isError'], checked)
+        self.assertEqual(checked['structuredContent']['recipe'], recipe)
+        explain = self.rpc('tools/call', {'name': 'explain_pdf_pipeline',
+                                        'arguments': {'recipe': recipe, 'files': {'body': self.doc['id']}}})
+        self.assertFalse(explain['isError'], explain)
+        self.assertEqual(explain['structuredContent']['decisions'][0]['selected'], 'long')
+        self.assertEqual(explain['structuredContent']['deferred'], [])
+        status, data = request('/api/pipelines/model-example?validation')
+        self.assertEqual(status, 200, data)
+        deferred = self.rpc('tools/call', {'name': 'explain_pdf_pipeline',
+                                         'arguments': {'recipe': json.loads(data), 'files': {'body': self.doc['id']}}})
+        self.assertFalse(deferred['isError'], deferred)
+        self.assertEqual(deferred['structuredContent']['decisions'], [])
+        self.assertTrue(deferred['structuredContent']['deferred'])
+        params = {'name': tool['name'], 'arguments': {'recipe': recipe, 'files': {'body': self.doc['id']}}}
+        result = self.rpc('tools/call', params, request_id=3)
+        self.assertFalse(result['isError'], result)
+        payload = result['structuredContent']
+        self.assertEqual(payload['recipeVersion'], recipe['version'])
+        self.assertEqual(payload['inputs'][0]['sha256'], self.doc['sha256'])
+        self.assertEqual(payload['decisions'][0]['outcome'], 'no')
+        self.assertEqual(payload['decisions'][0]['selected'], 'long')
+        self.assertIn('short', payload['skipped'])
+        self.assertIn('unknown', payload['skipped'])
+        output = payload['outputs'][0]['document']
+        link, = [item for item in result['content'] if item['type'] == 'resource_link']
+        self.assertEqual(link['mimeType'], 'application/pdf')
+        self.assertEqual(link['uri'], BASE + '/api/documents/' + output['id'] + '/file')
+        with urllib.request.urlopen(link['uri'], timeout=10) as response:
+            self.assertEqual(response.headers.get_content_type(), 'application/pdf')
+            pdf = response.read()
+        self.assertTrue(pdf.startswith(b'%PDF-'))
+        self.assertEqual(hashlib.sha256(pdf).hexdigest(), output['sha256'])
+        text = self.output_text(output)
+        if text is not None:
+            self.assertIn('LONG PACKET', text)
+            self.assertNotIn('SHORT PACKET', text)
+
+        choose['yes'] = 'missing-node'
+        rejected = self.rpc('tools/call', params, request_id=4)
+        self.assertTrue(rejected['isError'])
+        self.assertEqual(rejected['structuredContent']['issues'][0]['path'],
+                         f"nodes[{recipe['nodes'].index(choose)}].yes")
+        self.assertFalse(any(item['type'] == 'resource_link' for item in rejected['content']))
+
+    def test_packet_routes_numbered_unnumbered_and_ambiguous_bodies(self):
+        def invoke(name, recipe, files):
+            return self.rpc('tools/call', {'name': name, 'arguments': {'recipe': recipe, 'files': files}})
+        def one_page(page):
+            status, data = request('/api/documents/' + self.doc['id'] + '/remix', raw=str(page).encode())
+            self.assertEqual(status, 200, data)
+            return json.loads(data)['id']
+
+        status, data = request('/api/pipelines/model-example?packet')
+        self.assertEqual(status, 200, data)
+        recipe = json.loads(data)
+        files = {'cover': one_page(1), 'body': self.doc['id'], 'tail': one_page(4)}
+        for slot, doc_id in files.items():
+            status, data = request('/api/pipeline-inputs/packet-' + self.doc['id'][:12] + '-' + slot + '?document=' + doc_id, raw=b'')
+            self.assertEqual(status, 200, data)
+        explained = invoke('explain_pdf_pipeline', recipe, files)
+        self.assertFalse(explained['isError'], explained)
+        self.assertEqual(explained['structuredContent']['decisions'][0]['outcome'], 'no')
+
+        result = invoke('run_pdf_pipeline', recipe, files)
+        self.assertFalse(result['isError'], result)
+        payload = result['structuredContent']
+        self.assertEqual(payload['decisions'][0]['selected'], 'number-body')
+        output, receipt = payload['outputs']
+        self.assertEqual(receipt['report']['sha256'], output['document']['sha256'])
+        self.assertEqual(payload['validationEvidence'][0]['sha256'], output['document']['sha256'])
+        text = self.output_text(output['document'])
+        if text is not None:
+            self.assertIn('Page 1 of 4', text)
+            self.assertIn('Page 4 of 4', text)
+            self.assertNotIn('Page 5 of', text)
+
+        number = {'version': 1, 'name': 'Number body', 'nodes': [
+            {'id': 'body', 'op': 'input', 'slot': 'body', 'inputs': []},
+            {'id': 'numbered', 'op': 'number', 'inputs': ['body']},
+            {'id': 'pdf', 'op': 'write', 'inputs': ['numbered']}], 'outputs': ['pdf']}
+        numbered = invoke('run_pdf_pipeline', number, {'body': self.doc['id']})
+        self.assertFalse(numbered['isError'], numbered)
+        files['body'] = numbered['structuredContent']['outputs'][0]['document']['id']
+        result = invoke('run_pdf_pipeline', recipe, files)
+        self.assertFalse(result['isError'], result)
+        self.assertEqual(result['structuredContent']['decisions'][0]['outcome'], 'yes')
+        self.assertIn('number-body', result['structuredContent']['skipped'])
+
+        raster = b'q 100 0 0 100 50 50 cm BI /W 1 /H 1 /BPC 8 /CS /G ID \x80 EI Q\n'
+        objects = [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Count 1 /Kids [3 0 R] >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>',
+            f'<< /Length {len(raster)} >>\nstream\n'.encode() + raster + b'endstream'
+        ]
+        pdf = bytearray(b'%PDF-1.7\n')
+        offsets = []
+        for index, obj in enumerate(objects, 1):
+            offsets.append(len(pdf))
+            pdf.extend(f'{index} 0 obj\n'.encode() + obj + b'\nendobj\n')
+        xref = len(pdf)
+        pdf.extend(b'xref\n0 5\n0000000000 65535 f \n')
+        for offset in offsets:
+            pdf.extend(f'{offset:010d} 00000 n \n'.encode())
+        pdf.extend(f'trailer\n<< /Root 1 0 R /Size 5 >>\nstartxref\n{xref}\n%%EOF\n'.encode())
+        status, data = request('/api/pipeline-inputs/body', raw=bytes(pdf))
+        self.assertEqual(status, 200, data)
+        files['body'] = json.loads(data)['id']
+        result = invoke('run_pdf_pipeline', recipe, files)
+        self.assertTrue(result['isError'])
+        self.assertEqual(result['structuredContent']['decisions'][0]['outcome'], 'unknown')
+        self.assertEqual(result['structuredContent']['decisions'][0]['selected'], 'review-numbering')
+        self.assertEqual(result['structuredContent']['outputs'], [])
+        self.assertEqual(result['structuredContent']['validationEvidence'], [])
+
+    @unittest.skipUnless(os.environ.get('KYO_PDF_TEST_GOTENBERG') == '1', 'requires local Gotenberg')
+    def test_gotenberg_archive_packet_passes_3b_through_tool(self):
+        files = {'body': self.doc['id']}
+        for slot, page in [('cover', 1), ('tail', 4)]:
+            status, data = request('/api/documents/' + self.doc['id'] + '/remix', raw=str(page).encode())
+            self.assertEqual(status, 200, data)
+            files[slot] = json.loads(data)['id']
+
+        status, data = request('/api/pipelines/model-example?archive-packet')
+        self.assertEqual(status, 200, data)
+        recipe = json.loads(data)
+        result = self.rpc('tools/call', {'name': 'run_pdf_pipeline',
+                                        'arguments': {'files': files, 'recipe': recipe}})
+        self.assertFalse(result['isError'], result.get('structuredContent'))
+        payload = result['structuredContent']
+        decisions = {decision['node']: decision for decision in payload['decisions']}
+        self.assertEqual(decisions['body-numbering']['selected'], 'number-body')
+        self.assertEqual(decisions['archive-check']['outcome'], 'yes')
+        self.assertEqual(payload['executed'].count('convert-3b'), 1)
+        self.assertEqual(payload['validatorPasses'], 1)
+        file, receipt = payload['outputs']
+        self.assertEqual(len(file['document']['pages']), 6)
+        self.assertEqual(receipt['report']['sha256'], file['document']['sha256'])
+        self.assertEqual(payload['validationEvidence'][0]['sha256'], file['document']['sha256'])
+        self.assertEqual([(row['profile'], row['status']) for row in receipt['report']['validation']['results']],
+                         [('3b', 'passed')])
+        link, = [item for item in result['content'] if item['type'] == 'resource_link']
+        with urllib.request.urlopen(link['uri'], timeout=20) as response:
+            self.assertEqual(response.headers.get_content_type(), 'application/pdf')
+            self.assertEqual(hashlib.sha256(response.read()).hexdigest(), file['document']['sha256'])
+        text = self.output_text(file['document'])
+        if text is not None:
+            pages = text.split('\f')[:-1]
+            self.assertEqual(len(pages), 6)
+            self.assertNotIn('Page 1 of 4', pages[0])
+            for index, page in enumerate(pages[1:5], 1):
+                self.assertIn(f'Page {index} of 4', page)
+            self.assertNotIn('Page 4 of 4', pages[5])
 
     def test_page_count_example_runs_only_the_selected_stamp(self):
         recipe = self.example('pages')

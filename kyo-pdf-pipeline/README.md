@@ -1,19 +1,19 @@
 # Data-defined PDF pipelines
 
 `kyo-pdf-pipeline` represents a PDF job as immutable, versioned data: named operations,
-settings, input references and output references. The module depends on Kyo PDF;
-it does not depend on ZIO, PDFBox, veraPDF, a JSON library, or Volga.
+settings, input references and output references. The module uses Kyo PDF and ZIO
+Blocks Schema for JSON transport and page-count expressions.
 
 ```scala
-import io.github.adrielc.kyopdf.pipeline.{PdfArrow, PdfPipeline}
+import io.github.adrielc.kyopdf.pipeline.{PdfArrow, PdfPipelineJson}
 import PdfArrow.*
 
 val finish: PdfArrow[Document, File] =
   select(4, 1, 3) >>> stamp("DRAFT") >>>
     number(start = 7, style = "bates", prefix = "DOC-") >>> write
 val deliver = finish >>> (id[File] &&& validate("3b", "2b", "3u"))
-val recipe = PdfArrow.recipe("Review packet", input("body") >>> deliver)
-val checked = recipe.flatMap(PdfPipeline.check)
+val json = PdfPipelineJson.encode("Review packet", input("body") >>> deliver)
+val checked = json.flatMap(PdfPipelineJson.decode)
 ```
 
 `PdfArrow[A, B]` is an immutable, reusable arrow. `>>>` and `<<<` compose
@@ -56,7 +56,10 @@ val packet = syntax.of2((front: V[Document], body: V[Document]) => {
 
 `check` accumulates independent typed `Issue`s in deterministic order. Once fields
 are valid, it checks references, port kinds and cycles, then creates a stable
-execution order. A PDF operation consumes a document; writing produces bytes;
+execution order. `PdfPipelineJson.decode` performs the same checks after parsing.
+The JSON contains the executable recipe, including input slot names. Supply PDFs
+and a services interpreter separately when running it. The studio has its own
+editor JSON format. A PDF operation consumes a document; writing produces bytes;
 validation consumes those exact bytes and produces a receipt. Arbitrary callbacks
 and implementation class names are not part of a saved recipe.
 
@@ -76,9 +79,11 @@ can nest and rejoin shared steps. An unselected branch does not load its inputs,
 rewrite PDFs, validate files or trigger its stop operation.
 
 Predicates cover page-count ranges, declared PDF/A-3b metadata and completed
-validation verdicts. A metadata claim is not conformance. Missing validation
-results, conflicting metadata or unreadable metadata take the unknown path; a validator's inability to check is
-distinct from a failed conformance check. Custom services provide typed verdicts
+validation verdicts. The interpreter reconstructs a ZIO Blocks `SchemaExpr` from
+the saved page-count bounds and evaluates it against the document page count.
+The declaration predicate reads the PDF's metadata claim. Missing validation
+results, conflicting metadata and unreadable metadata take the unknown path.
+A failed conformance check takes the no path. Custom services provide typed verdicts
 through `validationReport`; the older string-only `validate` method remains
 supported and safely yields unknown when used as a condition.
 
@@ -88,7 +93,7 @@ val route: PdfArrow[Document, Document] = choose(pages(1, 3))(
   stamp("LONG PACKET"),
   stop[Document, Document]("Page count is unavailable")
 )
-val conditional = PdfArrow.recipe("Route a packet", input("body") >>> route >>> write)
+val conditional = PdfPipelineJson.encode("Route a packet", input("body") >>> route >>> write)
 ```
 
 Branches are reusable `A → B` arrows with a common domain and codomain, followed
@@ -128,5 +133,35 @@ same portable recipe model.
 The adapter is example code; the core pipeline module stays independent of Volga.
 
 ```sh
-sbt 'kyoPdfPipeline/test'
+sbt 'kyoPdfPipeline/testFull'
 ```
+
+The same pipeline sources and tests run on Scala Native 0.5.12. The opt-in
+build takes ZIO Blocks 0.0.56 Native jars built with Scala 3.8.4. Put the
+Schema, Chunk, TypeId, Maybe and Markdown jars in a directory outside the
+checkout and pass its path to sbt.
+
+```sh
+sbt --server -Dkyo.pdf.native.schemaJars="$SCHEMA_NATIVE_JARS" 'kyoPdfPipelineNative/testFull'
+```
+
+## Author recipes with a model
+
+Use `PdfPipelineModel.recipeSchema.print` to export the named-branch JSON Schema,
+or `PdfPipelineModel.toolSchema(withFiles = true).print` to include file bindings
+in a tool's argument schema. `PdfPipelineModel.decode` checks authored JSON and
+returns a runnable plan. `PdfPipelineModel.encode` gives a model-facing example
+from any checked recipe, including recipes compiled from typed arrows. Field
+examples come from the same operation and predicate registry as the decoder.
+
+`PdfPipeline.explain` resolves conditions backed by bound inputs. It reports
+conditions that depend on downstream processing as deferred. Use the same
+`choose`, `>>>`, `><`, and `&&&` combinators to chain, split, and rejoin the
+arrows before exporting a recipe. A `hasPageNumbers` condition uses the
+interpreter's page-number evidence and returns unknown by default.
+
+`PdfArrow.convertPdfA3b` is a `File → File` arrow backed by the interpreter's
+conversion service. Use `PdfArrow.archivePdfA3b` for a `File → (File, Receipt)`
+arrow that converts, validates the converted bytes, and returns both only on a
+passing PDF/A-3b verdict. Compose it after the final write so all page edits are
+included in the validation.

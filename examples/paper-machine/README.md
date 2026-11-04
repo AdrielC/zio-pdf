@@ -181,3 +181,95 @@ Pipeline regressions use only synthetic PDFs:
 ```sh
 python3 examples/paper-machine/test_pipelines.py http://127.0.0.1:8087
 ```
+
+## Call a pipeline as an MCP tool
+
+Connect a local MCP client to `http://127.0.0.1:8087/mcp`, using the port
+printed by Paper Machine. The endpoint uses Streamable HTTP with JSON responses.
+Upload a PDF through the studio or POST its bytes to
+`/api/pipeline-inputs/body`. The upload response contains the document ID.
+
+After initialization, discover `run_pdf_pipeline` with `tools/list`.
+Send a `tools/call` request like the one below, replacing the document ID
+with the ID from your upload.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "run_pdf_pipeline",
+    "arguments": {
+      "files": {"body": "YOUR_DOCUMENT_ID"},
+      "recipe": {
+        "version": 2,
+        "name": "Number single-page PDFs",
+        "nodes": [
+          {"id": "body", "op": "input", "slot": "body", "inputs": []},
+          {"id": "numbered", "op": "number", "inputs": ["body"]},
+          {"id": "route", "op": "choose",
+           "test": {"kind": "page-count", "min": 1, "max": 1},
+           "source": "body", "yes": "numbered", "no": "body", "unknown": "body"},
+          {"id": "pdf", "op": "write", "inputs": ["route"]}
+        ],
+        "outputs": ["pdf"]
+      }
+    }
+  }
+}
+```
+
+The result includes branch decisions in `structuredContent.decisions` and
+a downloadable `application/pdf` resource link for each PDF output. Download
+links use the studio's local document cache and are available while the output
+remains cached. Recipe errors include paths such as `nodes[2].yes`.
+
+Run the HTTP integration check against a running studio.
+
+```sh
+python3 examples/paper-machine/test_pipelines.py http://127.0.0.1:8087 \
+  PipelineTest.test_mcp_tool_returns_pdf_and_named_branch_decision
+```
+
+`check_pdf_pipeline` takes just a recipe and returns the checked, named-branch
+form and node order. `explain_pdf_pipeline` also takes file bindings and reports
+resolvable decisions, deferred conditions, and expected output kinds. It
+does not stamp, write, or validate PDFs. `run_pdf_pipeline` includes the
+recipe version, input hashes, output hashes, executed and skipped nodes, and
+validation evidence keyed by the SHA-256 of the bytes checked.
+
+Try **Cover, conditional numbering, and tail** in the pipeline example picker,
+or fetch the tool-ready recipe from `/api/pipelines/model-example?packet`.
+Bind `cover`, `body`, and `tail`. The body condition looks for consecutive
+page labels in extractable header and footer text. Confident absence adds
+numbers to the body only. Ambiguous or unreadable pages stop for review.
+The assembled PDF and the PDF/A-3b receipt come from two branches of the
+same write operation. A receipt can report a failed conformance check.
+
+### Produce a verified PDF/A-3b packet
+
+Run Gotenberg locally and launch Paper Machine with its port configured.
+
+```sh
+docker run --rm -p 127.0.0.1:3000:3000 gotenberg/gotenberg:8
+```
+
+In another terminal, start Paper Machine.
+
+```sh
+KYO_PDF_GOTENBERG_PORT=3000 sbt 'paperMachine/run 8087'
+```
+
+Pick **Verified PDF/A-3b packet** or fetch
+`/api/pipelines/model-example?archive-packet` for a tool-ready recipe.
+The archival arrow sends the finished PDF to the local converter and checks
+the returned bytes with veraPDF. Failed or unavailable validation stops the
+pipeline. Gotenberg reprocesses the PDF during conversion.
+
+Run the end-to-end test against the configured studio.
+
+```sh
+KYO_PDF_TEST_GOTENBERG=1 python3 examples/paper-machine/test_pipelines.py \
+  http://127.0.0.1:8087 PipelineTest.test_gotenberg_archive_packet_passes_3b_through_tool
+```

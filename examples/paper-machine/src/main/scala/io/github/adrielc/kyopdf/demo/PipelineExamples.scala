@@ -22,3 +22,28 @@ object PipelineExamples:
     val outputs = (route &&& receipt.named("before-output")) >>> (after >< id[Receipt]) >>>
       assocRight[File, Receipt, Receipt] >>> swap[Receipt, Receipt].second[File]
     PdfArrow.recipe("Route by PDF-A verdict", context >>> outputs).fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)
+
+  val finishBody: PdfArrow[PdfArrow.Document, PdfArrow.Document] =
+    import PdfArrow.*
+    choose(hasPageNumbers)(
+      id[Document],
+      number().named("number-body"),
+      stop[Document, Document]("Review the body page numbering before assembling this packet").named("review-numbering")
+    ).named("body-numbering")
+
+  private val packetFile: PdfArrow[Unit, PdfArrow.File] =
+    import PdfArrow.*
+    val sources = (input("cover") &&& (input("body") >>> finishBody)) &&& input("tail")
+    sources >>> assemble3(catalog = 1) >>> write.named("packet-pdf")
+
+  val packetArrow: PdfArrow[Unit, (PdfArrow.File, PdfArrow.Receipt)] =
+    import PdfArrow.*
+    packetFile >>> (id[File] &&& validate("3b").named("packet-validation"))
+
+  val packet: Recipe =
+    PdfArrow.recipe("Cover body and tail", packetArrow)
+      .fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)
+
+  val archivePacket: Recipe =
+    PdfArrow.recipe("Archival packet", packetFile >>> PdfArrow.archivePdfA3b)
+      .fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)

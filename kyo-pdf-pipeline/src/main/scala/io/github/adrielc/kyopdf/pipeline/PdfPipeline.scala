@@ -2,6 +2,7 @@ package io.github.adrielc.kyopdf.pipeline
 
 import io.github.adrielc.kyopdf.*
 import kyo.*
+import zio.blocks.schema.{DynamicOptic, Schema as BlocksSchema, SchemaExpr}
 
 /** A closed, versioned program. Nodes contain settings and references, never code. */
 object PdfPipeline:
@@ -15,10 +16,21 @@ object PdfPipeline:
   enum Predicate derives Schema:
     case PageCount(min: Int, max: Int)
     case Declares3b
+    case HasPageNumbers
     case Validation(profile: String)
     def input: Kind = this match
       case Validation(_) => Kind.Receipt
       case _ => Kind.Document
+
+  private final case class PageFacts(count: Int)
+  private lazy val pageFactsSchema = BlocksSchema.derived[PageFacts]
+  private lazy val pageCount = SchemaExpr.optic[PageFacts, Int](DynamicOptic.root.field("count"), pageFactsSchema)
+
+  private def pageRange(min: Int, max: Int): SchemaExpr[PageFacts, Boolean] =
+    import SchemaExpr.RelationalOperator.{GreaterThanOrEqual, LessThanOrEqual}
+    val lower = SchemaExpr.relational(pageCount, SchemaExpr.literal[PageFacts, Int](min), GreaterThanOrEqual)
+    val upper = SchemaExpr.relational(pageCount, SchemaExpr.literal[PageFacts, Int](max), LessThanOrEqual)
+    lower.and(upper)
 
   enum Op derives Schema:
     case Input(slot: String)
@@ -27,6 +39,7 @@ object PdfPipeline:
     case Stamp(text: String, placement: String = "top")
     case NumberPages(start: Int = 1, style: String = "page", prefix: String = "")
     case Write
+    case ConvertPdfA3b
     case Validate(profiles: Vector[String])
     case Choose(test: Predicate, kind: Kind = Kind.Document)
     case Stop(message: String, kind: Kind = Kind.Document)
@@ -35,7 +48,7 @@ object PdfPipeline:
     case StopAfter(message: String, kinds: Vector[Kind], kind: Kind = Kind.Document)
 
     def output: Kind = this match
-      case Write => Kind.File
+      case Write | ConvertPdfA3b => Kind.File
       case Validate(_) => Kind.Receipt
       case Choose(_, kind) => kind
       case Stop(_, kind) => kind
@@ -44,7 +57,7 @@ object PdfPipeline:
       case _ => Kind.Document
     def input: Kind = this match
       case Choose(test, _) => test.input
-      case Validate(_) => Kind.File
+      case Validate(_) | ConvertPdfA3b => Kind.File
       case _ => Kind.Document
 
   final case class Node(id: String, op: Op, inputs: Vector[String] = Vector.empty) derives Schema
@@ -195,6 +208,10 @@ object PdfPipeline:
 
   /** Expensive/application-specific operations remain at the interpreter boundary. */
   trait Services:
+    def pageNumberEvidence(@scala.annotation.unused document: PdfDocument): (Outcome, String) < (Abort[PdfError] & Sync) =
+      (Outcome.Unknown, "Visible page-number inspection is unavailable")
+    def convertPdfA3b(@scala.annotation.unused bytes: Vector[Byte]): Vector[Byte] < (Abort[PdfError] & Sync) =
+      Abort.fail(PdfError.InvalidPdf("PDF/A-3b conversion service is unavailable"))
     def stamp(document: PdfDocument, text: String, placement: String): PdfDocument < (Abort[PdfError] & Sync)
     def number(document: PdfDocument, start: Int, style: String, prefix: String): PdfDocument < (Abort[PdfError] & Sync)
     def validate(bytes: Vector[Byte], profiles: Vector[String]): String < (Abort[PdfError] & Sync)
@@ -203,14 +220,90 @@ object PdfPipeline:
       validate(bytes, profiles).map(json => ValidationReport(json))
 
   final case class Run(outputs: Vector[(String, Value)], executed: Vector[String], skipped: Vector[String] = Vector.empty, decisions: Vector[Decision] = Vector.empty)
+  final case class Deferred(node: String, reason: String)
+  final case class Explanation(outputs: Vector[(String, Kind)], decisions: Vector[Decision], deferred: Vector[Deferred])
+
+  /** Resolve choices only from available documents and already-resolved routes. */
+  def explain(plan: Checked, inputs: Map[String, PdfDocument], services: Services): Explanation < (Abort[PdfError] & Sync) = Sync.defer {
+    val graph = plan.order.map(node => node.id -> node).toMap
+    val resolved = scala.collection.mutable.Map.empty[String, Either[String, Value]]
+    val decisions = Vector.newBuilder[Decision]
+    val deferred = Vector.newBuilder[Deferred]
+
+    def inspect(id: String): Either[String, Value] < (Abort[PdfError] & Sync) = resolved.get(id) match
+      case Some(value) => value
+      case None =>
+        val node = graph(id)
+        val result: Either[String, Value] < (Abort[PdfError] & Sync) = node.op match
+          case Op.Input(slot) => inputs.get(slot).map(Value.Document.apply).toRight(s"Bind a document to $slot")
+          case Op.Choose(predicate, _) => inspect(node.inputs.head).map {
+            case Left(reason) =>
+              deferred += Deferred(id, reason)
+              Left(reason)
+            case Right(source) => test(predicate, source, services).map { (outcome, reason) =>
+              val selected = selectBranch(node, outcome)
+              decisions += Decision(id, outcome, selected, reason)
+              inspect(selected)
+            }
+          }
+          case _ =>
+            def visit(index: Int): Either[String, Value] < (Abort[PdfError] & Sync) =
+              if index == node.inputs.size then Left(s"${node.id} requires ${node.op.productPrefix} during execution")
+              else inspect(node.inputs(index)).map(_ => visit(index + 1))
+            visit(0)
+        result.map { value =>
+          resolved(id) = value
+          value
+        }
+    def visitOutputs(index: Int): Explanation < (Abort[PdfError] & Sync) =
+      if index == plan.recipe.outputs.length then
+        Explanation(plan.recipe.outputs.map(id => id -> graph(id).op.output), decisions.result(), deferred.result())
+      else inspect(plan.recipe.outputs(index)).map(_ => visitOutputs(index + 1))
+    visitOutputs(0)
+  }
+
+  private def selectBranch(node: Node, outcome: Outcome): String =
+    node.inputs(outcome match
+      case Outcome.Yes => 1
+      case Outcome.No => 2
+      case Outcome.Unknown => 3)
+
   final case class Limits(maxPages: Int = 64, maxObjects: Int = 8000, maxBytes: Int = 12 * 1024 * 1024,
       maxLiveBytes: Long = 64L * 1024 * 1024, maxLiveObjects: Int = 32000)
+
+  private def test(predicate: Predicate, source: Value, services: Services): (Outcome, String) < (Abort[PdfError] & Sync) = (predicate, source) match
+    case (Predicate.HasPageNumbers, Value.Document(document)) => services.pageNumberEvidence(document)
+    case (Predicate.PageCount(min, max), Value.Document(document)) => PdfPages.pageRefs(document).map { pages =>
+      val reason = s"${pages.length} pages; expected $min to $max inclusive"
+      pageRange(min, max).eval[Boolean](PageFacts(pages.length)) match
+        case Right(Seq(matches)) => (if matches then Outcome.Yes else Outcome.No, reason)
+        case _ => Abort.fail(PdfError.InvalidPdf("Page-count expression did not return one boolean"))
+    }
+    case (Predicate.Declares3b, Value.Document(document)) => PdfAIdentification.inspect(document).map { found =>
+      val outcome = found.state match
+        case PdfADeclarationState.Unreadable | PdfADeclarationState.Conflicting => Outcome.Unknown
+        case _ => if found.declares3b then Outcome.Yes else Outcome.No
+      (outcome, s"Active XMP: ${found.state}; this tests a declaration, not conformance")
+    }
+    case (Predicate.Validation(profile), Value.Receipt(_, verdicts)) =>
+      val verdict = verdicts.getOrElse(profile, Verdict.Unable)
+      (verdict match
+        case Verdict.Passed => Outcome.Yes
+        case Verdict.Failed => Outcome.No
+        case Verdict.Unable => Outcome.Unknown, s"PDF/A-$profile: $verdict")
+    case _ => Abort.fail(PdfError.InvalidPdf("Checked condition port changed type"))
 
   /** Demand-driven interpretation. Choices evaluate their condition, then only the
     * selected branch. Each demanded node runs once; unused branch references are
     * released as soon as the choice is known. Branches execute sequentially.
     */
-  def run(plan: Checked, inputs: Map[String, PdfDocument], services: Services, limits: Limits = Limits()): Run < (Abort[PdfError] & Sync) = Sync.defer {
+  def run(plan: Checked, inputs: Map[String, PdfDocument], services: Services, limits: Limits = Limits()): Run < (Abort[PdfError] & Sync) =
+    runObserved(plan, inputs, services, limits)((_, _) => ())
+
+  /** Observe completed steps and decisions even when a selected operation aborts. */
+  def runObserved(plan: Checked, inputs: Map[String, PdfDocument], services: Services, limits: Limits = Limits())(
+      observe: (Vector[String], Vector[Decision]) => Unit
+  ): Run < (Abort[PdfError] & Sync) = Sync.defer {
     val graph = plan.order.map(node => node.id -> node).toMap
     val uses = scala.collection.mutable.Map.empty[String, Int].withDefaultValue(0)
     val memo = scala.collection.mutable.Map.empty[String, Value]
@@ -256,23 +349,6 @@ object PdfPipeline:
         case Value.File(bytes) if bytes.length > limits.maxBytes => Abort.fail(PdfError.TooLarge(limits.maxBytes.toLong, bytes.length.toLong))
         case _ => value
 
-    def test(predicate: Predicate, source: Value): (Outcome, String) < (Abort[PdfError] & Sync) = (predicate, source) match
-      case (Predicate.PageCount(min, max), Value.Document(document)) => PdfPages.pageRefs(document).map { pages =>
-        (if pages.length >= min && pages.length <= max then Outcome.Yes else Outcome.No, s"${pages.length} pages; expected $min to $max inclusive")
-      }
-      case (Predicate.Declares3b, Value.Document(document)) => PdfAIdentification.inspect(document).map { found =>
-        val outcome = found.state match
-          case PdfADeclarationState.Unreadable | PdfADeclarationState.Conflicting => Outcome.Unknown
-          case _ => if found.declares3b then Outcome.Yes else Outcome.No
-        (outcome, s"Active XMP: ${found.state}; this tests a declaration, not conformance")
-      }
-      case (Predicate.Validation(profile), Value.Receipt(_, verdicts)) =>
-        val verdict = verdicts.getOrElse(profile, Verdict.Unable)
-        (verdict match
-          case Verdict.Passed => Outcome.Yes
-          case Verdict.Failed => Outcome.No
-          case Verdict.Unable => Outcome.Unknown, s"PDF/A-$profile: $verdict")
-      case _ => Abort.fail(PdfError.InvalidPdf("Checked condition port changed type"))
 
     def evaluate(id: String): Value < (Abort[PdfError] & Sync) = memo.get(id) match
       case Some(value) => value
@@ -281,19 +357,18 @@ object PdfPipeline:
         def finish(value: Value): Value < Abort[PdfError] = budget(value).map { value =>
           memo(id) = value
           executed += id
+          observe(executed.toVector, decisions.toVector)
           dependencies(id).foreach(release)
           value
         }
         node.op match
-          case Op.Choose(predicate, _) => evaluate(node.inputs.head).map { source => test(predicate, source).map { (outcome, reason) =>
-            val selectedIndex = outcome match
-              case Outcome.Yes => 1
-              case Outcome.No => 2
-              case Outcome.Unknown => 3
-            val selected = node.inputs(selectedIndex)
+          case Op.Choose(predicate, _) => evaluate(node.inputs.head).map { source => test(predicate, source, services).map { (outcome, reason) =>
+            val selectedIndex = outcome.ordinal + 1
+            val selected = selectBranch(node, outcome)
             dependencies(id) = Vector(node.inputs.head, selected)
             node.inputs.zipWithIndex.filter((_, index) => index > 0 && index != selectedIndex).foreach((unused, _) => release(unused))
             decisions += Decision(id, outcome, selected, reason)
+            observe(executed.toVector, decisions.toVector)
             evaluate(selected).map(finish)
           }}
           case Op.Stop(message, _) => Abort.fail(PdfError.InvalidPdf(s"Pipeline stopped at $id: $message"))
@@ -312,6 +387,9 @@ object PdfPipeline:
                 case Op.Stamp(text, placement) => services.stamp(document(), text, placement).map(Value.Document.apply)
                 case Op.NumberPages(start, style, prefix) => services.number(document(), start, style, prefix).map(Value.Document.apply)
                 case Op.Write => PdfWriter.write(document()).map(Value.File.apply)
+                case Op.ConvertPdfA3b => args.head match
+                  case Value.File(bytes) => services.convertPdfA3b(bytes).map(Value.File.apply)
+                  case _ => Abort.fail(PdfError.InvalidPdf("Checked archival conversion port changed type"))
                 case Op.Keep(index, _) => args(index)
                 case Op.StopAfter(message, _, _) => Abort.fail(PdfError.InvalidPdf(s"Pipeline stopped at $id: $message"))
                 case Op.Validate(profiles) => args.head match

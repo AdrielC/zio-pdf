@@ -40,6 +40,76 @@ object PdfArrowSpec extends ZIOSpecDefault:
   private def files(run: PdfPipeline.Run): Vector[Vector[Byte]] = run.outputs.collect { case (_, Value.File(bytes)) => bytes }
 
   def spec = suite("Typed PDF arrows")(
+    test("archive conversion validates the exact converted bytes and fails closed") {
+      class Archiver(verdict: Verdict) extends Services(verdict):
+        var conversions = 0
+        override def convertPdfA3b(bytes: Vector[Byte]): Vector[Byte] < (Abort[PdfError] & Sync) = Sync.defer {
+          conversions += 1
+          bytes :+ 0.toByte
+        }
+      val arrow = input("body") >>> write >>> archivePdfA3b
+      val checked = compile(arrow)
+      val plan = PdfPipelineModel.decode(PdfPipelineModel.encode(checked)).fold(e => throw AssertionError(e.toString), identity)
+      val passed = new Archiver(Verdict.Passed)
+      val failed = new Archiver(Verdict.Failed)
+      val unable = new Archiver(Verdict.Unable)
+      def runWith(service: Archiver) = result(PdfPipeline.run(plan, Map("body" -> document), service))
+      val archived = runWith(passed).fold(e => throw AssertionError(e.message), identity)
+      val rejected = runWith(failed)
+      val unverified = runWith(unable)
+      assertTrue(
+        plan.recipe == checked.recipe,
+        passed.conversions == 1,
+        failed.conversions == 1,
+        unable.conversions == 1,
+        files(archived) == passed.checked,
+        passed.checked.size == 1,
+        archived.outputs.size == 2,
+        rejected.left.toOption.exists(_.message.contains("did not pass")),
+        unverified.left.toOption.exists(_.message.contains("could not be validated"))
+      )
+    },
+    test("a serialized conditional round-trips and executes only its selected branch") {
+      val route = choose(pages(1, 1))(stamp("ONE"), stamp("MANY"), stop[Document, Document]("unknown"))
+      val arrow = input("body") >>> route >>> write
+      val original = compile(arrow)
+      val json = PdfPipelineJson.encode("Arrow regression", arrow).fold(e => throw AssertionError(e.toString), identity)
+      val portableJson =
+        """{"version":3,"name":"Arrow regression","nodes":[
+          |{"id":"body","op":{"Input":{"slot":"body"}}},
+          |{"id":"stamp","op":{"Stamp":{"text":"ONE"}},"inputs":["body"]},
+          |{"id":"stamp-2","op":{"Stamp":{"text":"MANY"}},"inputs":["body"]},
+          |{"id":"stop","op":{"StopAfter":{"message":"unknown","kinds":["Document"]}},"inputs":["body"]},
+          |{"id":"route","op":{"Choose":{"test":{"PageCount":{"min":1,"max":1}}}},"inputs":["body","stamp","stamp-2","stop"]},
+          |{"id":"pdf","op":{"Write":{}},"inputs":["route"]}],"outputs":["pdf"]}""".stripMargin.linesIterator.mkString
+      val decoded = PdfPipelineJson.decode(portableJson).fold(e => throw AssertionError(e.toString), identity)
+      val twoPages = result(PdfAssembly.concatenate(Vector(document, document), 0))
+        .fold(e => throw AssertionError(e.message), identity)
+
+      val one = new Services
+      val many = new Services
+      val oneRun = result(PdfPipeline.run(decoded, Map("body" -> document), one))
+        .fold(e => throw AssertionError(e.message), identity)
+      val manyRun = result(PdfPipeline.run(decoded, Map("body" -> twoPages), many))
+        .fold(e => throw AssertionError(e.message), identity)
+      val expected = result(PdfPipeline.run(original, Map("body" -> twoPages), new Services))
+        .fold(e => throw AssertionError(e.message), identity)
+
+      assertTrue(
+        json == portableJson,
+        decoded.recipe == original.recipe,
+        PdfPipelineJson.encode(decoded) == json,
+        oneRun.decisions.map(_.outcome) == Vector(PdfPipeline.Outcome.Yes),
+        manyRun.decisions.map(_.outcome) == Vector(PdfPipeline.Outcome.No),
+        one.marks == Vector("ONE"),
+        many.marks == Vector("MANY"),
+        files(oneRun).size == 1,
+        files(manyRun) == files(expected),
+        PdfPipelineJson.decode(json.replace("\"version\":3", "\"version\":0"))
+          .left.toOption.exists(_.exists(_.code == PdfPipeline.Code.Version)),
+        PdfPipelineJson.decode("{").left.toOption.exists(_.exists(_.code == PdfPipeline.Code.Structure))
+      )
+    },
     test("category identity and associativity preserve the compiled program and written bytes") {
       val f = select(1); val g = stamp("A"); val h = stamp("B")
       val left = input("body") >>> ((f >>> g) >>> h) >>> write

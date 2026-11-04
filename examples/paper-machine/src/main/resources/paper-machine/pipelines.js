@@ -18,6 +18,7 @@ const operationNames = {
   stamp: "Stamp pages",
   number: "Number pages",
   write: "Write PDF",
+  "convert-pdfa-3b": "Convert to PDF/A-3b",
   validate: "Validate PDF/A",
   choose: "Choose a path",
   stop: "Stop with reason",
@@ -27,7 +28,7 @@ const operationNames = {
 function pipelineKind(node) {
   if (["choose", "stop", "stop-after"].includes(node.op)) return node.kind;
   if (node.op === "keep") return node.kinds[node.index];
-  return node.op === "write"
+  return ["write", "convert-pdfa-3b"].includes(node.op)
     ? "file"
     : node.op === "validate"
       ? "receipt"
@@ -327,7 +328,7 @@ function drawPipelineEditor() {
               ? "receipt"
               : "document"
             : node.kind
-          : node.op === "validate"
+          : ["validate", "convert-pdfa-3b"].includes(node.op)
             ? "file"
             : "document";
       const available = recipe.nodes.filter(
@@ -431,6 +432,7 @@ function drawPipelineEditor() {
       const test = pipelineOptions(
         [
           ["page-count", "Page count"],
+          ["has-page-numbers", "Visible page numbers"],
           ["declares-3b", "Declares PDF/A-3b (XMP claim)"],
           ["validation", "Completed validation result"],
         ],
@@ -738,7 +740,7 @@ function addPipelineOperation() {
   let suffix = 1;
   while (recipe.nodes.some((n) => n.id === `step${suffix}`)) suffix++;
   const id = `step${suffix}`,
-    kind = op === "validate" ? "file" : "document";
+    kind = ["validate", "convert-pdfa-3b"].includes(op) ? "file" : "document";
   let selected = recipe.nodes.find(
     (n) => n.id === pipelineState.selected && pipelineKind(n) === kind,
   );
@@ -801,7 +803,7 @@ function addPipelineOperation() {
       );
   }
   recipe.nodes.push(node);
-  if (["write", "validate"].includes(op)) recipe.outputs.push(id);
+  if (["write", "validate", "convert-pdfa-3b"].includes(op)) recipe.outputs.push(id);
   pipelineState.selected = id;
   pipelineChanged(true);
   drawPipelineBindings();
