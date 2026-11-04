@@ -133,4 +133,8 @@ jobs:
       - name: Convert and verify a packet through MCP
         env:
           KYO_PDF_GOTENBERG_PORT: ${{ job.services.gotenberg.ports['3000'] }}
-        run: bash scripts/verify-gotenberg-tool.sh
+        run: |
+          repositories="$RUNNER_TEMP/gotenberg-sbt-repositories"
+          printf '%s\n' '[repositories]' 'local' 'central: https://repo.maven.apache.org/maven2' > "$repositories"
+          JAVA_TOOL_OPTIONS="-Dsbt.repository.config=$repositories -Dsbt.override.build.repos=true" \
+            bash scripts/verify-gotenberg-tool.sh
