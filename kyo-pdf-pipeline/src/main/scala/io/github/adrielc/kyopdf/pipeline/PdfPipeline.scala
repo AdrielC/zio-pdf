@@ -92,7 +92,7 @@ object PdfPipeline:
 
   val MaxNodes = 24
   val MaxOutputs = 8
-  val Profiles = Set("2b", "3b", "3u")
+  val Profiles = PdfAProfile.values.map(_.code).toSet
   private def identifier(value: String): Boolean = value.matches("[A-Za-z][A-Za-z0-9_-]{0,47}")
   private def line(value: String, max: Int): Boolean = value.length <= max && !value.exists(Character.isISOControl)
 
@@ -208,14 +208,24 @@ object PdfPipeline:
 
   enum Value:
     case Document(value: PdfDocument)
-    case File(bytes: Vector[Byte])
-    case Receipt(json: String, verdicts: Map[String, Verdict] = Map.empty)
+    case File(value: PdfFile)
+    case Receipt(value: PdfReceipt)
 
   final case class ValidationReport(json: String, verdicts: Map[String, Verdict] = Map.empty)
   final case class Decision(node: String, outcome: Outcome, selected: String, reason: String) derives Schema
 
   /** Expensive/application-specific operations remain at the interpreter boundary. */
   trait Services:
+    /** Typed entry points. Legacy callbacks are checked once at this adapter. */
+    def convert(file: PdfFile): PdfFile < (Abort[PdfError] & Sync) =
+      convertPdfA3b(file.bytes).map(bytes => accept(PdfFile.checked(bytes)))
+    def verify(file: PdfFile, profiles: Vector[PdfAProfile]): VerificationResult < (Abort[PdfError] & Sync) =
+      validationReport(file.bytes, profiles.map(_.code)).map(result =>
+        accept(VerificationResult.fromLegacy(result.json, result.verdicts)))
+    def inspect(file: PdfFile, rules: Policy.Checked): ReportJson < (Abort[PdfError] & Sync) =
+      preflightRules(file.bytes, rules).map(json => accept(ReportJson.parse(json)))
+    def inspect(file: PdfFile, profile: String): ReportJson < (Abort[PdfError] & Sync) =
+      preflight(file.bytes, profile).map(json => accept(ReportJson.parse(json)))
     def pageNumberEvidence(@scala.annotation.unused document: PdfDocument): (Outcome, String) < (Abort[PdfError] & Sync) =
       (Outcome.Unknown, "Visible page-number inspection is unavailable")
     def preflightRules(@scala.annotation.unused bytes: Vector[Byte], @scala.annotation.unused rules: Policy.Checked): String < (Abort[PdfError] & Sync) =
@@ -226,7 +236,8 @@ object PdfPipeline:
       Abort.fail(PdfError.InvalidPdf("PDF/A-3b conversion service is unavailable"))
     def stamp(document: PdfDocument, text: String, placement: String): PdfDocument < (Abort[PdfError] & Sync)
     def number(document: PdfDocument, start: Int, style: String, prefix: String): PdfDocument < (Abort[PdfError] & Sync)
-    def validate(bytes: Vector[Byte], profiles: Vector[String]): String < (Abort[PdfError] & Sync)
+    def validate(@scala.annotation.unused bytes: Vector[Byte], @scala.annotation.unused profiles: Vector[String]): String < (Abort[PdfError] & Sync) =
+      Abort.fail(PdfError.InvalidPdf("Provide a typed verify service or a legacy validation adapter"))
     /** Existing interpreters remain valid; opaque receipts have unknown verdicts. */
     def validationReport(bytes: Vector[Byte], profiles: Vector[String]): ValidationReport < (Abort[PdfError] & Sync) =
       validate(bytes, profiles).map(json => ValidationReport(json))
@@ -234,6 +245,10 @@ object PdfPipeline:
   final case class Run(outputs: Vector[(String, Value)], executed: Vector[String], skipped: Vector[String] = Vector.empty, decisions: Vector[Decision] = Vector.empty)
   final case class Deferred(node: String, reason: String)
   final case class Explanation(outputs: Vector[(String, Kind)], decisions: Vector[Decision], deferred: Vector[Deferred])
+
+  private def accept[A](checked: Either[Vector[DataIssue], A]): A < Abort[PdfError] = checked match
+    case Right(value) => value
+    case Left(issues) => Abort.fail(PdfError.InvalidPdf(s"Invalid pipeline output: ${issues.mkString(", ")}"))
 
   /** Resolve choices only from available documents and already-resolved routes. */
   def explain(plan: Checked, inputs: Map[String, PdfDocument], services: Services): Explanation < (Abort[PdfError] & Sync) = Sync.defer {
@@ -297,8 +312,11 @@ object PdfPipeline:
         case _ => if found.declares3b then Outcome.Yes else Outcome.No
       (outcome, s"Active XMP: ${found.state}; this tests a declaration, not conformance")
     }
-    case (Predicate.Validation(profile), Value.Receipt(_, verdicts)) =>
-      val verdict = verdicts.getOrElse(profile, Verdict.Unable)
+    case (Predicate.Validation(profile), Value.Receipt(receipt)) =>
+      val verdict = receipt match
+        case validation: PdfReceipt.Validation => PdfAProfile.parse(profile).toOption
+          .flatMap(validation.result.verdicts.get).getOrElse(Verdict.Unable)
+        case _: PdfReceipt.Inspection => Verdict.Unable
       (verdict match
         case Verdict.Passed => Outcome.Yes
         case Verdict.Failed => Outcome.No
@@ -316,6 +334,14 @@ object PdfPipeline:
   def runObserved(plan: Checked, inputs: Map[String, PdfDocument], services: Services, limits: Limits = Limits())(
       observe: (Vector[String], Vector[Decision]) => Unit
   ): Run < (Abort[PdfError] & Sync) = Sync.defer {
+    if limits.maxBytes <= 0 || limits.maxBytes > PdfFile.MaxBytes then
+      Abort.fail(PdfError.InvalidPdf(s"Pipeline file limit must be between 1 and ${PdfFile.MaxBytes} bytes"))
+    else runChecked(plan, inputs, services, limits)(observe)
+  }
+
+  private def runChecked(plan: Checked, inputs: Map[String, PdfDocument], services: Services, limits: Limits)(
+      observe: (Vector[String], Vector[Decision]) => Unit
+  ): Run < (Abort[PdfError] & Sync) = Sync.defer {
     val graph = plan.order.map(node => node.id -> node).toMap
     val uses = scala.collection.mutable.Map.empty[String, Int].withDefaultValue(0)
     val memo = scala.collection.mutable.Map.empty[String, Value]
@@ -330,7 +356,7 @@ object PdfPipeline:
       if uses(id) == 0 then
         if memo.remove(id).isEmpty then dependencies(id).foreach(release)
 
-    def weight(value: Value): (Long, Long) = value match
+    def retained(value: Value): Vector[(AnyRef, (Long, Long))] = value match
       case Value.Document(document) =>
         def payload(value: PdfValue): Long = value match
           case PdfValue.Literal(bytes) => bytes.length.toLong
@@ -339,26 +365,23 @@ object PdfPipeline:
           case PdfValue.Dict(fields) => fields.iterator.map(field => field.name.length.toLong * 2 + payload(field.value)).sum
           case PdfValue.Name(value) => value.length.toLong * 2
           case _ => 0L
-        (document.objects.iterator.map(obj => obj.stream.fold(0L)(_.length.toLong) + payload(obj.value)).sum, document.objects.length.toLong)
-      case Value.File(bytes) => (bytes.length.toLong, 0L)
-      case Value.Receipt(json, _) => (json.length.toLong * 2, 0L)
+        Vector(document -> (document.objects.iterator.map(obj => obj.stream.fold(0L)(_.length.toLong) + payload(obj.value)).sum, document.objects.length.toLong))
+      case Value.File(file) => Vector(file.bytes -> (file.size, 0L))
+      case Value.Receipt(receipt) => Vector(receipt.subject.bytes -> (receipt.subject.size, 0L),
+        receipt.report -> (receipt.report.countedBytes, receipt.report.nodes.toLong))
 
     def budget(value: Value): Value < Abort[PdfError] =
       val unique = new java.util.IdentityHashMap[AnyRef, java.lang.Boolean]()
-      val total = (memo.valuesIterator ++ Iterator(value)).filter { value =>
-        val key: AnyRef = value match
-          case Value.Document(doc) => doc
-          case Value.File(bytes) => bytes
-          case receipt => receipt
+      val total = (memo.valuesIterator ++ Iterator(value)).flatMap(retained).filter { (key, _) =>
         unique.put(key, java.lang.Boolean.TRUE) == null
-      }.map(weight).foldLeft((0L, 0L)) { (a, b) => (a._1 + b._1, a._2 + b._2) }
+      }.map(_._2).foldLeft((0L, 0L)) { (a, b) => (a._1 + b._1, a._2 + b._2) }
       if total._1 > limits.maxLiveBytes || total._2 > limits.maxLiveObjects then Abort.fail(PdfError.RetentionExceeded("Pipeline exceeds its live byte or object budget"))
       else value match
         case Value.Document(document) => PdfPages.pageRefs(document).map { pages =>
           if pages.isEmpty || pages.length > limits.maxPages || document.objects.length > limits.maxObjects then Abort.fail(PdfError.RetentionExceeded("Pipeline document exceeds its page or object limit"))
           else value
         }
-        case Value.File(bytes) if bytes.length > limits.maxBytes => Abort.fail(PdfError.TooLarge(limits.maxBytes.toLong, bytes.length.toLong))
+        case Value.File(file) if file.size > limits.maxBytes => Abort.fail(PdfError.TooLarge(limits.maxBytes.toLong, file.size))
         case _ => value
 
 
@@ -398,22 +421,30 @@ object PdfPipeline:
                 case Op.Assemble(catalog) => PdfAssembly.concatenate(args.indices.map(i => document(i)).toVector, catalog).map(Value.Document.apply)
                 case Op.Stamp(text, placement) => services.stamp(document(), text, placement).map(Value.Document.apply)
                 case Op.NumberPages(start, style, prefix) => services.number(document(), start, style, prefix).map(Value.Document.apply)
-                case Op.Write => PdfWriter.write(document()).map(Value.File.apply)
+                case Op.Write => ByteLimit.fromBytes(limits.maxBytes.toLong).map { limit =>
+                  PdfWriter.write(document(), limit).map(bytes => accept(PdfFile.checked(bytes)).map(Value.File.apply))
+                }
                 case Op.ConvertPdfA3b => args.head match
-                  case Value.File(bytes) => services.convertPdfA3b(bytes).map(Value.File.apply)
+                  case Value.File(file) => services.convert(file).map(Value.File.apply)
                   case _ => Abort.fail(PdfError.InvalidPdf("Checked archival conversion port changed type"))
                 case Op.Keep(index, _) => args(index)
                 case Op.StopAfter(message, _, _) => Abort.fail(PdfError.InvalidPdf(s"Pipeline stopped at $id: $message"))
                 case Op.PreflightRules(rules) => args.head match
-                  case Value.File(bytes) => Policy.compile(rules) match
-                    case Right(plan) => services.preflightRules(bytes, plan).map(Value.Receipt(_))
+                  case Value.File(file) => Policy.compile(rules) match
+                    case Right(plan) => services.inspect(file, plan).map(report => Value.Receipt(new PdfReceipt.Inspection(file, report)))
                     case Left(_) => Abort.fail(PdfError.InvalidPdf("Checked policy became invalid"))
                   case _ => Abort.fail(PdfError.InvalidPdf("Checked preflight port changed type"))
                 case Op.Preflight(profile) => args.head match
-                  case Value.File(bytes) => services.preflight(bytes, profile).map(Value.Receipt(_))
+                  case Value.File(file) => services.inspect(file, profile).map(report => Value.Receipt(new PdfReceipt.Inspection(file, report)))
                   case _ => Abort.fail(PdfError.InvalidPdf("Checked preflight port changed type"))
                 case Op.Validate(profiles) => args.head match
-                  case Value.File(bytes) => services.validationReport(bytes, profiles).map(report => Value.Receipt(report.json, report.verdicts))
+                  case Value.File(file) =>
+                    val typed = profiles.map(profile => PdfAProfile.parse(profile).toOption.get)
+                    services.verify(file, typed).map { result =>
+                      val extra = result.verdicts.keySet.diff(typed.toSet).toVector.sortBy(_.code)
+                      if extra.nonEmpty then accept[Value](Left(extra.map(DataIssue.UnrequestedProfile.apply)))
+                      else Value.Receipt(new PdfReceipt.Validation(file, result))
+                    }
                   case _ => Abort.fail(PdfError.InvalidPdf("Checked file port changed type"))
                 case _ => Abort.fail(PdfError.InvalidPdf("Unexpected routing operation"))
               program.map(finish)

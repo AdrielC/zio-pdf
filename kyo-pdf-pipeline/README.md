@@ -187,6 +187,41 @@ profile and compiles its comparisons into ZIO Blocks `SchemaExpr` expressions.
 `Policy.Checked.run` evaluates the plan against observations supplied by
 an inspector and accumulates findings.
 
+### Runtime results (unreleased)
+
+Runtime output payloads now carry checked domain types:
+
+```scala
+enum Value:
+  case Document(value: PdfDocument)
+  case File(value: PdfFile)
+  case Receipt(value: PdfReceipt)
+```
+
+`PdfFile.checked` accepts an immutable encoded payload with a PDF header and a
+fixed 64 MiB supported maximum. It retains the vector without copying it. This
+does not establish PDF syntax or archival conformance. Runtime file limits may
+be smaller, and the writer checks encoded size before allocating its output,
+including decimal expansion and sparse cross-reference tables.
+
+`PdfReceipt.Validation` holds a `VerificationResult` whose verdict keys are
+`PdfAProfile` values. `PdfReceipt.Inspection` holds application-specific report
+data and cannot supply archival verdicts. Both retain the exact `PdfFile`
+provided to the interpreter. The live-value budget counts that subject even
+when only a receipt is returned, and deduplicates shared subjects.
+
+`ReportJson.parse` produces an object-shaped report with limits of 1 MiB of
+characters, 64 levels and 32,768 JSON nodes. It rejects duplicate object fields.
+The typed `Services.verify`, `convert` and `inspect` entry points use these
+payloads. Existing string/byte callbacks remain compatibility adapters; malformed
+reports, unknown profiles and unrequested verdicts fail at that boundary.
+
+This changes the Scala runtime-result API. Read `file.bytes` and
+`receipt.report.value` (or `.encoded`) explicitly. Typed service implementations
+can override `verify(file, profiles)` and return `VerificationResult` directly.
+Saved recipe JSON, model-facing schemas and the studio result envelope retain
+their existing format. These changes are not part of the published v0.5.0 API.
+
 Rules select document, page, or bookmark scope. Conditions support comparisons
 between facts and numbers, `All`, `Any`, `Not`, and `Review`. The optional
 `when` condition limits applicability. A false condition selects the rule's
