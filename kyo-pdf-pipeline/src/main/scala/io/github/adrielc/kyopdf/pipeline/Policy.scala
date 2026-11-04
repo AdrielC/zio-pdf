@@ -7,7 +7,7 @@ import zio.blocks.schema.json.{Json, JsonCodecDeriver}
 import PdfPipeline.{Code, Issue}
 
 /** Versioned validation programs over PDF evidence. Unknown evidence requires review. */
-object CourtRules:
+object Policy:
   enum Scope derives kyo.Schema:
     case Document, Page, Bookmark
 
@@ -46,7 +46,7 @@ object CourtRules:
 
   final case class Rule(id: String, scope: Scope, condition: Condition, citation: String, source: String,
       message: String, onFailure: Status = Status.FixRequired, when: Option[Condition] = None) derives kyo.Schema
-  final case class Profile(version: Int, id: String, name: String, court: String, filingType: String,
+  final case class Profile(version: Int, id: String, name: String, authority: String, documentType: String,
       effectiveDate: String, source: String, rules: Vector[Rule]) derives kyo.Schema
 
   object Rule:
@@ -96,10 +96,10 @@ object CourtRules:
       "properties" -> Obj((ruleFields ++ Vector(
         "onFailure" -> enumValues(Vector("FixRequired", "NeedsReview")),
         "when" -> Obj("anyOf" -> Arr(condition, Obj("type" -> Str("null"))))))*))
-    val fields = Vector("version" -> Obj("const" -> Num(1)), "id" -> text, "name" -> text, "court" -> text,
-      "filingType" -> text, "effectiveDate" -> text, "source" -> text,
+    val fields = Vector("version" -> Obj("const" -> Num(1)), "id" -> text, "name" -> text, "authority" -> text,
+      "documentType" -> text, "effectiveDate" -> text, "source" -> text,
       "rules" -> Obj("type" -> Str("array"), "minItems" -> Num(1), "maxItems" -> Num(64), "items" -> rule))
-    Obj("$id" -> Str("urn:kyo-pdf:court-rules:v1"), "$defs" -> Obj("condition" -> conditionSchema),
+    Obj("$id" -> Str("urn:kyo-pdf:policy:v1"), "$defs" -> Obj("condition" -> conditionSchema),
       "type" -> Str("object"), "additionalProperties" -> Bool(false),
       "required" -> Arr(fields.map((key, _) => Str(key))*), "properties" -> Obj(fields*))
 
@@ -139,9 +139,9 @@ object CourtRules:
   def compile(profile: Profile): Either[Vector[Issue], Checked] =
     val issues = Vector.newBuilder[Issue]
     def add(path: String, code: Code, message: String): Unit = issues += Issue(path, code, message)
-    if profile.version != 1 then add("profile.version", Code.Version, "Use court rules version 1")
+    if profile.version != 1 then add("profile.version", Code.Version, "Use policy version 1")
     if !identifier(profile.id) then add("profile.id", Code.Identifier, "Use a profile identifier up to 80 characters")
-    Vector("name" -> profile.name, "court" -> profile.court, "filingType" -> profile.filingType).foreach { (key, value) =>
+    Vector("name" -> profile.name, "authority" -> profile.authority, "documentType" -> profile.documentType).foreach { (key, value) =>
       if !line(value, 160) then add(s"profile.$key", Code.Setting, "Supply single-line text up to 160 characters")
     }
     if Try(LocalDate.parse(profile.effectiveDate)).isFailure then add("profile.effectiveDate", Code.Setting, "Use an ISO date")
@@ -222,7 +222,7 @@ object CourtRules:
     case Expression.Review => None
 
   private final case class CompiledRule(rule: Rule, condition: Expression, when: Option[Expression])
-  final class Checked private[CourtRules] (val profile: Profile, private val rules: Vector[CompiledRule]):
+  final class Checked private[Policy] (val profile: Profile, private val rules: Vector[CompiledRule]):
     /** Return all independent findings. Missing evidence never becomes a passing rule. */
     def run(observations: Vector[Observation]): Vector[Finding] =
       rules.flatMap { compiled =>

@@ -166,13 +166,13 @@ arrow that converts, validates the converted bytes, and returns both only on a
 passing PDF/A-3b verdict. Compose it after the final write so all page edits are
 included in the validation.
 
-## Court rules as data
+## Policies as data
 
-A `CourtRules.Profile` is a versioned validation program with a court, filing
+A `Policy.Profile` is a versioned validation program with an authority, document
 type, effective date, source citations, and rules. Serialize it with
-`CourtRules.encode` and load it with `CourtRules.decode`. Loading checks the
+`Policy.encode` and load it with `Policy.decode`. Loading checks the
 profile and compiles its comparisons into ZIO Blocks `SchemaExpr` expressions.
-`CourtRules.Checked.run` evaluates the plan against observations supplied by
+`Policy.Checked.run` evaluates the plan against observations supplied by
 an inspector and accumulates findings.
 
 Rules select document, page, or bookmark scope. Conditions support comparisons
@@ -183,8 +183,8 @@ applicability produce `needs-review`. Each finding retains its rule, source,
 page, and measured evidence.
 
 ```scala
-import io.github.adrielc.kyopdf.pipeline.{CourtRules, PdfArrow}
-import CourtRules.*
+import io.github.adrielc.kyopdf.pipeline.{Policy, PdfArrow}
+import Policy.*
 
 val size = Condition.Compare(
   Operand.Fact(Metric.FileBytes),
@@ -193,25 +193,25 @@ val size = Condition.Compare(
 )
 val rules = Profile(
   version = 1,
-  id = "example-motion-v1",
-  name = "Example motion checks",
-  court = "Example court",
-  filingType = "Motion",
+  id = "example-report-v1",
+  name = "Example report checks",
+  authority = "Example organization",
+  documentType = "Report",
   effectiveDate = "2026-11-03",
-  source = "Example court filing instructions",
+  source = "Example document standards",
   rules = Vector(Rule(
     "file-size", Scope.Document, size,
-    "Example rule 1", "Example court filing instructions",
+    "Example rule 1", "Example document standards",
     "The PDF must fit within 20 MB."
   ))
 )
-val saved = CourtRules.encode(rules)
-val loaded = CourtRules.decode(saved)
+val saved = Policy.encode(rules)
+val loaded = Policy.decode(saved)
 val workflow = PdfArrow.input("body") >>> PdfArrow.write >>>
   (PdfArrow.id[PdfArrow.File] &&& PdfArrow.preflight(rules))
 ```
 
-Export `CourtRules.jsonSchema.print` for model authoring. The pipeline tool
+Export `Policy.jsonSchema.print` for model authoring. The pipeline tool
 schema embeds the same definition for the `preflight-rules` operation.
 The California Second District petition preset is expressed through this API.
 

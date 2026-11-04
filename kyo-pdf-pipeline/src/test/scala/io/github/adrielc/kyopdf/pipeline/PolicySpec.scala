@@ -2,20 +2,20 @@ package io.github.adrielc.kyopdf.pipeline
 
 import zio.test.*
 import zio.blocks.schema.json.{Json, JsonSchema}
-import CourtRules.*
+import Policy.*
 
-object CourtRulesSpec extends ZIOSpecDefault:
+object PolicySpec extends ZIOSpecDefault:
   private def compare(metric: Metric, comparison: Comparison, limit: Long): Condition =
     Condition.Compare(Operand.Fact(metric), comparison, Operand.Number(limit))
   private val rule = Rule("size", Scope.Document, compare(Metric.FileBytes, Comparison.LessThanOrEqual, 5000),
     "Example rule 1", "Synthetic test rule", "PDF size must fit.")
   private def profile(rules: Rule*): Profile =
-    Profile(1, "synthetic-court-v1", "Synthetic profile", "Synthetic court", "Motion", "2026-11-03", "Synthetic test rules", rules.toVector)
+    Profile(1, "synthetic-policy-v1", "Synthetic profile", "Synthetic organization", "Report", "2026-11-03", "Synthetic test rules", rules.toVector)
   private def checked(value: Profile): Checked = compile(value).fold(e => throw AssertionError(e.toString), identity)
   private def result(plan: Checked, values: Map[Metric, Long]): Vector[String] =
     plan.run(Vector(Observation(Scope.Document, values))).map(_.status)
 
-  def spec = suite("Serializable court rules")(
+  def spec = suite("Serializable policies")(
     test("a saved profile compiles to SchemaExpr and changes results when its data changes") {
       val original = profile(rule)
       val loaded = decode(encode(original)).fold(e => throw AssertionError(e.toString), identity)
@@ -76,17 +76,17 @@ object CourtRulesSpec extends ZIOSpecDefault:
     test("custom rules remain data through arrow composition and both JSON formats") {
       import PdfArrow.*
       val arrow = input("body") >>> write >>> (id[File] &&& preflight(profile(rule)))
-      val recipe = PdfArrow.recipe("Synthetic court", arrow).fold(e => throw AssertionError(e.toString), identity)
+      val recipe = PdfArrow.recipe("Synthetic organization", arrow).fold(e => throw AssertionError(e.toString), identity)
       val plan = PdfPipeline.check(recipe).fold(e => throw AssertionError(e.toString), identity)
       val model = PdfPipelineModel.encode(plan)
-      val schema = JsonSchema.fromJson(CourtRules.jsonSchema).fold(e => throw AssertionError(e.toString), identity)
+      val schema = JsonSchema.fromJson(Policy.jsonSchema).fold(e => throw AssertionError(e.toString), identity)
       assertTrue(
         Json.parseUnsafe(encode(profile(rule))).conforms(schema),
         Json.parseUnsafe(encode(CourtProfile.CaliforniaSecondDistrictPetition.rules)).conforms(schema),
         PdfPipelineJson.decode(PdfPipelineJson.encode(plan)).toOption.get.recipe == recipe,
         PdfPipelineModel.decode(model).toOption.get.recipe == recipe,
         model.contains("preflight-rules"),
-        CourtRules.jsonSchema.print.contains("condition")
+        Policy.jsonSchema.print.contains("condition")
       )
     }
   )

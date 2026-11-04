@@ -1,7 +1,7 @@
 package io.github.adrielc.kyopdf.demo
 
-import io.github.adrielc.kyopdf.pipeline.{CourtProfile, CourtRules}
-import CourtRules.{Metric, Observation, Scope}
+import io.github.adrielc.kyopdf.pipeline.{CourtProfile, Policy}
+import Policy.{Metric, Observation, Scope}
 import java.awt.geom.Rectangle2D
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.PDDocument
@@ -10,7 +10,7 @@ import org.apache.pdfbox.text.PDFTextStripperByArea
 import scala.collection.mutable
 import scala.util.{Try, Using}
 
-private[demo] object CourtPreflight:
+private[demo] object PolicyPreflight:
   private val profile = CourtProfile.CaliforniaSecondDistrictPetition
   private val MaxPages = 64
   private val MaxBookmarks = 256
@@ -18,12 +18,12 @@ private[demo] object CourtPreflight:
   private val Decorated = """(?i)page\s+([1-9][0-9]{0,5})(?:\s+of\s+[1-9][0-9]{0,5})?""".r
   private val Exhibit = """(?i)^exhibit\s+([a-z0-9]+)\b.*""".r
 
-  private lazy val defaultPlan = CourtRules.compile(profile.rules).fold(
+  private lazy val defaultPlan = Policy.compile(profile.rules).fold(
     issues => throw IllegalStateException(issues.mkString(", ")), identity)
 
   def inspect(bytes: Array[Byte]): String = inspect(bytes, defaultPlan)
 
-  def inspect(bytes: Array[Byte], plan: CourtRules.Checked): String =
+  def inspect(bytes: Array[Byte], plan: Policy.Checked): String =
     val measured = Try(Using.resource(Loader.loadPDF(bytes))(inspectDocument)).getOrElse(
       Vector(Observation(Scope.Document, Map.empty, notes = Vector("The PDF could not be inspected."))))
     val observations = measured.map { observation =>
@@ -33,8 +33,8 @@ private[demo] object CourtPreflight:
     val findings = plan.run(observations)
     val status = if findings.exists(_.status == "fix-required") then "fix-required"
       else if findings.exists(_.status == "needs-review") then "needs-review" else "pass"
-    CourtRules.encodeReport(CourtRules.Report("court-preflight", plan.profile, PdfValidation.sha256(bytes),
-      PdfValidation.sha256(CourtRules.encode(plan.profile).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+    Policy.encodeReport(Policy.Report("policy-preflight", plan.profile, PdfValidation.sha256(bytes),
+      PdfValidation.sha256(Policy.encode(plan.profile).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
       bytes.length.toLong, status, findings))
 
   private def inspectDocument(pdf: PDDocument): Vector[Observation] =

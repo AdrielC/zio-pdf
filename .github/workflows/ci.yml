@@ -104,7 +104,7 @@ jobs:
           bash scripts/verify-native-consumer.sh
 
   gotenberg-tool:
-    name: Gotenberg and court tools
+    name: Gotenberg and policy tools
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -129,7 +129,7 @@ jobs:
             cs install sbt
           fi
           echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
-      - name: Verify archival packets and court rules through MCP
+      - name: Verify archival packets and policies through MCP
         env:
           KYO_PDF_GOTENBERG_PORT: ${{ job.services.gotenberg.ports['3000'] }}
         run: |

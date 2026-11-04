@@ -284,7 +284,7 @@ same recipe in the MCP format.
 
 The example checks the bytes emitted by its write step. To inspect an uploaded
 PDF byte for byte, upload it to `/api/documents` and POST an empty body to
-`/api/documents/{id}/court-preflight`. The receipt hash identifies the file that
+`/api/documents/{id}/policy-preflight`. The receipt hash identifies the file that
 was checked.
 
 The profile checks file size, extractable text, page labels and visible
@@ -294,12 +294,12 @@ coverage and zoom, text quality, formatting, and sensitive information by
 review. This pilot covers single PDFs within the studio limits of 12 MiB and
 64 pages.
 
-### Load another court's rules
+### Load a policy
 
-GET `/api/court-profiles/example` returns the California rules as editable JSON.
-GET `/api/court-profiles/schema` exports the authoring schema. POST a profile
-to `/api/court-profiles/check` to compile and validate it, then POST that same
-JSON to `/api/documents/{id}/court-preflight` to inspect an uploaded PDF.
+GET `/api/policies/example` returns the California rules as editable JSON.
+GET `/api/policies/schema` exports the authoring schema. POST a profile
+to `/api/policies/check` to compile and validate it, then POST that same
+JSON to `/api/documents/{id}/policy-preflight` to inspect an uploaded PDF.
 
 A pipeline can carry the entire profile in a `preflight-rules` node's
 `rules` field. Save, load, and compose it through the ordinary arrows and

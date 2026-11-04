@@ -5,7 +5,7 @@ import com.google.gson.stream.{JsonReader, JsonToken}
 import java.io.StringReader
 import java.nio.charset.StandardCharsets.UTF_8
 import io.github.adrielc.kyopdf.pipeline.PdfPipeline.*
-import io.github.adrielc.kyopdf.pipeline.{CourtRules, CourtProfile}
+import io.github.adrielc.kyopdf.pipeline.{Policy, CourtProfile}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
@@ -126,7 +126,7 @@ object PipelineJson:
         case "convert-pdfa-3b" => (Op.ConvertPdfA3b, Set.empty)
         case "write" => (Op.Write, Set.empty)
         case "preflight-rules" =>
-          val rules = CourtRules.decode(Option(node.get("rules")).fold("null")(_.toString)) match
+          val rules = Policy.decode(Option(node.get("rules")).fold("null")(_.toString)) match
             case Right(plan) => plan.profile
             case Left(issues) =>
               issues.foreach(issue => errors += issue.copy(path = s"$path.rules." + issue.path.stripPrefix("profile.")))
@@ -162,7 +162,7 @@ object PipelineJson:
         case Op.NumberPages(start, style, prefix) => ("number", s",\"start\":$start,\"style\":${PaperMachine.quote(style)},\"prefix\":${PaperMachine.quote(prefix)}")
         case Op.ConvertPdfA3b => ("convert-pdfa-3b", "")
         case Op.Write => ("write", "")
-        case Op.PreflightRules(rules) => ("preflight-rules", s",\"rules\":${CourtRules.encode(rules)}")
+        case Op.PreflightRules(rules) => ("preflight-rules", s",\"rules\":${Policy.encode(rules)}")
         case Op.Preflight(profile) => ("preflight", s",\"profile\":${PaperMachine.quote(profile)}")
         case Op.Validate(profiles) => ("validate", s",\"profiles\":${strings(profiles)}")
         case Op.Choose(test, kind) => ("choose", s",\"test\":${predicate(test)},\"kind\":${PaperMachine.quote(kind.toString.toLowerCase)}")

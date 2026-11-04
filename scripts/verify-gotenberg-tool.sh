@@ -46,4 +46,4 @@ fi
 KYO_PDF_TEST_GOTENBERG=1 python3 examples/paper-machine/test_pipelines.py "$studio_url" \
   PipelineTest.test_gotenberg_archive_packet_passes_3b_through_tool \
   PipelineTest.test_court_preflight_reports_source_pages_and_exact_bytes \
-  PipelineTest.test_loaded_court_rules_compile_and_run_through_mcp
+  PipelineTest.test_loaded_policy_compiles_and_runs_through_mcp

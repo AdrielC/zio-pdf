@@ -42,7 +42,7 @@ object PdfPipeline:
     case ConvertPdfA3b
     case Validate(profiles: Vector[String])
     case Preflight(profile: String)
-    case PreflightRules(rules: CourtRules.Profile)
+    case PreflightRules(rules: Policy.Profile)
     case Choose(test: Predicate, kind: Kind = Kind.Document)
     case Stop(message: String, kind: Kind = Kind.Document)
     /** Arrow projections retain evaluation of every input before selecting a value. */
@@ -140,7 +140,7 @@ object PdfPipeline:
           if !Set("page", "number", "bates")(style) then add(s"$path.style", Code.Setting, "Choose page, number, or bates")
           if !line(prefix, 24) then add(s"$path.prefix", Code.Setting, "Use a single-line prefix up to 24 characters")
         case Op.PreflightRules(rules) =>
-          CourtRules.compile(rules).left.foreach(_.foreach { issue =>
+          Policy.compile(rules).left.foreach(_.foreach { issue =>
             add(s"$path.rules." + issue.path.stripPrefix("profile."), issue.code, issue.message)
           })
         case Op.Preflight(profile) if profile != CourtProfile.CaliforniaSecondDistrictPetition.id =>
@@ -218,8 +218,8 @@ object PdfPipeline:
   trait Services:
     def pageNumberEvidence(@scala.annotation.unused document: PdfDocument): (Outcome, String) < (Abort[PdfError] & Sync) =
       (Outcome.Unknown, "Visible page-number inspection is unavailable")
-    def preflightRules(@scala.annotation.unused bytes: Vector[Byte], @scala.annotation.unused rules: CourtRules.Checked): String < (Abort[PdfError] & Sync) =
-      Abort.fail(PdfError.InvalidPdf("Court rules interpreter is unavailable"))
+    def preflightRules(@scala.annotation.unused bytes: Vector[Byte], @scala.annotation.unused rules: Policy.Checked): String < (Abort[PdfError] & Sync) =
+      Abort.fail(PdfError.InvalidPdf("Policy interpreter is unavailable"))
     def preflight(@scala.annotation.unused bytes: Vector[Byte], @scala.annotation.unused profile: String): String < (Abort[PdfError] & Sync) =
       Abort.fail(PdfError.InvalidPdf("Court preflight service is unavailable"))
     def convertPdfA3b(@scala.annotation.unused bytes: Vector[Byte]): Vector[Byte] < (Abort[PdfError] & Sync) =
@@ -405,9 +405,9 @@ object PdfPipeline:
                 case Op.Keep(index, _) => args(index)
                 case Op.StopAfter(message, _, _) => Abort.fail(PdfError.InvalidPdf(s"Pipeline stopped at $id: $message"))
                 case Op.PreflightRules(rules) => args.head match
-                  case Value.File(bytes) => CourtRules.compile(rules) match
+                  case Value.File(bytes) => Policy.compile(rules) match
                     case Right(plan) => services.preflightRules(bytes, plan).map(Value.Receipt(_))
-                    case Left(_) => Abort.fail(PdfError.InvalidPdf("Checked court rules became invalid"))
+                    case Left(_) => Abort.fail(PdfError.InvalidPdf("Checked policy became invalid"))
                   case _ => Abort.fail(PdfError.InvalidPdf("Checked preflight port changed type"))
                 case Op.Preflight(profile) => args.head match
                   case Value.File(bytes) => services.preflight(bytes, profile).map(Value.Receipt(_))

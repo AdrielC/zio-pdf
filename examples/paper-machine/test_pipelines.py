@@ -274,7 +274,7 @@ class PipelineTest(unittest.TestCase):
         status, data = request('/api/documents', raw=bytes(pdf))
         self.assertEqual(status, 200, data)
         source = json.loads(data)
-        status, data = request('/api/documents/' + source['id'] + '/court-preflight', raw=b'')
+        status, data = request('/api/documents/' + source['id'] + '/policy-preflight', raw=b'')
         self.assertEqual(status, 200, data)
         report = json.loads(data)
         self.assertEqual(report['sha256'], hashlib.sha256(pdf).hexdigest())
@@ -300,26 +300,26 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(receipt['report']['sha256'], file['document']['sha256'])
         self.assertEqual(receipt['report']['profile'], report['profile'])
 
-    def test_loaded_court_rules_compile_and_run_through_mcp(self):
-        status, data = request('/api/court-profiles/example')
+    def test_loaded_policy_compiles_and_runs_through_mcp(self):
+        status, data = request('/api/policies/example')
         self.assertEqual(status, 200, data)
         profile = json.loads(data)
-        status, schema = request('/api/court-profiles/schema')
+        status, schema = request('/api/policies/schema')
         self.assertEqual(status, 200, schema)
         self.assertIn('rules', json.loads(schema)['properties'])
 
         profile.update(id='synthetic-motion-v1', name='Synthetic motion profile',
-                       court='Synthetic court', filingType='Motion', source='Synthetic test rules')
+                       authority='Synthetic standards body', documentType='Report', source='Synthetic test rules')
         rule = profile['rules'][0]
         profile['rules'] = [rule]
         rule.update(id='page-limit', citation='Synthetic rule 1', source='Synthetic test rules',
                     message='The document must have at most three pages.',
                     condition={'Compare': {'left': {'Fact': {'metric': 'PageCount'}},
                                            'comparison': 'LessThanOrEqual', 'right': {'Number': {'value': 3}}}})
-        status, compiled = request('/api/court-profiles/check', profile)
+        status, compiled = request('/api/policies/check', profile)
         self.assertEqual(status, 200, compiled)
         self.assertEqual(json.loads(compiled), profile)
-        status, report = request('/api/documents/' + self.doc['id'] + '/court-preflight', profile)
+        status, report = request('/api/documents/' + self.doc['id'] + '/policy-preflight', profile)
         self.assertEqual(status, 200, report)
         failed = json.loads(report)
         self.assertEqual(failed['sha256'], self.doc['sha256'])
@@ -327,7 +327,7 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(failed['findings'][0]['evidence']['PageCount'], 4)
 
         rule['condition']['Compare']['right']['Number']['value'] = 4
-        status, report = request('/api/documents/' + self.doc['id'] + '/court-preflight', profile)
+        status, report = request('/api/documents/' + self.doc['id'] + '/policy-preflight', profile)
         self.assertEqual(status, 200, report)
         passed = json.loads(report)
         self.assertEqual(passed['status'], 'pass')
@@ -353,7 +353,7 @@ class PipelineTest(unittest.TestCase):
         invalid = copy.deepcopy(profile)
         invalid['version'] = 99
         invalid['rules'][0]['scope'] = 'Page'
-        status, errors = request('/api/court-profiles/check', invalid)
+        status, errors = request('/api/policies/check', invalid)
         self.assertEqual(status, 400, errors)
         issues = json.loads(errors)['issues']
         self.assertTrue(any(i['path'] == 'profile.version' for i in issues))

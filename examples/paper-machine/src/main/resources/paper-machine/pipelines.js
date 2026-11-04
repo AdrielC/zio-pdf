@@ -21,7 +21,7 @@ const operationNames = {
   "convert-pdfa-3b": "Convert to PDF/A-3b",
   validate: "Validate PDF/A",
   preflight: "Court preflight",
-  "preflight-rules": "Court rules",
+  "preflight-rules": "Policy",
   choose: "Choose a path",
   stop: "Stop with reason",
   keep: "Keep a value",
@@ -576,7 +576,7 @@ function drawPipelineEditor() {
       const editor = element("textarea");
       editor.rows = 12;
       editor.value = JSON.stringify(node.rules, null, 2);
-      editor.setAttribute("aria-label", "Court rules JSON");
+      editor.setAttribute("aria-label", "Policy JSON");
       editor.onchange = () => {
         try {
           node.rules = JSON.parse(editor.value);
@@ -585,7 +585,7 @@ function drawPipelineEditor() {
           pipelineError(new Error("Use valid court rules JSON."));
         }
       };
-      settings.append(pipelineField("Court rules JSON", editor));
+      settings.append(pipelineField("Policy JSON", editor));
       break;
     }
     case "validate": {
@@ -954,11 +954,11 @@ function renderPipelineResults(result) {
     } else {
       const report = output.report,
         row = element("section", "pipeline-receipt");
-      if (report.kind === "court-preflight") {
+      if (report.kind === "policy-preflight") {
         row.append(element("h4", "", report.profile.name));
         const statusLabels = { pass: "Pass", "needs-review": "Needs review", "fix-required": "Fix required" };
         row.append(element("p", "", statusLabels[report.status]));
-        const source = element("a", "text-button", "Court formatting rules");
+        const source = element("a", "text-button", "Policy source");
         source.href = report.profile.source;
         const details = element("details");
         details.append(element("summary", "", `${report.findings.length} findings`));

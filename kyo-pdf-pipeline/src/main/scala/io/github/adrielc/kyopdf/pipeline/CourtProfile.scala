@@ -8,10 +8,10 @@ enum CourtProfile(val id: String, val label: String, val effectiveDate: String, 
     "https://appellate.courts.ca.gov/district-courts/2dca/rules-forms-filing/electronic-filing/electronic-formatting-requirements-and-guidelines"
   )
 
-  def rules: CourtRules.Profile = CourtProfile.californiaRules
+  def rules: Policy.Profile = CourtProfile.californiaRules
 
 object CourtProfile:
-  import CourtRules.*
+  import Policy.*
   private val RuleSource = "https://courts.ca.gov/cms/rules/index/eight/rule8_74"
   private def compare(metric: Metric, comparison: Comparison, value: Long): Condition =
     Condition.Compare(Operand.Fact(metric), comparison, Operand.Number(value))
