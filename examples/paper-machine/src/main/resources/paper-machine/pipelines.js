@@ -20,6 +20,8 @@ const operationNames = {
   write: "Write PDF",
   "convert-pdfa-3b": "Convert to PDF/A-3b",
   validate: "Validate PDF/A",
+  preflight: "Court preflight",
+  "preflight-rules": "Policy",
   choose: "Choose a path",
   stop: "Stop with reason",
   keep: "Keep a value",
@@ -30,7 +32,7 @@ function pipelineKind(node) {
   if (node.op === "keep") return node.kinds[node.index];
   return ["write", "convert-pdfa-3b"].includes(node.op)
     ? "file"
-    : node.op === "validate"
+    : ["validate", "preflight", "preflight-rules"].includes(node.op)
       ? "receipt"
       : "document";
 }
@@ -328,7 +330,7 @@ function drawPipelineEditor() {
               ? "receipt"
               : "document"
             : node.kind
-          : ["validate", "convert-pdfa-3b"].includes(node.op)
+          : ["validate", "preflight", "preflight-rules", "convert-pdfa-3b"].includes(node.op)
             ? "file"
             : "document";
       const available = recipe.nodes.filter(
@@ -570,6 +572,22 @@ function drawPipelineEditor() {
       ]);
       text("Prefix", "prefix", "text", 24);
       break;
+    case "preflight-rules": {
+      const editor = element("textarea");
+      editor.rows = 12;
+      editor.value = JSON.stringify(node.rules, null, 2);
+      editor.setAttribute("aria-label", "Policy JSON");
+      editor.onchange = () => {
+        try {
+          node.rules = JSON.parse(editor.value);
+          pipelineChanged();
+        } catch {
+          pipelineError(new Error("Use valid court rules JSON."));
+        }
+      };
+      settings.append(pipelineField("Policy JSON", editor));
+      break;
+    }
     case "validate": {
       const fieldset = element("fieldset");
       fieldset.append(element("legend", "", "Validation profiles"));
@@ -740,7 +758,7 @@ function addPipelineOperation() {
   let suffix = 1;
   while (recipe.nodes.some((n) => n.id === `step${suffix}`)) suffix++;
   const id = `step${suffix}`,
-    kind = ["validate", "convert-pdfa-3b"].includes(op) ? "file" : "document";
+    kind = ["validate", "preflight", "preflight-rules", "convert-pdfa-3b"].includes(op) ? "file" : "document";
   let selected = recipe.nodes.find(
     (n) => n.id === pipelineState.selected && pipelineKind(n) === kind,
   );
@@ -793,6 +811,7 @@ function addPipelineOperation() {
   if (op === "number")
     Object.assign(node, { start: 1, style: "page", prefix: "" });
   if (op === "validate") node.profiles = ["3b"];
+  if (op === "preflight") node.profile = "ca-2dca-petition-2026-07-01-v1";
   if (
     ["select", "stamp", "number", "assemble", "choose"].includes(op) &&
     selected
@@ -803,7 +822,7 @@ function addPipelineOperation() {
       );
   }
   recipe.nodes.push(node);
-  if (["write", "validate", "convert-pdfa-3b"].includes(op)) recipe.outputs.push(id);
+  if (["write", "validate", "preflight", "preflight-rules", "convert-pdfa-3b"].includes(op)) recipe.outputs.push(id);
   pipelineState.selected = id;
   pipelineChanged(true);
   drawPipelineBindings();
@@ -935,6 +954,33 @@ function renderPipelineResults(result) {
     } else {
       const report = output.report,
         row = element("section", "pipeline-receipt");
+      if (report.kind === "policy-preflight") {
+        row.append(element("h4", "", report.profile.name));
+        const statusLabels = { pass: "Pass", "needs-review": "Needs review", "fix-required": "Fix required" };
+        row.append(element("p", "", statusLabels[report.status]));
+        const source = element("a", "text-button", "Policy source");
+        source.href = report.profile.source;
+        const details = element("details");
+        details.append(element("summary", "", `${report.findings.length} findings`));
+        details.open = true;
+        const doc = result.outputs.find((item) => item.kind === "file" && item.document.sha256 === report.sha256)?.document;
+        for (const finding of report.findings) {
+          const line = element("p", "", `${statusLabels[finding.status]} · ${finding.rule} · ${finding.message}`);
+          if (doc && finding.page) {
+            const jump = element("button", "text-button", `Open page ${finding.page}`);
+            jump.onclick = () => {
+              activate(doc);
+              selectStudioTool(false);
+              showPage(finding.page);
+            };
+            line.append(jump);
+          }
+          details.append(line);
+        }
+        row.append(source, details, element("p", "receipt-hash", `SHA-256 ${report.sha256}`));
+        holder.append(row);
+        continue;
+      }
       row.append(element("h4", "", `Validation · ${output.node}`));
       const verdicts = element("div", "pipeline-verdicts");
       for (const result of report.validation.results || [])

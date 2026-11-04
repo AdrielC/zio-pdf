@@ -41,6 +41,8 @@ object PdfPipeline:
     case Write
     case ConvertPdfA3b
     case Validate(profiles: Vector[String])
+    case Preflight(profile: String)
+    case PreflightRules(rules: Policy.Profile)
     case Choose(test: Predicate, kind: Kind = Kind.Document)
     case Stop(message: String, kind: Kind = Kind.Document)
     /** Arrow projections retain evaluation of every input before selecting a value. */
@@ -49,7 +51,7 @@ object PdfPipeline:
 
     def output: Kind = this match
       case Write | ConvertPdfA3b => Kind.File
-      case Validate(_) => Kind.Receipt
+      case Validate(_) | Preflight(_) | PreflightRules(_) => Kind.Receipt
       case Choose(_, kind) => kind
       case Stop(_, kind) => kind
       case Keep(index, kinds) => kinds.lift(index).getOrElse(Kind.Document)
@@ -57,7 +59,7 @@ object PdfPipeline:
       case _ => Kind.Document
     def input: Kind = this match
       case Choose(test, _) => test.input
-      case Validate(_) | ConvertPdfA3b => Kind.File
+      case Validate(_) | ConvertPdfA3b | Preflight(_) | PreflightRules(_) => Kind.File
       case _ => Kind.Document
 
   final case class Node(id: String, op: Op, inputs: Vector[String] = Vector.empty) derives Schema
@@ -137,6 +139,12 @@ object PdfPipeline:
           if start < 1 || start > 999999 then add(s"$path.start", Code.Setting, "Start numbering from 1 to 999999")
           if !Set("page", "number", "bates")(style) then add(s"$path.style", Code.Setting, "Choose page, number, or bates")
           if !line(prefix, 24) then add(s"$path.prefix", Code.Setting, "Use a single-line prefix up to 24 characters")
+        case Op.PreflightRules(rules) =>
+          Policy.compile(rules).left.foreach(_.foreach { issue =>
+            add(s"$path.rules." + issue.path.stripPrefix("profile."), issue.code, issue.message)
+          })
+        case Op.Preflight(profile) if profile != CourtProfile.CaliforniaSecondDistrictPetition.id =>
+          add(s"$path.profile", Code.Setting, "Choose a supported court profile")
         case Op.Validate(profiles) if profiles.isEmpty || profiles.distinct != profiles || !profiles.forall(Profiles.contains) =>
           add(s"$path.profiles", Code.Setting, "Choose distinct profiles from 2b, 3b and 3u")
         case _ => ()
@@ -210,6 +218,10 @@ object PdfPipeline:
   trait Services:
     def pageNumberEvidence(@scala.annotation.unused document: PdfDocument): (Outcome, String) < (Abort[PdfError] & Sync) =
       (Outcome.Unknown, "Visible page-number inspection is unavailable")
+    def preflightRules(@scala.annotation.unused bytes: Vector[Byte], @scala.annotation.unused rules: Policy.Checked): String < (Abort[PdfError] & Sync) =
+      Abort.fail(PdfError.InvalidPdf("Policy interpreter is unavailable"))
+    def preflight(@scala.annotation.unused bytes: Vector[Byte], @scala.annotation.unused profile: String): String < (Abort[PdfError] & Sync) =
+      Abort.fail(PdfError.InvalidPdf("Court preflight service is unavailable"))
     def convertPdfA3b(@scala.annotation.unused bytes: Vector[Byte]): Vector[Byte] < (Abort[PdfError] & Sync) =
       Abort.fail(PdfError.InvalidPdf("PDF/A-3b conversion service is unavailable"))
     def stamp(document: PdfDocument, text: String, placement: String): PdfDocument < (Abort[PdfError] & Sync)
@@ -392,6 +404,14 @@ object PdfPipeline:
                   case _ => Abort.fail(PdfError.InvalidPdf("Checked archival conversion port changed type"))
                 case Op.Keep(index, _) => args(index)
                 case Op.StopAfter(message, _, _) => Abort.fail(PdfError.InvalidPdf(s"Pipeline stopped at $id: $message"))
+                case Op.PreflightRules(rules) => args.head match
+                  case Value.File(bytes) => Policy.compile(rules) match
+                    case Right(plan) => services.preflightRules(bytes, plan).map(Value.Receipt(_))
+                    case Left(_) => Abort.fail(PdfError.InvalidPdf("Checked policy became invalid"))
+                  case _ => Abort.fail(PdfError.InvalidPdf("Checked preflight port changed type"))
+                case Op.Preflight(profile) => args.head match
+                  case Value.File(bytes) => services.preflight(bytes, profile).map(Value.Receipt(_))
+                  case _ => Abort.fail(PdfError.InvalidPdf("Checked preflight port changed type"))
                 case Op.Validate(profiles) => args.head match
                   case Value.File(bytes) => services.validationReport(bytes, profiles).map(report => Value.Receipt(report.json, report.verdicts))
                   case _ => Abort.fail(PdfError.InvalidPdf("Checked file port changed type"))

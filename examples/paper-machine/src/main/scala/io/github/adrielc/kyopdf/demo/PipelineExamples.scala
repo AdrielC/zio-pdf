@@ -1,7 +1,7 @@
 package io.github.adrielc.kyopdf.demo
 
 import io.github.adrielc.kyopdf.pipeline.PdfPipeline.*
-import io.github.adrielc.kyopdf.pipeline.PdfArrow
+import io.github.adrielc.kyopdf.pipeline.{CourtProfile, PdfArrow}
 
 object PipelineExamples:
   def pages: Recipe = PipelineWiring.conditionalExample
@@ -46,4 +46,10 @@ object PipelineExamples:
 
   val archivePacket: Recipe =
     PdfArrow.recipe("Archival packet", packetFile >>> PdfArrow.archivePdfA3b)
+      .fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)
+
+  val courtPreflight: Recipe =
+    import PdfArrow.*
+    val arrow = input("body") >>> write >>> (id[File] &&& preflight(CourtProfile.CaliforniaSecondDistrictPetition.rules))
+    PdfArrow.recipe("California Second District petition preflight", arrow)
       .fold(errors => throw IllegalStateException(errors.mkString(", ")), identity)

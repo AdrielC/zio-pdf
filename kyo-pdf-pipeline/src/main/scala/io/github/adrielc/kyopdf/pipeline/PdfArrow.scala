@@ -92,6 +92,8 @@ object PdfArrow:
     ).named("archive-check")
     convertPdfA3b >>> (id[File] &&& validate("3b").named("archive-validation")) >>> (verifiedFile &&& receipt)
 
+  def preflight(rules: Policy.Profile): PdfArrow[File, Receipt] = step(Op.PreflightRules(rules), "policy-preflight")
+  def preflight(profile: CourtProfile): PdfArrow[File, Receipt] = step(Op.Preflight(profile.id), "court-preflight")
   def validate(profiles: String*): PdfArrow[File, Receipt] = step(Op.Validate(profiles.toVector), "checks")
   def assemble(catalog: Int = 0): PdfArrow[(Document, Document), Document] = step(Op.Assemble(catalog), "assembled")
   def assemble3(catalog: Int = 0): PdfArrow[((Document, Document), Document), Document] = step(Op.Assemble(catalog), "assembled")

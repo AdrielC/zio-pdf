@@ -1,6 +1,7 @@
 package io.github.adrielc.kyopdf.demo
 
 import io.github.adrielc.kyopdf.*
+import io.github.adrielc.kyopdf.pipeline.{CourtProfile, Policy}
 import io.github.adrielc.kyopdf.pipeline.PdfPipeline.*
 import kyo.*
 import com.google.gson.{JsonArray, JsonParser}
@@ -21,6 +22,11 @@ final class PipelineServices(profiles: Vector[String], originals: Vector[(PdfDoc
     originals.find((source, _) => source eq document) match
       case Some((_, bytes)) => Sync.defer(PageNumberEvidence.inspect(bytes))
       case None => PdfWriter.write(document).map(bytes => Sync.defer(PageNumberEvidence.inspect(bytes.toArray)))
+  override def preflightRules(bytes: Vector[Byte], rules: Policy.Checked): String < (Abort[PdfError] & Sync) =
+    Sync.defer(PolicyPreflight.inspect(bytes.toArray, rules))
+  override def preflight(bytes: Vector[Byte], profile: String): String < (Abort[PdfError] & Sync) =
+    if profile == CourtProfile.CaliforniaSecondDistrictPetition.id then Sync.defer(PolicyPreflight.inspect(bytes.toArray))
+    else Abort.fail(PdfError.InvalidPdf("Unknown court profile"))
   override def convertPdfA3b(bytes: Vector[Byte]): Vector[Byte] < (Abort[PdfError] & Sync) =
     Abort.catching[Exception](error => PdfError.InvalidPdf(Option(error.getMessage).getOrElse("PDF/A-3b conversion failed")))(
       Sync.defer(GotenbergArchive.convert(bytes))

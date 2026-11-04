@@ -52,6 +52,9 @@ object PdfPipelineModel:
     variant("number", "NumberPages", int("start", 1, true), Field("style", choices("page", "number", "bates"), Str("page"), true), str("prefix", "", true)),
     variant("write", "Write"),
     variant("convert-pdfa-3b", "ConvertPdfA3b"),
+    variant("preflight-rules", "PreflightRules", Field("rules", Policy.jsonSchema.asInstanceOf[Obj],
+      Json.parseUnsafe(Policy.encode(CourtProfile.CaliforniaSecondDistrictPetition.rules)))),
+    variant("preflight", "Preflight", Field("profile", choices(CourtProfile.CaliforniaSecondDistrictPetition.id), Str(CourtProfile.CaliforniaSecondDistrictPetition.id))),
     variant("validate", "Validate", Field("profiles", array(profiles), strings(Vector("3b")))),
     variant("choose", "Choose", Field("test", Obj("oneOf" -> Arr(predicates.map(_.schema("kind"))*)), Obj("kind" -> Str("has-page-numbers"))), port),
     variant("stop", "Stop", str("message", "Review required"), port),
@@ -159,6 +162,7 @@ object PdfPipelineModel:
           case Str(name) => Str(name.capitalize)
           case other => other
         field.name -> (field.name match
+          case "rules" => Policy.normalizeProfile(value)
           case "kind" => kind(value)
           case "kinds" => value match
             case Arr(values) => Arr(values.iterator.map(kind).toSeq*)

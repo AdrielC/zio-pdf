@@ -244,6 +244,139 @@ class PipelineTest(unittest.TestCase):
                 self.assertIn(f'Page {index} of 4', page)
             self.assertNotIn('Page 4 of 4', pages[5])
 
+    def test_court_preflight_reports_source_pages_and_exact_bytes(self):
+        def stream(content):
+            return f'<< /Length {len(content)} >>\nstream\n'.encode() + content + b'endstream'
+
+        objects = [
+            b'<< /Type /Catalog /Pages 2 0 R /Outlines 8 0 R /PageLabels << /Nums [0 << /S /D /St 4 >>] >> >>',
+            b'<< /Type /Pages /Count 3 /Kids [3 0 R 4 0 R 5 0 R] /Resources << /Font << /F 10 0 R >> >> >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Contents 6 0 R >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Contents 7 0 R >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] >>',
+            stream(b'BT /F 12 Tf 30 350 Td (Petition for review) Tj ET\n'),
+            stream(b'BT /F 12 Tf 30 350 Td (Exhibit B) Tj ET\n'),
+            b'<< /Type /Outlines /First 9 0 R /Last 9 0 R /Count 1 >>',
+            b'<< /Title (Exhibit B) /Parent 8 0 R /Dest [3 0 R /XYZ null null null] >>',
+            b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        ]
+        pdf = bytearray(b'%PDF-1.7\n')
+        offsets = []
+        for index, obj in enumerate(objects, 1):
+            offsets.append(len(pdf))
+            pdf.extend(f'{index} 0 obj\n'.encode() + obj + b'\nendobj\n')
+        xref = len(pdf)
+        pdf.extend(f'xref\n0 {len(objects) + 1}\n0000000000 65535 f \n'.encode())
+        for offset in offsets:
+            pdf.extend(f'{offset:010d} 00000 n \n'.encode())
+        pdf.extend(f'trailer\n<< /Root 1 0 R /Size {len(objects) + 1} >>\nstartxref\n{xref}\n%%EOF\n'.encode())
+
+        status, data = request('/api/documents', raw=bytes(pdf))
+        self.assertEqual(status, 200, data)
+        source = json.loads(data)
+        status, data = request('/api/documents/' + source['id'] + '/policy-preflight', raw=b'')
+        self.assertEqual(status, 200, data)
+        report = json.loads(data)
+        self.assertEqual(report['sha256'], hashlib.sha256(pdf).hexdigest())
+        self.assertEqual(report['profile']['effectiveDate'], '2026-07-01')
+        self.assertEqual(report['status'], 'fix-required')
+        findings = report['findings']
+        self.assertTrue(any(f['check'] == 'file-size' and f['status'] == 'pass' for f in findings))
+        self.assertTrue(any(f['check'] == 'pagination' and f['status'] == 'fix-required' and f['page'] == 2 for f in findings))
+        self.assertTrue(any(f['check'] == 'searchability' and f['status'] == 'needs-review' and f['page'] == 3 for f in findings))
+        self.assertTrue(any(f['check'] == 'exhibit-destinations' and f['status'] == 'needs-review'
+                            and f['page'] == 1 and 'page 2' in f['message'] for f in findings), findings)
+        self.assertTrue(all(f['source'].startswith('https://courts.ca.gov/') for f in findings))
+        status, unchanged = request('/api/documents/' + source['id'] + '/file')
+        self.assertEqual((status, unchanged), (200, bytes(pdf)))
+
+        status, data = request('/api/pipelines/model-example?court-preflight')
+        self.assertEqual(status, 200, data)
+        recipe = json.loads(data)
+        call = {'name': 'run_pdf_pipeline', 'arguments': {'recipe': recipe, 'files': {'body': source['id']}}}
+        result = self.rpc('tools/call', call)
+        self.assertFalse(result['isError'], result)
+        file, receipt = result['structuredContent']['outputs']
+        self.assertEqual(receipt['report']['sha256'], file['document']['sha256'])
+        self.assertEqual(receipt['report']['profile'], report['profile'])
+
+    def test_loaded_policy_compiles_and_runs_through_mcp(self):
+        status, data = request('/api/policies/example')
+        self.assertEqual(status, 200, data)
+        profile = json.loads(data)
+        status, schema = request('/api/policies/schema')
+        self.assertEqual(status, 200, schema)
+        self.assertIn('rules', json.loads(schema)['properties'])
+
+        profile.update(id='synthetic-motion-v1', name='Synthetic motion profile',
+                       authority='Synthetic standards body', documentType='Report', source='Synthetic test rules')
+        rule = profile['rules'][0]
+        profile['rules'] = [rule]
+        rule.update(id='page-limit', citation='Synthetic rule 1', source='Synthetic test rules',
+                    message='The document must have at most three pages.',
+                    condition={'Compare': {'left': {'Fact': {'metric': 'PageCount'}},
+                                           'comparison': 'LessThanOrEqual', 'right': {'Number': {'value': 3}}}})
+        status, compiled = request('/api/policies/check', profile)
+        self.assertEqual(status, 200, compiled)
+        self.assertEqual(json.loads(compiled), profile)
+        legacy = copy.deepcopy(profile)
+        legacy['court'] = legacy.pop('authority')
+        legacy['filingType'] = legacy.pop('documentType')
+        status, migrated = request('/api/policies/check', legacy)
+        self.assertEqual(status, 200, migrated)
+        self.assertEqual(json.loads(migrated), profile)
+        status, report = request('/api/documents/' + self.doc['id'] + '/policy-preflight', profile)
+        self.assertEqual(status, 200, report)
+        failed = json.loads(report)
+        self.assertEqual(failed['sha256'], self.doc['sha256'])
+        self.assertEqual(failed['status'], 'fix-required')
+        self.assertEqual(failed['findings'][0]['evidence']['PageCount'], 4)
+
+        rule['condition']['Compare']['right']['Number']['value'] = 4
+        status, report = request('/api/documents/' + self.doc['id'] + '/policy-preflight', profile)
+        self.assertEqual(status, 200, report)
+        passed = json.loads(report)
+        self.assertEqual(passed['status'], 'pass')
+        self.assertNotEqual(passed['profileSha256'], failed['profileSha256'])
+        self.assertEqual(passed['sha256'], failed['sha256'])
+
+        status, data = request('/api/pipelines/model-example?court-preflight')
+        self.assertEqual(status, 200, data)
+        recipe = json.loads(data)
+        operation = next(n for n in recipe['nodes'] if n['op'] == 'preflight-rules')
+        operation['rules'] = profile
+        checked = self.rpc('tools/call', {'name': 'check_pdf_pipeline', 'arguments': {'recipe': recipe}})
+        self.assertFalse(checked['isError'], checked)
+        self.assertEqual(checked['structuredContent']['recipe'], recipe)
+        operation['rules'] = legacy
+        migrated = self.rpc('tools/call', {'name': 'check_pdf_pipeline', 'arguments': {'recipe': recipe}})
+        self.assertFalse(migrated['isError'], migrated)
+        operation['rules'] = profile
+        # Legacy was captured before the threshold changed from three to four.
+        migrated_rules = next(n['rules'] for n in migrated['structuredContent']['recipe']['nodes']
+                              if n['op'] == 'preflight-rules')
+        self.assertEqual(migrated_rules['authority'], profile['authority'])
+        result = self.rpc('tools/call', {'name': 'run_pdf_pipeline',
+                                        'arguments': {'recipe': recipe, 'files': {'body': self.doc['id']}}})
+        self.assertFalse(result['isError'], result)
+        file, receipt = result['structuredContent']['outputs']
+        self.assertEqual(receipt['report']['status'], 'pass')
+        self.assertEqual(receipt['report']['sha256'], file['document']['sha256'])
+        self.assertEqual(receipt['report']['profileSha256'], passed['profileSha256'])
+
+        invalid = copy.deepcopy(profile)
+        invalid['version'] = 99
+        invalid['rules'][0]['scope'] = 'Page'
+        status, errors = request('/api/policies/check', invalid)
+        self.assertEqual(status, 400, errors)
+        issues = json.loads(errors)['issues']
+        self.assertTrue(any(i['path'] == 'profile.version' for i in issues))
+        self.assertTrue(any(i['code'] == 'Type' for i in issues))
+        operation['rules'] = invalid
+        rejected = self.rpc('tools/call', {'name': 'check_pdf_pipeline', 'arguments': {'recipe': recipe}})
+        self.assertTrue(rejected['isError'])
+        self.assertTrue(any('.rules.version' in i['path'] for i in rejected['structuredContent']['issues']))
+
     def test_page_count_example_runs_only_the_selected_stamp(self):
         recipe = self.example('pages')
         self.assertEqual(recipe['version'], 3)
