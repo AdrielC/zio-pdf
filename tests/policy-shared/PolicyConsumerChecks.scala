@@ -1,8 +1,11 @@
 import io.github.adrielc.kyopdf.*
 import io.github.adrielc.kyopdf.pipeline.{PdfArrow, PdfPipeline, PdfPipelineJson, PdfPipelineModel, Policy}
 import kyo.*
+import _root_.zio.blocks.schema.{Schema as BlocksSchema}
+import _root_.zio.blocks.schema.json.JsonCodecDeriver
 
 object PolicyConsumerChecks:
+  private case class Evidence(label: String, pages: Int)
   private def value[A](program: A < (Abort[PdfError] & Sync)): A =
     import kyo.AllowUnsafe.embrace.danger
     Abort.run[PdfError](Sync.Unsafe.run(program)).eval match
@@ -11,6 +14,9 @@ object PolicyConsumerChecks:
       case kyo.Result.Panic(error) => throw error
 
   def run(): (PdfDocument, Vector[Byte]) =
+    val evidenceCodec = BlocksSchema.derived[Evidence].derive(JsonCodecDeriver)
+    val evidence = Evidence("Synthetic report", 1)
+    assert(evidenceCodec.decode(evidenceCodec.encode(evidence)) == Right(evidence))
     import Policy.*
     val profile = Profile(1, "report-v1", "Report policy", "Example organization", "Report",
       "2026-11-03", "Synthetic report requirements", Vector(
