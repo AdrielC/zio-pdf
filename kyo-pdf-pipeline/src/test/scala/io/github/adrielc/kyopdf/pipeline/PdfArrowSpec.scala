@@ -24,7 +24,7 @@ object PdfArrowSpec extends ZIOSpecDefault:
       doc.copy(objects = doc.objects.updated(0, catalog.copy(value = catalog.dictionary.get.updated("Mark", PdfValue.Literal(text.getBytes(java.nio.charset.StandardCharsets.UTF_8).toVector)))))
     }
     def number(doc: PdfDocument, start: Int, style: String, prefix: String): PdfDocument < (Abort[PdfError] & Sync) = doc
-    def validate(bytes: Vector[Byte], profiles: Vector[String]): String < (Abort[PdfError] & Sync) = Sync.defer { checked :+= bytes; "{}" }
+    override def validate(bytes: Vector[Byte], profiles: Vector[String]): String < (Abort[PdfError] & Sync) = Sync.defer { checked :+= bytes; "{}" }
     override def validationReport(bytes: Vector[Byte], profiles: Vector[String]): ValidationReport < (Abort[PdfError] & Sync) =
       validate(bytes, profiles).map(json => ValidationReport(json, profiles.map(_ -> status).toMap))
   private def result[A](program: A < (Abort[PdfError] & Sync)): Either[PdfError, A] =
@@ -37,7 +37,7 @@ object PdfArrowSpec extends ZIOSpecDefault:
     PdfArrow.recipe("Arrow regression", arrow).flatMap(PdfPipeline.check).fold(e => throw AssertionError(e.toString), identity)
   private def run[B](arrow: PdfArrow[Unit, B], services: Services = new Services): PdfPipeline.Run =
     result(PdfPipeline.run(compile(arrow), Map("body" -> document), services)).fold(e => throw AssertionError(e.message), identity)
-  private def files(run: PdfPipeline.Run): Vector[Vector[Byte]] = run.outputs.collect { case (_, Value.File(bytes)) => bytes }
+  private def files(run: PdfPipeline.Run): Vector[Vector[Byte]] = run.outputs.collect { case (_, Value.File(file)) => file.bytes }
 
   def spec = suite("Typed PDF arrows")(
     test("archive conversion validates the exact converted bytes and fails closed") {

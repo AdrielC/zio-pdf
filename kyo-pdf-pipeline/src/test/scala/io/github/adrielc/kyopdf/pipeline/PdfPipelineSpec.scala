@@ -26,7 +26,7 @@ object PdfPipelineSpec extends ZIOSpecDefault:
     var stamps = 0
     def stamp(document: PdfDocument, text: String, placement: String): PdfDocument < (Abort[PdfError] & Sync) = Sync.defer { stamps += 1; document }
     def number(document: PdfDocument, start: Int, style: String, prefix: String): PdfDocument < (Abort[PdfError] & Sync) = document
-    def validate(bytes: Vector[Byte], profiles: Vector[String]): String < (Abort[PdfError] & Sync) = Sync.defer { validations :+= bytes; "{}" }
+    override def validate(bytes: Vector[Byte], profiles: Vector[String]): String < (Abort[PdfError] & Sync) = Sync.defer { validations :+= bytes; "{}" }
   private val base = Recipe(1, "Synthetic recipe", Vector(Node("body", Op.Input("body")), Node("pdf", Op.Write, Vector("body"))), Vector("pdf"))
 
   def spec = suite("Data-defined PDF pipelines")(
@@ -58,7 +58,7 @@ object PdfPipelineSpec extends ZIOSpecDefault:
         Node("joined", Op.Assemble(), Vector("left", "right")), Node("pdf", Op.Write, Vector("joined"))), Vector("pdf"))
       val services = new ServicesStub
       val run = value(PdfPipeline.run(checked(recipe), Map("body" -> document), services))
-      val bytes = run.outputs.head._2.asInstanceOf[Value.File].bytes
+      val bytes = run.outputs.head._2.asInstanceOf[Value.File].value.bytes
       val decoded = value(ByteLimit.fromBytes(1024 * 1024).map(limit => PdfDocument.decode(bytes.toArray, limit)))
       assertTrue(services.stamps == 1, run.executed.distinct == run.executed, value(PdfPages.pageRefs(decoded)).length == 2)
     },
@@ -152,7 +152,7 @@ object PdfPipelineSpec extends ZIOSpecDefault:
         Node("assembled", Op.Assemble(), Vector("marked", "marked")), Node("marked", Op.Stamp("DRAFT"), Vector("body")), Node("body", Op.Input("body"))), Vector("pdf", "checks2", "checks3"))
       val services = new ServicesStub
       val run = value(PdfPipeline.run(checked(recipe), Map("body" -> document), services))
-      val bytes = run.outputs.head._2.asInstanceOf[Value.File].bytes
+      val bytes = run.outputs.head._2.asInstanceOf[Value.File].value.bytes
       val decoded = value(ByteLimit.fromBytes(1024 * 1024).map(limit => PdfDocument.decode(bytes.toArray, limit)))
       assertTrue(services.stamps == 1, services.validations == Vector(bytes, bytes), run.executed.distinct == run.executed,
         value(PdfPages.pageRefs(decoded)).length == 2)

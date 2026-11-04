@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Replace pipeline byte-vector and string-receipt payloads with checked
+  `PdfFile`, parsed `ReportJson`, typed `PdfAProfile` verdicts, and validation or
+  inspection receipts bound to their exact file. This changes the Scala runtime
+  API while preserving recipe and tool JSON formats.
+- Bound writer output before rendering, including decimal expansion and sparse
+  xref tables. Count receipt-retained files in the live-value budget without
+  double-counting shared payloads.
+
 ## [0.5.0] — 2026-11-03
 
 - Publish `kyo-pdf-pipeline_native0.5_3` with the shared Policy API, JSON formats,

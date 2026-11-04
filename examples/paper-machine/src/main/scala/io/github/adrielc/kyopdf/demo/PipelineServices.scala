@@ -35,7 +35,7 @@ final class PipelineServices(profiles: Vector[String], originals: Vector[(PdfDoc
     PacketBuild.finish(document, PacketOptions(stamp = text, placement = placement))
   def number(document: PdfDocument, start: Int, style: String, prefix: String): PdfDocument < (Abort[PdfError] & Sync) =
     PacketBuild.finish(document, PacketOptions(numbered = true, start = start, style = style, prefix = prefix))
-  def validate(bytes: Vector[Byte], selected: Vector[String]): String < (Abort[PdfError] & Sync) =
+  override def validate(bytes: Vector[Byte], selected: Vector[String]): String < (Abort[PdfError] & Sync) =
     Abort.catching[Exception](error => PdfError.InvalidPdf(Option(error.getMessage).getOrElse("Validation could not finish")))(Sync.defer {
     val data = bytes.toArray
     val hash = PdfValidation.sha256(data)

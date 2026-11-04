@@ -359,11 +359,11 @@ object PaperMachine:
       evaluate(program)
         .flatMap { run =>
           val outputs = run.outputs.foldLeft[Either[String, Vector[String]]](Right(Vector.empty)) { case (acc, (id, value)) => acc.flatMap { found => value match
-            case Value.File(bytes) =>
+            case Value.File(file) =>
               val name = plan.recipe.name.replaceAll("[^A-Za-z0-9 _-]", "").trim.take(70)
-              admit(bytes.toArray, s"${if name.nonEmpty then name else "Pipeline"} - $id.pdf")
+              admit(file.bytes.toArray, s"${if name.nonEmpty then name else "Pipeline"} - $id.pdf")
                 .map(doc => found :+ s"{\"node\":${quote(id)},\"kind\":\"file\",\"document\":${report(doc)}}")
-            case Value.Receipt(receipt, _) => Right(found :+ s"{\"node\":${quote(id)},\"kind\":\"receipt\",\"report\":$receipt}")
+            case Value.Receipt(receipt) => Right(found :+ s"{\"node\":${quote(id)},\"kind\":\"receipt\",\"report\":${receipt.report.encoded}}")
             case _ => Left("A pipeline output must be a PDF file or validation receipt")
           }}
           val decisions = decisionsJson(run.decisions)

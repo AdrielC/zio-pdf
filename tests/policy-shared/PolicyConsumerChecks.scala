@@ -47,12 +47,12 @@ object PolicyConsumerChecks:
         throw AssertionError("Unexpected stamp")
       def number(doc: PdfDocument, start: Int, style: String, prefix: String): PdfDocument < (Abort[PdfError] & Sync) =
         throw AssertionError("Unexpected numbering")
-      def validate(bytes: Vector[Byte], profiles: Vector[String]): String < (Abort[PdfError] & Sync) =
+      override def validate(bytes: Vector[Byte], profiles: Vector[String]): String < (Abort[PdfError] & Sync) =
         throw AssertionError("Unexpected archival validation")
       override def preflightRules(bytes: Vector[Byte], rules: Policy.Checked): String < (Abort[PdfError] & Sync) =
         val findings = rules.run(Vector(Observation(Scope.Document, Map(Metric.FileBytes -> bytes.length.toLong))))
         assert(findings.map(_.status) == Vector("pass"))
-        "policy-passed"
+        """{"status":"policy-passed"}"""
     def execute(route: PdfArrow[Document, Document], expected: PdfPipeline.Outcome): Vector[Byte] =
       val recipe = PdfArrow.recipe("Policy consumer", input("body") >>> route >>> write >>>
         (id[File] &&& preflight(profile))).toOption.get
@@ -61,8 +61,8 @@ object PolicyConsumerChecks:
       assert(PdfPipelineModel.decode(PdfPipelineModel.encode(loaded)).toOption.get.recipe == recipe)
       val run = value(PdfPipeline.run(loaded, Map("body" -> document), services))
       assert(run.decisions.map(_.outcome) == Vector(expected))
-      assert(run.outputs.exists(_._2 == PdfPipeline.Value.Receipt("policy-passed")))
-      run.outputs.collectFirst { case (_, PdfPipeline.Value.File(bytes)) => bytes }.get
+      assert(run.outputs.exists { case (_, PdfPipeline.Value.Receipt(receipt)) => receipt.report.encoded == """{"status":"policy-passed"}"""; case _ => false })
+      run.outputs.collectFirst { case (_, PdfPipeline.Value.File(file)) => file.bytes }.get
     val stop = PdfArrow.stop[Document, Document]("Unselected branch executed")
     val output = execute(choose(pages(1, 1))(id[Document], stop, stop), PdfPipeline.Outcome.Yes)
     assert(execute(choose(pages(2, 3))(stop, id[Document], stop), PdfPipeline.Outcome.No) == output)

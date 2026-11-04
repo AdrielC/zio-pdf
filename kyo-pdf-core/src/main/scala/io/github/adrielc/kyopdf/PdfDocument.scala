@@ -255,6 +255,76 @@ object PdfPages:
 object PdfWriter:
   import PdfValue.*
 
+  /** Bound the encoded representation before rendering strings, streams or xref tables. */
+  def write(document: PdfDocument, limit: ByteLimit): Vector[Byte] < (Abort[PdfError] & Sync) =
+    sizeBound(document, math.min(limit.toLong, Int.MaxValue.toLong - 8)) match
+      case Left(error) => Abort.fail(error)
+      case Right(_) => write(document)
+
+  private def sizeBound(document: PdfDocument, maximum: Long): Either[PdfError, Unit] =
+    var size = 0L
+    var failure: Option[PdfError] = None
+    def add(amount: Long): Unit =
+      if failure.isEmpty then
+        if amount > maximum - size then failure = Some(PdfError.TooLarge(maximum, maximum + 1))
+        else size += amount
+    def count(value: PdfValue): Unit =
+      val todo = scala.collection.mutable.ArrayDeque(value -> 0)
+      while todo.nonEmpty && failure.isEmpty do
+        val (next, depth) = todo.removeLast()
+        if depth > 64 then failure = Some(PdfError.RetentionExceeded("PDF writer nesting exceeds 64 levels"))
+        else next match
+          case Null => add(4)
+          case Bool(v) => add(if v then 4 else 5)
+          case Number(v) =>
+            val raw = v.bigDecimal
+            if raw.signum == 0 then add(1)
+            else
+              // Normalizing an extreme negative scale can itself overflow.
+              // Its plain integer width is unchanged by stripping zeroes.
+              val decimal = if raw.scale <= 0 then raw else raw.stripTrailingZeros
+              val precision = decimal.precision.toLong
+              val scale = decimal.scale.toLong
+              val digits = if scale <= 0 then precision - scale else if scale >= precision then scale + 2 else precision + 1
+              add(digits + (if decimal.signum < 0 then 1 else 0))
+          case Name(v) =>
+            add(1)
+            v.foreach { c => add(if c.isWhitespace || "#/%()<>[]{}".contains(c) then 1 + math.max(2, Integer.toHexString(c.toInt).length) else 1) }
+          case Literal(bytes) =>
+            add(2)
+            bytes.foreach { byte =>
+              val c = (byte & 255).toChar
+              add(if c == '(' || c == ')' || c == '\\' || c == '\n' || c == '\r' || c == '\t' then 2
+                else if c < ' ' || c > '~' then 4 else 1)
+            }
+          case Hex(bytes) => add(2L + bytes.length.toLong * 2)
+          case Array(values) =>
+            add(2L + math.max(0, values.length - 1))
+            values.foreach(v => todo.append(v -> (depth + 1)))
+          case Dict(fields) =>
+            add(6L + math.max(0, fields.length - 1))
+            fields.foreach { f => add(2L + f.name.length); todo.append(f.value -> (depth + 1)) }
+          case Ref(ref) => add(ref.number.toString.length.toLong + ref.generation.toString.length + 3)
+    add(12L + document.version.length)
+    document.objects.foreach { obj =>
+      if failure.isEmpty then
+        if obj.index.number <= 0 || obj.index.number > Int.MaxValue || obj.index.generation < 0 || obj.index.generation > 65535 then
+          failure = Some(PdfError.InvalidPdf("PDF object number or generation is outside writer bounds"))
+        else
+          add(obj.index.number.toString.length.toLong + obj.index.generation.toString.length + 6)
+          obj.stream match
+            case None => count(obj.value); add(8)
+            case Some(bytes) => obj.value match
+              case d: Dict => count(d.updated("Length", Number(BigDecimal(bytes.length)))); add(26L + bytes.length)
+              case _ => failure = Some(PdfError.InvalidPdf("PDF stream object must contain a dictionary"))
+    }
+    val largest = document.objects.iterator.map(_.index.number).maxOption.getOrElse(0L)
+    val xrefDigits = size.toString.length
+    add(28L + (largest + 1).toString.length + largest * 20)
+    count(PdfTrailer.forRewrite(document.trailer).updated("Size", Number(BigDecimal(largest + 1))))
+    add(26L + xrefDigits)
+    failure.toLeft(())
+
   def write(document: PdfDocument): Vector[Byte] < (Abort[PdfError] & Sync) =
     if document.encrypted then Abort.fail(PdfError.InvalidPdf("Encrypted PDFs cannot be written"))
     else Abort.catching[Throwable](error => PdfError.InvalidPdf(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))) {
