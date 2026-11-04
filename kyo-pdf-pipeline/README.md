@@ -136,14 +136,26 @@ The adapter is example code; the core pipeline module stays independent of Volga
 sbt 'kyoPdfPipeline/testFull'
 ```
 
-The same pipeline sources and tests run on Scala Native 0.5.12. The opt-in
-build takes ZIO Blocks 0.0.56 Native jars built with Scala 3.8.4. Put the
-Schema, Chunk, TypeId, Maybe and Markdown jars in a directory outside the
-checkout and pass its path to sbt.
+The same Policy and pipeline sources and tests run on Scala Native 0.5.12.
+Use the published Native module, which brings its public-source Schema runtime
+and Kyo core as transitive dependencies:
+
+```scala
+libraryDependencies += "io.github.adrielc" % "kyo-pdf-pipeline_native0.5_3" % "0.5.0"
+```
 
 ```sh
-sbt --server -Dkyo.pdf.native.schemaJars="$SCHEMA_NATIVE_JARS" 'kyoPdfPipelineNative/testFull'
+sbt 'kyoPdfPipelineNative/testFull'
+bash scripts/verify-native-policy-consumer.sh
 ```
+
+The Native runtime is built from [pinned public ZIO Blocks sources](../modules/zio-blocks-native/README.md).
+There are no supplied-JAR settings or repository overrides. Consumers do not need
+`-experimental`. Compile-time nominal schema derivation, SchemaExpr conditions,
+JSON Schema export, recipe loading, and Policy execution work on Native.
+JVM reflection is unavailable. Artwork, PDF/A conversion and archival validation
+still require an appropriate `Services` interpreter; the Paper Machine server
+and its PDFBox/veraPDF implementation run on JVM.
 
 ## Author recipes with a model
 

@@ -1,0 +1,9 @@
+This distribution includes source from ZIO Blocks v0.0.56.
+Copyright 2024-2026 John A. De Goes and the ZIO Contributors.
+Licensed under the Apache License, Version 2.0.
+Public source: https://github.com/zio/zio-blocks
+Pinned commit: b4523963f2981c15f15d0afa05b33a1ff0cf38a9
+
+Native platform adaptations are maintained with Kyo PDF.
+UPSTREAM.json records the original files and checksums, and the checksums
+of adapted files. README.md describes the platform adaptations and limits.

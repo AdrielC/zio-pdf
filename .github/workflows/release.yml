@@ -26,8 +26,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Install PDF validators and Native build dependencies
-        run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils clang libexpat1-dev zlib1g-dev
+      - name: Install PDF validators
+        run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils
       - uses: coursier/cache-action@95e5b1029b6b86e7bac033ee44a0697d8a527d2d # v8.1.1
       - name: Install sbt
         run: |
@@ -49,12 +49,36 @@ jobs:
         run: |
           bash scripts/verify-external-consumer.sh
           bash scripts/verify-policy-consumer.sh
-      - name: Test and consume the Scala Native package
-        run: |
-          sbt --server -J-Xms256m -J-Xmx2g -Dsbt.server.autostart=false -batch kyoPdfNative/testFull
-          bash scripts/verify-native-consumer.sh
       - name: Validate generated PDF independently
         run: bash scripts/verify-generated-pdf.sh
+
+  native:
+    name: Scala Native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libexpat1-dev zlib1g-dev qpdf poppler-utils
+      - name: Install sbt
+        run: |
+          if ! command -v sbt >/dev/null 2>&1; then
+            curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > /usr/local/bin/cs
+            chmod +x /usr/local/bin/cs
+            cs install sbt
+          fi
+          echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
+      - name: Test and consume the Scala Native package
+        run: |
+          python3 scripts/verify-native-provenance.py
+          sbt --server -J-Xms128m -J-Xmx3g -J-XX:ActiveProcessorCount=4 -Dsbt.server.autostart=false -batch ";kyoPdfNative/testFull;blocksSchemaNative/testFull;kyoPdfPipelineNative/testFull"
+          bash scripts/verify-native-consumer.sh
+          bash scripts/verify-native-policy-consumer.sh
 
   gotenberg-tool:
     name: Gotenberg and policy tools
@@ -92,14 +116,14 @@ jobs:
             bash scripts/verify-gotenberg-tool.sh
 
   maven-central:
-    needs: [validate, gotenberg-tool]
+    needs: [validate, native, gotenberg-tool]
     runs-on: ubuntu-latest
     env:
       PGP_SECRET: ${{ secrets.PGP_SECRET }}
       PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-      CI_RELEASE: ';root/publishSigned;scalaJs/publishSigned;kyoPdf/publishSigned;kyoPdfZio/publishSigned;kyoPdfPipeline/publishSigned;kyoPdfNative/publishSigned'
+      CI_RELEASE: ';root/publishSigned;scalaJs/publishSigned;kyoPdf/publishSigned;kyoPdfZio/publishSigned;kyoPdfPipeline/publishSigned;kyoPdfNative/publishSigned;blocksChunkNative/publishSigned;blocksTypeIdNative/publishSigned;blocksMaybeNative/publishSigned;blocksMarkdownNative/publishSigned;blocksSchemaNative/publishSigned;kyoPdfPipelineNative/publishSigned'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,6 +134,8 @@ jobs:
           java-version: 21
           cache: sbt
       - uses: coursier/cache-action@95e5b1029b6b86e7bac033ee44a0697d8a527d2d # v8.1.1
+      - name: Install Native consumer dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libexpat1-dev zlib1g-dev qpdf poppler-utils
       - name: Install sbt
         run: |
           if ! command -v sbt >/dev/null 2>&1; then
@@ -134,14 +160,14 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           for attempt in $(seq 1 30); do
             ready=true
-            for artifact in zio-pdf_3 zio-pdf_sjs1_3 kyo-pdf_3 kyo-pdf-zio_3 kyo-pdf-pipeline_3 kyo-pdf_native0.5_3; do
+            for artifact in zio-pdf_3 zio-pdf_sjs1_3 kyo-pdf_3 kyo-pdf-zio_3 kyo-pdf-pipeline_3 kyo-pdf_native0.5_3 kyo-pdf-blocks-chunk_native0.5_3 kyo-pdf-blocks-typeid_native0.5_3 kyo-pdf-blocks-maybe_native0.5_3 kyo-pdf-blocks-markdown_native0.5_3 kyo-pdf-blocks-schema_native0.5_3 kyo-pdf-pipeline_native0.5_3; do
               base="https://repo.maven.apache.org/maven2/io/github/adrielc/${artifact}/${version}/${artifact}-${version}"
               for suffix in .pom .jar -sources.jar -javadoc.jar; do
                 if ! curl -fsS --retry 2 "${base}${suffix}" >/dev/null; then ready=false; fi
               done
             done
             if [[ "$ready" == true ]]; then
-              echo "Verified all six ${version} artifacts on Maven Central."
+              echo "Verified all twelve ${version} artifacts on Maven Central."
               exit 0
             fi
             sleep 20
@@ -149,7 +175,9 @@ jobs:
           echo "Maven Central did not expose all ${version} artifacts within 10 minutes." >&2
           exit 1
       - name: Run the Policy API from Maven Central
-        run: bash scripts/verify-policy-consumer.sh --central "${GITHUB_REF_NAME#v}"
+        run: |
+          bash scripts/verify-policy-consumer.sh --central "${GITHUB_REF_NAME#v}"
+          bash scripts/verify-native-policy-consumer.sh --central "${GITHUB_REF_NAME#v}"
 
   github-release:
     needs: maven-central

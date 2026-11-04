@@ -17,17 +17,21 @@ libraryDependencies += "io.github.adrielc" %% "kyo-pdf-zio" % version // optiona
 libraryDependencies += "io.github.adrielc" %% "kyo-pdf-pipeline" % version // Policy and arrows
 ```
 
-Version 0.4.0 publishes all three JVM Kyo modules. For Scala Native 0.5 and
+Version 0.5.0 publishes all three JVM Kyo modules and Native Policy pipelines. For Scala Native 0.5 and
 Scala 3, use the Kyo core:
 
 ```scala
-libraryDependencies += "io.github.adrielc" % "kyo-pdf_native0.5_3" % "0.4.0"
+libraryDependencies += "io.github.adrielc" % "kyo-pdf_native0.5_3" % "0.5.0"
+// Policy API and serializable arrows; includes the Native core transitively:
+libraryDependencies += "io.github.adrielc" % "kyo-pdf-pipeline_native0.5_3" % "0.5.0"
 ```
 
 Native builds require a Scala Native toolchain, Expat, and zlib. On Ubuntu,
 install `clang libexpat1-dev zlib1g-dev`; macOS provides the libraries in its
 SDK. The Native core parses, rewrites, and reads PDF/A declarations. The studio
-server and independent PDF/A validator still run on the JVM.
+server and independent PDF/A validator still run on the JVM. Native pipelines
+use the same shared Policy and arrow sources, with a [public-source Schema
+runtime](modules/zio-blocks-native/README.md). No local JAR setup is required.
 
 The original `zio-pdf` implementation remains in this repository as a parity
 reference and compatibility implementation. It is not a dependency of the Kyo
@@ -115,17 +119,18 @@ That distinction makes the raw path suitable for very large uploads while keepin
 
 ## Project status
 
-Release `0.4.0` publishes the JVM Policy API and Kyo modules, the Native Kyo core,
-and the existing JVM and Scala.js APIs. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
+Release `0.5.0` publishes the JVM Policy API and Kyo modules, the Native Kyo core,
+and the existing JVM and Scala.js APIs, and Native Policy pipelines. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
 
 ```scala
-libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.4.0" // JVM
-libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.4.0" // Scala.js
+libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.5.0" // JVM
+libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.5.0" // Scala.js
 ```
 
 The release workflow publishes `kyo-pdf`, `kyo-pdf-zio`, and `kyo-pdf-pipeline`
 for JVM, `zio-pdf` for JVM and Scala.js, and the Scala Native Kyo PDF core.
-The Native pipeline remains an opt-in source build. Examples, benchmarks, the
+The Native Policy and pipeline module uses public-source Native Schema support
+artifacts published under the same organization and version. Examples, benchmarks, the
 browser application, and comparison benches are build-only projects.
 
 ## Quick start
@@ -529,8 +534,8 @@ Plain `git clone` is enough — no submodules.
 
 Tags matching `v*` require curated notes in `release-notes/<tag>.md`. The
 workflow tests the build, exercises Gotenberg tool calls, and runs external
-Policy and Native consumers before `sbt-ci-release` signs and uploads all six
-artifacts. It verifies every coordinate and runs the Policy consumer from
+Policy and Native consumers before `sbt-ci-release` signs and uploads all twelve
+artifacts. It verifies every coordinate and runs JVM and Native Policy consumers from
 Maven Central before creating the GitHub release.
 
 ## License
