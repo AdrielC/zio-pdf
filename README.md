@@ -17,13 +17,13 @@ libraryDependencies += "io.github.adrielc" %% "kyo-pdf-zio" % version // optiona
 libraryDependencies += "io.github.adrielc" %% "kyo-pdf-pipeline" % version // Policy and arrows
 ```
 
-Version 0.5.0 publishes all three JVM Kyo modules and Native Policy pipelines. For Scala Native 0.5 and
-Scala 3, use the Kyo core:
+Version 0.6.0 publishes all three JVM Kyo modules and Native Policy pipelines,
+including checked runtime results. For Scala Native 0.5 and Scala 3, use:
 
 ```scala
-libraryDependencies += "io.github.adrielc" % "kyo-pdf_native0.5_3" % "0.5.0"
+libraryDependencies += "io.github.adrielc" % "kyo-pdf_native0.5_3" % "0.6.0"
 // Policy API and serializable arrows; includes the Native core transitively:
-libraryDependencies += "io.github.adrielc" % "kyo-pdf-pipeline_native0.5_3" % "0.5.0"
+libraryDependencies += "io.github.adrielc" % "kyo-pdf-pipeline_native0.5_3" % "0.6.0"
 ```
 
 Native builds require a Scala Native toolchain, Expat, and zlib. On Ubuntu,
@@ -119,12 +119,17 @@ That distinction makes the raw path suitable for very large uploads while keepin
 
 ## Project status
 
-Release `0.5.0` publishes the JVM Policy API and Kyo modules, the Native Kyo core,
-and the existing JVM and Scala.js APIs, and Native Policy pipelines. The source, tests, [browser playground](https://adrielc.github.io/zio-pdf/), POM metadata, signed-release workflow, and independent-consumer check are public.
+Release `0.6.0` publishes the JVM Policy API and Kyo modules, the Native Kyo core
+and Policy pipelines, and the existing JVM and Scala.js APIs. Pipeline runtime
+results now use checked PDF payloads and file-bound receipts; Scala callers must
+recompile and follow the [migration notes](release-notes/v0.6.0.md). Saved recipe
+and tool JSON formats remain compatible. The source, tests,
+[browser playground](https://adrielc.github.io/zio-pdf/), POM metadata,
+signed-release workflow, and independent-consumer checks are public.
 
 ```scala
-libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.5.0" // JVM
-libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.5.0" // Scala.js
+libraryDependencies += "io.github.adrielc" %%  "zio-pdf" % "0.6.0" // JVM
+libraryDependencies += "io.github.adrielc" %%% "zio-pdf" % "0.6.0" // Scala.js
 ```
 
 The release workflow publishes `kyo-pdf`, `kyo-pdf-zio`, and `kyo-pdf-pipeline`
