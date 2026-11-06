@@ -4,9 +4,9 @@ import PdfPipeline.*
 
 /** Typed Scala authoring; the result is the same closed data graph as saved JSON. */
 final class RecipeBuilder:
-  sealed trait DocumentPort
-  sealed trait FilePort
-  sealed trait ReceiptPort
+  type DocumentPort = io.github.adrielc.kyopdf.PdfDocument
+  type FilePort = PdfFile
+  type ReceiptPort = PdfReceipt
   final class Wire[A] private[RecipeBuilder] (private[RecipeBuilder] val id: String, private[RecipeBuilder] val kind: Kind)
   private var nodes = Vector.empty[Node]
   private def node[A](op: Op, inputs: Vector[String]): Wire[A] =
@@ -32,7 +32,15 @@ final class RecipeBuilder:
     node(Op.Choose(Predicate.Declares3b, yes.kind), Vector(source.id, yes.id, no.id, unknown.id))
   def chooseValidation[A](source: Wire[ReceiptPort], profile: String)(passed: Wire[A], failed: Wire[A], unable: Wire[A]): Wire[A] =
     node(Op.Choose(Predicate.Validation(profile), passed.kind), Vector(source.id, passed.id, failed.id, unable.id))
-  private def version: Int = if nodes.exists(n => n.op.isInstanceOf[Op.Choose] || n.op.isInstanceOf[Op.Stop]) then 2 else 1
+  def registered[A, B, P](input: Wire[A], step: StepRegistry.Step[A, B, P], settings: P,
+      onError: StepRegistry.OnError = StepRegistry.OnError.Fail): Wire[B] =
+    node(Op.Registered(step.call(settings, onError)), Vector(input.id))
+  def registered2[A, B, C, P](left: Wire[A], right: Wire[B], step: StepRegistry.Step[(A, B), C, P], settings: P): Wire[C] =
+    node(Op.Registered(step.call(settings)), Vector(left.id, right.id))
+  def choosePolicy[A](source: Wire[PdfSteps.PolicyResult])(yes: Wire[A], no: Wire[A], unknown: Wire[A]): Wire[A] =
+    node(Op.Choose(Predicate.PolicyPassed, yes.kind), Vector(source.id, yes.id, no.id, unknown.id))
+  def outputs(name: String, values: Wire[?]*): Recipe = Recipe(version, name, nodes, values.toVector.map(_.id))
+  private def version: Int = if nodes.exists(_.op.isInstanceOf[Op.Registered]) then 4 else if nodes.exists(n => n.op.isInstanceOf[Op.Choose] || n.op.isInstanceOf[Op.Stop]) then 2 else 1
   def recipe(name: String, files: Vector[Wire[FilePort]], receipts: Vector[Wire[ReceiptPort]]): Recipe =
     Recipe(version, name, nodes, files.map(_.id) ++ receipts.map(_.id))
   def recipe(name: String, file: Wire[FilePort], receipts: Wire[ReceiptPort]*): Recipe =

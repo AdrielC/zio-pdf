@@ -14,6 +14,11 @@ object PipelineServices:
   val BusyMessage = "Another validation is running. Wait for it to finish."
 
 final class PipelineServices(profiles: Vector[String], originals: Vector[(PdfDocument, Array[Byte])] = Vector.empty) extends Services:
+  override lazy val semantic: io.github.adrielc.kyopdf.pipeline.SemanticBackend =
+    sys.env.get("KYO_PDF_SEMANTIC_PYTHON").map { python =>
+      new io.github.adrielc.kyopdf.pipeline.ProcessSemanticBackend(java.nio.file.Path.of(python),
+        java.nio.file.Path.of(sys.env.getOrElse("KYO_PDF_SEMANTIC_WORKER", "scripts/semantic-worker.py")))
+    }.getOrElse(io.github.adrielc.kyopdf.pipeline.SemanticBackend.unavailable)
   private val receipts = scala.collection.mutable.ArrayBuffer.empty[(String, Set[String], String)]
   def validationEvidence: Vector[String] = receipts.toVector.map(_._3)
   def validationPasses: Int = receipts.size

@@ -363,13 +363,15 @@ object PaperMachine:
               val name = plan.recipe.name.replaceAll("[^A-Za-z0-9 _-]", "").trim.take(70)
               admit(file.bytes.toArray, s"${if name.nonEmpty then name else "Pipeline"} - $id.pdf")
                 .map(doc => found :+ s"{\"node\":${quote(id)},\"kind\":\"file\",\"document\":${report(doc)}}")
+            case Value.Data(kind, data) => Right(found :+ s"""{"node":${quote(id)},"kind":"data","schema":${quote(kind.toString)},"value":${data.encoded}}""")
             case Value.Receipt(receipt) => Right(found :+ s"{\"node\":${quote(id)},\"kind\":\"receipt\",\"report\":${receipt.report.encoded}}")
             case _ => Left("A pipeline output must be a PDF file or validation receipt")
           }}
           val decisions = decisionsJson(run.decisions)
+          val flags = run.flags.map(flag => s"""{"node":${quote(flag.node)},"operation":${quote(flag.operation)},"code":${quote(flag.code.toString)},"message":${quote(flag.message)}}""").mkString("[", ",", "]")
           val validations = services.validationEvidence.mkString("[", ",", "]")
           val validationRuns = services.validationRuns.map((hash, profiles) => s"{\"sha256\":${quote(hash)},\"profiles\":${profiles.map(quote).mkString("[", ",", "]")}}").mkString("[", ",", "]")
-          outputs.map(values => s"{\"recipeVersion\":${plan.recipe.version},\"inputs\":$inputHashes,\"validationEvidence\":$validations,\"validationRuns\":$validationRuns,\"decisions\":$decisions,\"skipped\":${run.skipped.map(quote).mkString("[", ",", "]")},\"validatorPasses\":${services.validationPasses},\"recipe\":${PipelineJson.encode(plan.recipe)},\"executed\":${run.executed.map(quote).mkString("[", ",", "]")},\"outputs\":${values.mkString("[", ",", "]")}}")
+          outputs.map(values => s"{\"flags\":$flags,\"sourcePasses\":${run.sourcePasses},\"recipeVersion\":${plan.recipe.version},\"inputs\":$inputHashes,\"validationEvidence\":$validations,\"validationRuns\":$validationRuns,\"decisions\":$decisions,\"skipped\":${run.skipped.map(quote).mkString("[", ",", "]")},\"validatorPasses\":${services.validationPasses},\"recipe\":${PipelineJson.encode(plan.recipe)},\"executed\":${run.executed.map(quote).mkString("[", ",", "]")},\"outputs\":${values.mkString("[", ",", "]")}}")
         }.fold(message =>
           val executed = observedNodes.map(quote).mkString("[", ",", "]")
           val validations = services.validationEvidence.mkString("[", ",", "]")

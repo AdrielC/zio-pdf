@@ -1,0 +1,4 @@
+# Optional renderer, separately licensed AGPL/commercial. Not a core dependency.
+PyMuPDF==1.26.7
+# Independent test parser.
+pypdf==6.2.0

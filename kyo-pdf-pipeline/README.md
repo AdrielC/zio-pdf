@@ -4,6 +4,13 @@
 settings, input references and output references. The module uses Kyo PDF and ZIO
 Blocks Schema for JSON transport and page-count expressions.
 
+Recipe version 4 adds host-registered typed operations, schema-defined data ports,
+serializable filters and gates, policy branches, semantic editing, and bounded
+planning. See [registered workflows](../docs/registered-workflows.md) for the
+operation registry, redaction tradeoffs, backend configuration, and JVM/Native
+tests. [Court format research](../docs/court-format-survey.md) explains why PDF,
+editable orders, and digital exhibits need different preparation routes.
+
 ```scala
 import io.github.adrielc.kyopdf.pipeline.{PdfArrow, PdfPipelineJson}
 import PdfArrow.*
