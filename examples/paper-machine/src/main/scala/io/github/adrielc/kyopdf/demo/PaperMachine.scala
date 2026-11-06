@@ -22,6 +22,10 @@ object PaperMachine:
   private val MaxPages = 64
   private final case class Document(id: String, name: String, bytes: Array[Byte], value: PdfDocument, pages: Vector[ObjectRef], identification: PdfAIdentification, sha256: String)
   private final case class Reply(bytes: Array[Byte], mime: String = "application/json", status: Int = 200)
+  private final case class AuthoringErrors(issues: Vector[PdfPipeline.Issue]) derives zio.blocks.schema.Schema
+  private final case class AuthoringCheck(recipe: zio.blocks.schema.json.Json, order: Vector[String]) derives zio.blocks.schema.Schema
+  private lazy val authoringErrorsCodec = zio.blocks.schema.Schema[AuthoringErrors].derive(zio.blocks.schema.json.JsonCodecDeriver)
+  private lazy val authoringCheckCodec = zio.blocks.schema.Schema[AuthoringCheck].derive(zio.blocks.schema.json.JsonCodecDeriver)
   private val pipelineSlots = new java.util.concurrent.Semaphore(1)
   private val documents = mutable.LinkedHashMap.empty[String, Document]
   private val pipelineInputs = mutable.LinkedHashMap.empty[String, Document]
@@ -142,6 +146,27 @@ object PaperMachine:
           }
         }
 
+  private def authoring(exchange: HttpExchange): Reply =
+    def failed(issues: Vector[PdfPipeline.Issue]): Reply = json(authoringErrorsCodec.encodeToString(AuthoringErrors(issues)), 400)
+    val query = Option(exchange.getRequestURI.getRawQuery).getOrElse("")
+    val fields = query.split('&').toVector.filter(_.nonEmpty).map(_.split("=", 2).toVector)
+    if query.length > 4096 || fields.exists(_.size != 2) || fields.map(_.head).distinct.size != fields.size ||
+        !fields.forall(f => Set("operations", "format")(f.head)) then
+      failed(Vector(PdfPipeline.Issue("query", PdfPipeline.Code.Structure, "Supply operations and optional format")))
+    else
+      val options = fields.map(v => v.head -> URLDecoder.decode(v(1), UTF_8)).toMap
+      val format = options.getOrElse("format", "json")
+      if !Set("json", "toon")(format) then failed(Vector(PdfPipeline.Issue("format", PdfPipeline.Code.Structure, "Choose json or toon")))
+      else PdfPipelineModel.authoring(options.getOrElse("operations", "").split(',').filter(_.nonEmpty).toSet).fold(failed, profile =>
+        if exchange.getRequestMethod == "GET" then
+          if format == "toon" then Reply(profile.exportedToon.getBytes(UTF_8), "text/toon") else json(profile.exported.print)
+        else
+          val content = String(read(exchange, PipelineJson.MaxBytes), UTF_8)
+          val checked = if format == "toon" then profile.decodeToon(content) else profile.decode(content)
+          checked.fold(failed, plan => json(authoringCheckCodec.encodeToString(AuthoringCheck(
+            zio.blocks.schema.json.Json.parseUnsafe(PdfPipelineModel.encode(plan)), plan.order.map(_.id)))))
+      )
+
   private def route(exchange: HttpExchange): Reply =
     val path = exchange.getRequestURI.getPath
     val method = exchange.getRequestMethod
@@ -155,6 +180,7 @@ object PaperMachine:
       Using.resource(getClass.getResourceAsStream(s"/paper-machine/$asset")) { stream =>
         Reply(stream.readNBytes(256 * 1024), mime)
       }
+    else if path == "/api/pipelines/authoring" && method == "GET" || path == "/api/pipelines/authoring/check" && method == "POST" then authoring(exchange)
     else if path == "/api/policies/schema" && method == "GET" then json(Policy.jsonSchema.print)
     else if path == "/api/policies/example" && method == "GET" then
       json(Policy.encode(CourtProfile.CaliforniaSecondDistrictPetition.rules))

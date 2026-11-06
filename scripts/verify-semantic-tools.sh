@@ -38,6 +38,8 @@ if [[ "$platform" == jvm ]]; then
   if [[ -z "$studio_url" ]]; then echo 'Studio did not become ready' >&2; exit 1; fi
   "$python" examples/paper-machine/test_pipelines.py "$studio_url" \
     PipelineTest.test_registered_redaction_and_ocr_through_actual_tool \
+    PipelineTest.test_toon_context_accepts_json_recipe_and_runs_named_branches \
+    PipelineTest.test_registered_packet_cover_and_contents_through_tool \
     PipelineTest.test_mcp_tool_returns_pdf_and_named_branch_decision \
     PipelineTest.test_strict_json_and_structural_limits
 fi

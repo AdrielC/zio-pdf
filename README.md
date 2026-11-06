@@ -98,6 +98,12 @@ paths and explicit stop reasons. Shared steps execute once, unselected branches
 are skipped, and decision traces explain the path through the graph. Validation
 receipts identify the exact written bytes.
 
+PDF packets can use [live or staged single-pass stitching](docs/pdf-packets.md),
+with a generated cover, clickable table of contents and section bookmarks.
+The shared Kyo engine runs on JVM and Native; the ZIO adapter uses idiomatic ZIO
+streams and file sinks. Registered `pdf.packet-2`, `pdf.packet-3` and `pdf.packet-4`
+operations compose with the existing typed, serializable arrows.
+
 ### Kyo package migration
 
 The Kyo core now uses `io.github.adrielc.kyopdf` and its adapter uses

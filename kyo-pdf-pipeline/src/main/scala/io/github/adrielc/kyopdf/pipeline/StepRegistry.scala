@@ -3,8 +3,8 @@ package io.github.adrielc.kyopdf.pipeline
 import io.github.adrielc.kyopdf.*
 import io.github.adrielc.scan.Scan
 import kyo.*
-import zio.blocks.schema.{Schema as BSchema}
-import zio.blocks.schema.json.{Json, JsonCodecDeriver}
+import zio.blocks.schema.{Schema as BSchema, DynamicValue}
+import zio.blocks.schema.json.{Json, JsonCodecDeriver, JsonSchema, SchemaType, JsonSchemaType}
 import PdfPipeline.{Kind, Value, Code, Issue}
 
 /** Versioned, typed operations. Recipes carry identifiers and data; executors
@@ -30,13 +30,18 @@ object StepRegistry:
   final class DataSchema[A](val id: String, val version: Int, val schema: BSchema[A]):
     require(id.matches("[a-z][a-z0-9.-]{0,63}") && version >= 1)
     private lazy val codec = schema.derive(JsonCodecDeriver.withRejectExtraFields(true))
+    private lazy val validator = schema.toDynamicSchema
     val kind: Kind = Kind.Data(id, version)
     lazy val jsonSchema: Json = StepSchema.exported(schema, s"${id}_v$version")
     def encode(value: A): String = codec.encodeToString(value)
     def decode(json: String): Either[Error, A] =
       if json.length > MaxSettingsChars then Left(Error(ErrorCode.Limit, "Step data exceeds 64 KiB"))
       else ReportJson.parse(json).left.map(_ => Error(ErrorCode.InvalidInput, "Expected bounded object data")).flatMap { _ =>
-        codec.decode(json).left.map(e => Error(ErrorCode.InvalidInput, e.toString.take(300)))
+        codec.decode(json).left.map(e => Error(ErrorCode.InvalidInput, e.toString.take(300))).flatMap { value =>
+          validator.check(schema.toDynamicValue(value)) match
+            case Some(error) => Left(Error(ErrorCode.InvalidInput, error.message.take(300)))
+            case None => Right(value)
+        }
       }
 
   sealed abstract class Port[A](val kinds: Vector[Kind], val schemas: Vector[Json]):
@@ -47,12 +52,14 @@ object StepRegistry:
     val unit: Port[Unit] = new Port[Unit](Vector.empty, Vector.empty):
       def read(values: Vector[Value]) = if values.isEmpty then Right(()) else wrong
       def write(value: Unit) = Right(Vector.empty)
-    val file: Port[PdfFile] = new Port[PdfFile](Vector(Kind.File), Vector(Json.Object("type" -> Json.String("string"), "format" -> Json.String("pdf-file-reference"), "contentMediaType" -> Json.String("application/pdf")))):
+    val file: Port[PdfFile] = new Port[PdfFile](Vector(Kind.File), Vector(JsonSchema.Object(
+      `type` = Some(SchemaType.Single(JsonSchemaType.String)), format = Some("pdf-file-reference"), contentMediaType = Some("application/pdf")).toJson)):
       def read(values: Vector[Value]) = values match
         case Vector(Value.File(file)) => Right(file)
         case _ => wrong
       def write(value: PdfFile) = Right(Vector(Value.File(value)))
-    val document: Port[PdfDocument] = new Port[PdfDocument](Vector(Kind.Document), Vector(Json.Object("type" -> Json.String("string"), "format" -> Json.String("pdf-document-reference")))):
+    val document: Port[PdfDocument] = new Port[PdfDocument](Vector(Kind.Document), Vector(JsonSchema.Object(
+      `type` = Some(SchemaType.Single(JsonSchemaType.String)), format = Some("pdf-document-reference")).toJson)):
       def read(values: Vector[Value]) = values match
         case Vector(Value.Document(doc)) => Right(doc)
         case _ => wrong
@@ -88,16 +95,24 @@ object StepRegistry:
     def output: Kind
     def access: Access
     def capabilities: Set[Capability]
+    def description: String
     def descriptor: Json
     def check(settings: String): Vector[Issue]
+    def resolve(settings: DynamicValue, onError: OnError): Either[Error, Call]
     private[pipeline] def execute(values: Vector[Value], settings: String, context: Context): Value < (Abort[Error] & Sync)
     private[pipeline] def probe(settings: String): Option[Scan[Byte, Value]]
+
+  private final case class Descriptor(operation: String, version: Int, description: String, parameters: Json,
+      inputs: Vector[Json], output: Json, access: String, capabilities: Vector[String], examples: Vector[Json]) derives BSchema
+  private final case class Catalog(operations: Vector[Json]) derives BSchema
+  private lazy val descriptorCodec = BSchema[Descriptor].derive(JsonCodecDeriver)
+  private lazy val catalogCodec = BSchema[Catalog].derive(JsonCodecDeriver)
 
   /** One output per node; products are represented by typed data schemas. */
   final class Step[A, B, P](val id: String, val version: Int, val in: Port[A], val out: Port[B],
       val parameters: DataSchema[P], val examples: Vector[P], val access: Access,
       val capabilities: Set[Capability], validate: P => Vector[Issue] = (_: P) => Vector.empty,
-      scan: Option[P => Scan[Byte, B]] = None)(
+      scan: Option[P => Scan[Byte, B]] = None, val description: String = "")(
       run: (A, P, Context) => B < (Abort[Error] & Sync)) extends Entry:
     require(out.kinds.length == 1 && in.kinds.length <= 4 && examples.nonEmpty)
     require(scan.isEmpty || (in.kinds == Vector(Kind.File) && access == Access.Stream &&
@@ -106,16 +121,14 @@ object StepRegistry:
     val output = out.kinds.head
     def call(settings: P, onError: OnError = OnError.Fail): Call =
       Call(id, version, parameters.encode(settings), inputs, output, onError)
-    def descriptor: Json = Json.Object(
-      "operation" -> Json.String(id), "version" -> Json.Number(version),
-      "parameters" -> parameters.jsonSchema,
-      "inputs" -> Json.Array(in.schemas*), "output" -> out.schemas.head,
-      "access" -> Json.String(access.toString),
-      "capabilities" -> Json.Array(capabilities.toVector.sortBy(_.ordinal).map(c => Json.String(c.toString))*),
-      "examples" -> Json.Array(examples.map(p => Json.parseUnsafe(parameters.encode(p)))*))
+    def descriptor: Json = Json.parseUnsafe(descriptorCodec.encodeToString(Descriptor(id, version, description,
+      parameters.jsonSchema, in.schemas, out.schemas.head, access.toString, capabilities.toVector.sortBy(_.ordinal).map(_.toString),
+      examples.map(p => Json.parseUnsafe(parameters.encode(p))))))
     def check(settings: String): Vector[Issue] = parameters.decode(settings) match
       case Left(error) => Vector(Issue("settings", Code.Setting, error.message))
       case Right(value) => validate(value)
+    def resolve(settings: DynamicValue, onError: OnError): Either[Error, Call] =
+      parameters.decode(settings.toJson.print).map(value => call(value, onError))
     private def get[T](value: Either[Error, T]): T < Abort[Error] = value.fold(Abort.fail, identity)
     private[pipeline] def execute(values: Vector[Value], settings: String, context: Context): Value < (Abort[Error] & Sync) =
       get(in.read(values)).map { input => get(parameters.decode(settings)).map { params =>
@@ -128,7 +141,8 @@ object StepRegistry:
   final class Registry private[StepRegistry] (val entries: Vector[Entry]):
     private val indexed = entries.map(e => (e.id -> e.version) -> e).toMap
     def find(id: String, version: Int): Option[Entry] = indexed.get(id -> version)
-    def exported: Json = StepSchema.hoist(Json.Object("operations" -> Json.Array(entries.map(_.descriptor)*)))
+    def versions(id: String): Vector[Entry] = entries.filter(_.id == id).sortBy(_.version)
+    def exported: Json = Json.parseUnsafe(catalogCodec.encodeToString(Catalog(entries.map(_.descriptor))))
     def add(entry: Entry): Either[Error, Registry] =
       if entries.size >= 256 then Left(Error(ErrorCode.Limit, "Registry has at most 256 operations"))
       else if indexed.contains(entry.id -> entry.version) then Left(Error(ErrorCode.InvalidInput, "Duplicate operation/version"))
@@ -150,12 +164,12 @@ object StepRegistry:
           val group = context.groups.getOrElse(node, Vector(node -> call))
           val probes = group.map { (id, c) => find(c.operation, c.version).get.probe(c.settings).get.map(id -> _) }
           val fused = probes.reduceLeft((a, b) => a.broadcast(b).map(_.fold(identity, identity)))
-          val file = values.head.asInstanceOf[Value.File].value
-          fused.compile() match
+          val file = getFile(values)
+          file.map { file => fused.compile() match
             case Left(_) => Abort.fail(Error(ErrorCode.Limit, "Fused scan exceeds execution limits"))
             case Right(plan) => Sync.defer {
               val runner = plan.open((pair: (String, Value)) => context.scans(pair._1) = pair._2)
-              SyncResource.ensure(Sync.defer(runner.close())) {
+              SyncResource.ensure[Error](Sync.defer(runner.close())) {
                 context.sourcePasses += 1
                 val fed = runner.feed { emit =>
                   val source = file.bytes.iterator
@@ -165,6 +179,7 @@ object StepRegistry:
                 else context.scans.remove(node).fold[Value < Abort[Error]](Abort.fail(Error(ErrorCode.Backend, "Probe emitted no result")))(identity)
               }
             }
+          }
         case None => entry.execute(values, call.settings, context)
       Abort.run[Error](work).map {
         case Result.Success(value) => value
@@ -175,6 +190,10 @@ object StepRegistry:
         case Result.Failure(error) => Abort.fail(PdfError.OperationFailed(node, call.operation, error.copy(message = error.message.take(300))))
         case Result.Panic(error) => Abort.fail(PdfError.OperationFailed(node, call.operation, Error(ErrorCode.Backend, s"Step defect: ${error.getClass.getSimpleName}")))
       }
+
+    private def getFile(values: Vector[Value]): PdfFile < Abort[Error] = values match
+      case Vector(Value.File(file)) => file
+      case _ => Abort.fail(Error(ErrorCode.InvalidInput, "A byte scan requires one File input"))
 
   def literal[A](id: String, schema: DataSchema[A], example: A): Step[Unit, A, A] =
     new Step(id, 1, Port.unit, Port.data(schema), schema, Vector(example), Access.Document,

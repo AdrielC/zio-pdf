@@ -123,7 +123,7 @@ jobs:
       PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-      CI_RELEASE: ';root/publishSigned;scalaJs/publishSigned;kyoPdf/publishSigned;kyoPdfZio/publishSigned;kyoPdfFs2/publishSigned;kyoPdfFs2Native/publishSigned;kyoPdfPipeline/publishSigned;kyoPdfNative/publishSigned;blocksChunkNative/publishSigned;blocksTypeIdNative/publishSigned;blocksMaybeNative/publishSigned;blocksMarkdownNative/publishSigned;blocksSchemaNative/publishSigned;kyoPdfPipelineNative/publishSigned'
+      CI_RELEASE: ';root/publishSigned;scalaJs/publishSigned;kyoPdf/publishSigned;kyoPdfZio/publishSigned;kyoPdfFs2/publishSigned;kyoPdfFs2Native/publishSigned;blocksToon/publishSigned;kyoPdfPipeline/publishSigned;kyoPdfNative/publishSigned;blocksChunkNative/publishSigned;blocksTypeIdNative/publishSigned;blocksMaybeNative/publishSigned;blocksMarkdownNative/publishSigned;blocksSchemaNative/publishSigned;blocksToonNative/publishSigned;kyoPdfPipelineNative/publishSigned'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
