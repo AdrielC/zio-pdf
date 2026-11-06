@@ -134,6 +134,41 @@ class PipelineTest(unittest.TestCase):
                          f"nodes[{recipe['nodes'].index(choose)}].yes")
         self.assertFalse(any(item['type'] == 'resource_link' for item in rejected['content']))
 
+    @unittest.skipUnless(os.environ.get('KYO_PDF_SEMANTIC_PYTHON'), 'requires local semantic worker')
+    def test_registered_redaction_and_ocr_through_actual_tool(self):
+        source = Path(__file__).resolve().parents[2] / 'target/semantic-fixtures/source.pdf'
+        status, data = request('/api/documents', raw=source.read_bytes())
+        self.assertEqual(status, 200, data)
+        uploaded = json.loads(data)
+        def step(node_id, operation, inputs, input_kinds, output_kind, settings):
+            return {'id': node_id, 'op': 'registered', 'inputs': inputs, 'call': {
+                'operation': operation, 'version': 1, 'inputs': input_kinds,
+                'output': output_kind, 'settings': settings}}
+        selection = {'Data': {'schema': 'pdf.selection', 'version': 1}}
+        plan = {'Data': {'schema': 'pdf.redaction-plan', 'version': 1}}
+        recipe = {'version': 4, 'name': 'Synthetic semantic packet', 'nodes': [
+            {'id': 'body', 'op': 'input', 'slot': 'body', 'inputs': []},
+            {'id': 'pdf', 'op': 'write', 'inputs': ['body']},
+            step('select', 'pdf.select-content', ['pdf'], ['File'], selection,
+                 {'regions': [{'page': 1, 'x': 18, 'y': 18, 'width': 220, 'height': 47}]}),
+            step('plan', 'pdf.plan-redaction', ['select'], [selection], plan, {}),
+            step('redact', 'pdf.redact', ['pdf', 'plan'], ['File', plan], 'File', {}),
+            step('ocr', 'pdf.ocr', ['redact'], ['File'], 'File', {})], 'outputs': ['ocr']}
+        checked = self.rpc('tools/call', {'name': 'check_pdf_pipeline', 'arguments': {'recipe': recipe}})
+        self.assertFalse(checked['isError'], checked)
+        result = self.rpc('tools/call', {'name': 'run_pdf_pipeline', 'arguments': {
+            'recipe': recipe, 'files': {'body': uploaded['id']}}})
+        self.assertFalse(result['isError'], result)
+        payload = result['structuredContent']
+        self.assertEqual(payload['flags'], [])
+        output = payload['outputs'][0]['document']
+        text = self.output_text(output)
+        self.assertIn('KEEP VISIBLE', text)
+        self.assertNotIn('SECRET42', text)
+        self.assertEqual(payload['executed'][-2:], ['redact', 'ocr'])
+        link, = [item for item in result['content'] if item['type'] == 'resource_link']
+        self.assertEqual(link['uri'], BASE + '/api/documents/' + output['id'] + '/file')
+
     def test_packet_routes_numbered_unnumbered_and_ambiguous_bodies(self):
         def invoke(name, recipe, files):
             return self.rpc('tools/call', {'name': name, 'arguments': {'recipe': recipe, 'files': files}})

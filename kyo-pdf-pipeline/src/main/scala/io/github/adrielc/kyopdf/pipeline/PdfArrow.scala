@@ -18,12 +18,12 @@ sealed abstract class PdfArrow[A, B] private[PdfArrow] (
   final def named(name: String): PdfArrow[A, B] = Named(this, name)
 
 object PdfArrow:
-  sealed trait Document
-  sealed trait File
-  sealed trait Receipt
+  type Document = io.github.adrielc.kyopdf.PdfDocument
+  type File = PdfFile
+  type Receipt = PdfReceipt
 
   /** Closed evidence for scalar ports, the tensor unit, and products of ports. */
-  sealed abstract class Ports[A] private[PdfArrow] (val kinds: Vector[Kind])
+  sealed abstract class Ports[A] private[pipeline] (val kinds: Vector[Kind])
   sealed abstract class Scalar[A] private[PdfArrow] (kind: Kind) extends Ports[A](Vector(kind))
   object Ports:
     given document: Scalar[Document] = new Scalar[Document](Kind.Document) {}
@@ -50,6 +50,7 @@ object PdfArrow:
   def pages(min: Int, max: Int): Condition[Document] = new Condition(id[Document], Predicate.PageCount(min, max))
   val hasPageNumbers: Condition[Document] = new Condition(id[Document], Predicate.HasPageNumbers)
   val declares3b: Condition[Document] = new Condition(id[Document], Predicate.Declares3b)
+  val policyPassed: Condition[PdfSteps.PolicyResult] = new Condition(dataIdentity(PdfSteps.policyResult), Predicate.PolicyPassed)
   def verified(profile: String): Condition[Receipt] = new Condition(id[Receipt], Predicate.Validation(profile))
   def choose[A, B: Scalar](condition: Condition[A])(yes: PdfArrow[A, B], no: PdfArrow[A, B], unknown: PdfArrow[A, B]): PdfArrow[A, B] =
     Branch(condition, yes, no, unknown)
@@ -99,8 +100,19 @@ object PdfArrow:
   def assemble3(catalog: Int = 0): PdfArrow[((Document, Document), Document), Document] = step(Op.Assemble(catalog), "assembled")
   def assemble4(catalog: Int = 0): PdfArrow[(((Document, Document), Document), Document), Document] = step(Op.Assemble(catalog), "assembled")
 
+  /** Host-registered typed operations participate in ordinary arrow wiring. */
+  def registered[A, B, P](operation: StepRegistry.Step[A, B, P], settings: P,
+      onError: StepRegistry.OnError = StepRegistry.OnError.Fail): PdfArrow[A, B] =
+    val in = new Ports[A](operation.inputs) {}
+    val out = new Ports[B](Vector(operation.output)) {}
+    Primitive(in, out, Op.Registered(operation.call(settings, onError)), operation.id.replace('.', '-').take(43))
+  def dataPort[A](schema: StepRegistry.DataSchema[A]): Scalar[A] = new Scalar[A](schema.kind) {}
+  def dataIdentity[A](schema: StepRegistry.DataSchema[A]): PdfArrow[A, A] =
+    val ports = new Ports[A](Vector(schema.kind)) {}
+    Wiring(ports, ports, Vector(0))
+
   /** Compile a closed arrow into portable data. No operation IDs are needed to compose arrows. */
-  def recipe[B](name: String, arrow: PdfArrow[Unit, B]): Either[Vector[Issue], Recipe] =
+  def recipe[B](name: String, arrow: PdfArrow[Unit, B], registry: StepRegistry.Registry = StepRegistry.standard): Either[Vector[Issue], Recipe] =
     val nodes = scala.collection.mutable.ArrayBuffer.empty[Node]
     val allocated = scala.collection.mutable.Set.empty[String]
     def add(op: Op, inputs: Vector[String], preferred: String): String =
@@ -136,6 +148,6 @@ object PdfArrow:
     val outputs = roots.zip(arrow.codomain.kinds).map { (id, kind) =>
       if seenOutputs.add(id) then id else add(Op.Keep(0, Vector(kind)), Vector(id), "output")
     }
-    val version = if nodes.exists(n => n.op.isInstanceOf[Op.Keep] || n.op.isInstanceOf[Op.StopAfter]) then 3
+    val version = if nodes.exists(_.op.isInstanceOf[Op.Registered]) then 4 else if nodes.exists(n => n.op.isInstanceOf[Op.Keep] || n.op.isInstanceOf[Op.StopAfter]) then 3
       else if nodes.exists(n => n.op.isInstanceOf[Op.Choose] || n.op.isInstanceOf[Op.Stop]) then 2 else 1
-    PdfPipeline.check(Recipe(version, name, nodes.toVector, outputs)).map(_.recipe)
+    PdfPipeline.check(Recipe(version, name, nodes.toVector, outputs), registry).map(_.recipe)

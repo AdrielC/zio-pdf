@@ -14,6 +14,7 @@ val scodecCoreVersion          = "2.3.3"
 val scodecBitsVersion          = "1.2.5"
 val scalaJsDomVersion          = "2.8.1"
 val scalaJavaTimeVersion       = "2.7.0"
+val scalaNativeCryptoVersion   = "0.3.0"
 val kyoVersion                 = "1.0.0-RC4"
 val scanFs2Version             = "3.14.0"
 
@@ -316,6 +317,7 @@ lazy val kyoPdfPipelineNative = (project in file("kyo-pdf-pipeline-native"))
     Test / unmanagedSourceDirectories += baseDirectory.value / "src" / "test" / "scala",
     libraryDependencies ++= List(
       "io.github.cquiroz" % "scala-java-time_native0.5_3" % scalaJavaTimeVersion,
+      "com.github.lolgab" % "scala-native-crypto_native0.5_3" % scalaNativeCryptoVersion,
       "dev.zio" % "zio-test_native0.5_3" % zioVersion % Test,
       "dev.zio" % "zio-test-sbt_native0.5_3" % zioVersion % Test
     ),

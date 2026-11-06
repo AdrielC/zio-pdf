@@ -8,6 +8,7 @@ import zio.blocks.schema.{DynamicOptic, Schema as BlocksSchema, SchemaExpr}
 object PdfPipeline:
   enum Kind derives Schema:
     case Document, File, Receipt
+    case Data(schema: String, version: Int)
 
   enum Outcome derives Schema:
     case Yes, No, Unknown
@@ -18,8 +19,10 @@ object PdfPipeline:
     case Declares3b
     case HasPageNumbers
     case Validation(profile: String)
+    case PolicyPassed
     def input: Kind = this match
       case Validation(_) => Kind.Receipt
+      case PolicyPassed => PdfSteps.policyResult.kind
       case _ => Kind.Document
 
   private final case class PageFacts(count: Int)
@@ -33,6 +36,7 @@ object PdfPipeline:
     lower.and(upper)
 
   enum Op derives Schema:
+    case Registered(call: StepRegistry.Call)
     case Input(slot: String)
     case Select(pages: Vector[Int])
     case Assemble(catalog: Int = 0)
@@ -50,6 +54,7 @@ object PdfPipeline:
     case StopAfter(message: String, kinds: Vector[Kind], kind: Kind = Kind.Document)
 
     def output: Kind = this match
+      case Registered(call) => call.output
       case Write | ConvertPdfA3b => Kind.File
       case Validate(_) | Preflight(_) | PreflightRules(_) => Kind.Receipt
       case Choose(_, kind) => kind
@@ -58,6 +63,7 @@ object PdfPipeline:
       case StopAfter(_, _, kind) => kind
       case _ => Kind.Document
     def input: Kind = this match
+      case Registered(call) => call.inputs.headOption.getOrElse(Kind.Document)
       case Choose(test, _) => test.input
       case Validate(_) | ConvertPdfA3b | Preflight(_) | PreflightRules(_) => Kind.File
       case _ => Kind.Document
@@ -67,9 +73,9 @@ object PdfPipeline:
     /** Inline a reusable fragment, binding its named document inputs to this graph.
       * IDs are namespaced; no runtime closures or hidden references are introduced.
       */
-    def include(prefix: String, fragment: Recipe, bindings: Map[String, String]): Either[Vector[Issue], Recipe] =
-      if !Set(1, 2, 3)(fragment.version) then return Left(Vector(Issue("fragment.version", Code.Version, "Use recipe version 1, 2 or 3")))
-      check(fragment) match
+    def include(prefix: String, fragment: Recipe, bindings: Map[String, String], registry: StepRegistry.Registry = StepRegistry.standard): Either[Vector[Issue], Recipe] =
+      if !Set(1, 2, 3, 4)(fragment.version) then return Left(Vector(Issue("fragment.version", Code.Version, "Use recipe version 1, 2, 3 or 4")))
+      check(fragment, registry) match
         case Left(issues) => return Left(issues.map(issue => issue.copy(path = "fragment." + issue.path)))
         case _ => ()
       val slots = fragment.nodes.collect { case Node(_, Op.Input(slot), _) => slot }.toSet
@@ -83,12 +89,12 @@ object PdfPipeline:
           node.copy(id = aliases(node.id), inputs = node.inputs.map(id => aliases.getOrElse(id, s"$prefix-$id")))
         }
         val recipe = copy(version = math.max(version, fragment.version), nodes = nodes ++ added, outputs = (outputs ++ fragment.outputs.map(id => aliases.getOrElse(id, s"$prefix-$id"))).distinct)
-        check(recipe).map(_.recipe)
+        check(recipe, registry).map(_.recipe)
 
   enum Code derives Schema:
     case Structure, Version, Limit, Identifier, Duplicate, Setting, Reference, Arity, Type, Cycle, Output, Binding
   final case class Issue(path: String, code: Code, message: String) derives Schema
-  final class Checked private[PdfPipeline] (val recipe: Recipe, val order: Vector[Node])
+  final class Checked private[PdfPipeline] (val recipe: Recipe, val order: Vector[Node], val registry: StepRegistry.Registry)
 
   val MaxNodes = 24
   val MaxOutputs = 8
@@ -97,10 +103,11 @@ object PdfPipeline:
   private def line(value: String, max: Int): Boolean = value.length <= max && !value.exists(Character.isISOControl)
 
   /** Accumulate independent field failures first; graph checks require unique IDs. */
-  def check(recipe: Recipe): Either[Vector[Issue], Checked] =
+  def check(recipe: Recipe): Either[Vector[Issue], Checked] = check(recipe, StepRegistry.standard)
+  def check(recipe: Recipe, registry: StepRegistry.Registry): Either[Vector[Issue], Checked] =
     val issues = Vector.newBuilder[Issue]
     def add(path: String, code: Code, message: String): Unit = issues += Issue(path, code, message)
-    if !Set(1, 2, 3)(recipe.version) then add("version", Code.Version, "Use recipe version 1, 2 or 3")
+    if !Set(1, 2, 3, 4)(recipe.version) then add("version", Code.Version, "Use recipe version 1, 2, 3 or 4")
     if recipe.name.trim.isEmpty || !line(recipe.name, 80) then add("name", Code.Setting, "Give the recipe a single-line name up to 80 characters")
     if recipe.nodes.isEmpty || recipe.nodes.length > MaxNodes then add("nodes", Code.Limit, s"Use 1 to $MaxNodes nodes")
     if recipe.outputs.isEmpty || recipe.outputs.length > MaxOutputs || recipe.outputs.distinct != recipe.outputs then
@@ -110,6 +117,9 @@ object PdfPipeline:
       if !identifier(node.id) then add(s"$path.id", Code.Identifier, "Use a letter followed by up to 47 letters, digits, hyphens or underscores")
       if node.inputs.length > 4 then add(s"$path.inputs", Code.Limit, "A node may have at most four inputs")
       node.op match
+        case Op.Registered(call) =>
+          if recipe.version < 4 then add(s"$path.op", Code.Version, "Registered steps require recipe version 4")
+          registry.check(call).foreach(issue => add(s"$path.call.${issue.path}", issue.code, issue.message))
         case Op.Keep(index, kinds) =>
           if recipe.version < 3 then add(s"$path.op", Code.Version, "Keep requires recipe version 3")
           if kinds.isEmpty || kinds.length > 4 then add(s"$path.kinds", Code.Setting, "Use one to four input kinds")
@@ -149,6 +159,7 @@ object PdfPipeline:
           add(s"$path.profiles", Code.Setting, "Choose distinct profiles from 2b, 3b and 3u")
         case _ => ()
       val validArity = node.op match
+        case Op.Registered(call) => node.inputs.length == call.inputs.length
         case Op.Input(_) | Op.Stop(_, _) => node.inputs.isEmpty
         case Op.Choose(_, _) => node.inputs.length == 4
         case Op.Assemble(_) => node.inputs.nonEmpty && node.inputs.length <= 4
@@ -171,6 +182,7 @@ object PdfPipeline:
           case None => add(s"nodes[$index].inputs[$port]", Code.Reference, s"Missing node: $id")
           case Some(source) =>
             val expected = node.op match
+              case Op.Registered(call) => call.inputs(port)
               case Op.Choose(_, kind) if port > 0 => kind
               case Op.Keep(_, kinds) => kinds(port)
               case Op.StopAfter(_, kinds, _) => kinds(port)
@@ -204,18 +216,20 @@ object PdfPipeline:
         else
           var needed = recipe.outputs.toSet
           sorted.reverseIterator.foreach(node => if needed(node.id) then needed ++= node.inputs)
-          Right(new Checked(recipe, sorted.filter(n => needed(n.id))))
+          Right(new Checked(recipe, sorted.filter(n => needed(n.id)), registry))
 
   enum Value:
     case Document(value: PdfDocument)
     case File(value: PdfFile)
     case Receipt(value: PdfReceipt)
+    case Data(kind: Kind, value: ReportJson)
 
   final case class ValidationReport(json: String, verdicts: Map[String, Verdict] = Map.empty)
   final case class Decision(node: String, outcome: Outcome, selected: String, reason: String) derives Schema
 
   /** Expensive/application-specific operations remain at the interpreter boundary. */
   trait Services:
+    def semantic: SemanticBackend = SemanticBackend.unavailable
     /** Typed entry points. Legacy callbacks are checked once at this adapter. */
     def convert(file: PdfFile): PdfFile < (Abort[PdfError] & Sync) =
       convertPdfA3b(file.bytes).map(bytes => accept(PdfFile.checked(bytes)))
@@ -242,7 +256,7 @@ object PdfPipeline:
     def validationReport(bytes: Vector[Byte], profiles: Vector[String]): ValidationReport < (Abort[PdfError] & Sync) =
       validate(bytes, profiles).map(json => ValidationReport(json))
 
-  final case class Run(outputs: Vector[(String, Value)], executed: Vector[String], skipped: Vector[String] = Vector.empty, decisions: Vector[Decision] = Vector.empty)
+  final case class Run(outputs: Vector[(String, Value)], executed: Vector[String], skipped: Vector[String] = Vector.empty, decisions: Vector[Decision] = Vector.empty, flags: Vector[StepRegistry.Flag] = Vector.empty, sourcePasses: Int = 0)
   final case class Deferred(node: String, reason: String)
   final case class Explanation(outputs: Vector[(String, Kind)], decisions: Vector[Decision], deferred: Vector[Deferred])
 
@@ -299,6 +313,10 @@ object PdfPipeline:
       maxLiveBytes: Long = 64L * 1024 * 1024, maxLiveObjects: Int = 32000)
 
   private def test(predicate: Predicate, source: Value, services: Services): (Outcome, String) < (Abort[PdfError] & Sync) = (predicate, source) match
+    case (Predicate.PolicyPassed, Value.Data(kind, data)) if kind == PdfSteps.policyResult.kind =>
+      PdfSteps.policyResult.decode(data.encoded) match
+        case Right(result) => (result.outcome, result.evidence.mkString("; "))
+        case Left(_) => (Outcome.Unknown, "Policy outcome is unreadable")
     case (Predicate.HasPageNumbers, Value.Document(document)) => services.pageNumberEvidence(document)
     case (Predicate.PageCount(min, max), Value.Document(document)) => PdfPages.pageRefs(document).map { pages =>
       val reason = s"${pages.length} pages; expected $min to $max inclusive"
@@ -343,6 +361,8 @@ object PdfPipeline:
       observe: (Vector[String], Vector[Decision]) => Unit
   ): Run < (Abort[PdfError] & Sync) = Sync.defer {
     val graph = plan.order.map(node => node.id -> node).toMap
+    val context = new StepRegistry.Context(services, limits)
+    context.groups = ExecutionPlanner.scanGroups(plan)
     val uses = scala.collection.mutable.Map.empty[String, Int].withDefaultValue(0)
     val memo = scala.collection.mutable.Map.empty[String, Value]
     val dependencies = scala.collection.mutable.Map.from(plan.order.map(node => node.id -> node.inputs))
@@ -366,13 +386,14 @@ object PdfPipeline:
           case PdfValue.Name(value) => value.length.toLong * 2
           case _ => 0L
         Vector(document -> (document.objects.iterator.map(obj => obj.stream.fold(0L)(_.length.toLong) + payload(obj.value)).sum, document.objects.length.toLong))
+      case Value.Data(_, data) => Vector(data -> (data.countedBytes, data.nodes.toLong))
       case Value.File(file) => Vector(file.bytes -> (file.size, 0L))
       case Value.Receipt(receipt) => Vector(receipt.subject.bytes -> (receipt.subject.size, 0L),
         receipt.report -> (receipt.report.countedBytes, receipt.report.nodes.toLong))
 
     def budget(value: Value): Value < Abort[PdfError] =
       val unique = new java.util.IdentityHashMap[AnyRef, java.lang.Boolean]()
-      val total = (memo.valuesIterator ++ Iterator(value)).flatMap(retained).filter { (key, _) =>
+      val total = (memo.valuesIterator ++ context.scans.valuesIterator ++ Iterator(value)).flatMap(retained).filter { (key, _) =>
         unique.put(key, java.lang.Boolean.TRUE) == null
       }.map(_._2).foldLeft((0L, 0L)) { (a, b) => (a._1 + b._1, a._2 + b._2) }
       if total._1 > limits.maxLiveBytes || total._2 > limits.maxLiveObjects then Abort.fail(PdfError.RetentionExceeded("Pipeline exceeds its live byte or object budget"))
@@ -416,6 +437,7 @@ object PdfPipeline:
                 case Value.Document(value) => value
                 case _ => throw IllegalStateException("Checked document port changed type")
               val program: Value < (Abort[PdfError] & Sync) = node.op match
+                case Op.Registered(call) => plan.registry.run(id, call, args, context)
                 case Op.Input(slot) => inputs.get(slot).fold[Value < Abort[PdfError]](Abort.fail(PdfError.InvalidPdf(s"Bind input $slot to a current PDF; this path needs it")))(doc => Value.Document(doc))
                 case Op.Select(pages) => PdfPages.select(document(), pages).map(Value.Document.apply)
                 case Op.Assemble(catalog) => PdfAssembly.concatenate(args.indices.map(i => document(i)).toVector, catalog).map(Value.Document.apply)
@@ -452,7 +474,7 @@ object PdfPipeline:
 
     def outputs(index: Int, found: Vector[(String, Value)]): Run < (Abort[PdfError] & Sync) =
       if index == plan.recipe.outputs.length then
-        Run(found, executed.toVector, plan.recipe.nodes.map(_.id).filterNot(executed.contains), decisions.toVector)
+        Run(found, executed.toVector, plan.recipe.nodes.map(_.id).filterNot(executed.contains), decisions.toVector, context.flags.toVector, context.sourcePasses)
       else
         val id = plan.recipe.outputs(index)
         evaluate(id).map(value => outputs(index + 1, found :+ (id -> value)))

@@ -41,10 +41,17 @@ final case class ThumbnailInfo(
     compressedBytes: Int
 ) derives Schema
 
+enum OperationErrorCode derives Schema:
+  case InvalidInput, Unsupported, Unavailable, Rejected, Limit, Verification, Backend
+
+final case class OperationError(code: OperationErrorCode, message: String, recoverable: Boolean = false) derives Schema
+
 sealed trait PdfError derives Schema:
   def message: String
 
 object PdfError:
+  final case class OperationFailed(node: String, operation: String, error: OperationError) extends PdfError:
+    val message = s"$node ($operation): ${error.code}: ${error.message}"
   final case class TooLarge(limit: Long, observed: Long) extends PdfError:
     val message = s"PDF input is $observed bytes, above the configured $limit-byte limit"
   final case class InvalidPdf(reason: String) extends PdfError:
