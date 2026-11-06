@@ -1,5 +1,5 @@
 import io.github.adrielc.kyopdf.*
-import io.github.adrielc.kyopdf.pipeline.{PdfArrow, PdfPipeline, PdfPipelineJson, PdfPipelineModel, Policy}
+import io.github.adrielc.kyopdf.pipeline.{PdfArrow, PdfPipeline, PdfPipelineJson, PdfPipelineModel, PdfFile, PdfSteps, Policy}
 import kyo.*
 import _root_.zio.blocks.schema.{Schema as BlocksSchema}
 import _root_.zio.blocks.schema.json.JsonCodecDeriver
@@ -15,6 +15,9 @@ object PolicyConsumerChecks:
 
   def run(): (PdfDocument, Vector[Byte]) =
     ScanConsumerChecks.run()
+    // Exercise the published digest dependency without any test framework on the classpath.
+    val hashProbe = PdfFile.checked("%PDF-1.7\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII).toVector).toOption.get
+    assert(PdfSteps.sha256(hashProbe) == "0716f9264c9fe19f5d7455276107f3ddcc1d3497f63d60689a73558ae8a1bf5e")
     val evidenceCodec = BlocksSchema.derived[Evidence].derive(JsonCodecDeriver)
     val evidence = Evidence("Synthetic report", 1)
     assert(evidenceCodec.decode(evidenceCodec.encode(evidence)) == Right(evidence))

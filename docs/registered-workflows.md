@@ -88,6 +88,11 @@ is AGPL/commercial licensed, optional, and not linked or published with the core
 Scala artifacts; choose a deployment/license arrangement appropriate to your
 application or implement the same service contract with another backend.
 
+The Native pipeline artifact declares the public `scala-native-crypto` dependency
+for SHA-256. Native consumers need OpenSSL available to the linker (`libssl-dev`
+on Debian/Ubuntu or Homebrew OpenSSL on macOS); the standalone consumer proof
+executes a known digest without a test framework on its classpath.
+
 The worker accepts at most 12 MiB and 64 pages, 16 million pixels per page and
 128 million pixels per run, 72–300 DPI, and 256 regions. Requests/reports are
 bounded to 64 KiB. The adapter enforces an execution timeout and removes its

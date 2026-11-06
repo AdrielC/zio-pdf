@@ -91,7 +91,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Install Native build dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libexpat1-dev zlib1g-dev qpdf poppler-utils
+        run: sudo apt-get update && sudo apt-get install -y clang libexpat1-dev libssl-dev zlib1g-dev qpdf poppler-utils
       - name: Install sbt
         run: |
           if ! command -v sbt >/dev/null 2>&1; then
@@ -124,7 +124,7 @@ jobs:
       - name: Install renderer test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libexpat1-dev zlib1g-dev qpdf poppler-utils tesseract-ocr tesseract-ocr-eng python3-venv
+          sudo apt-get install -y clang libexpat1-dev libssl-dev zlib1g-dev qpdf poppler-utils tesseract-ocr tesseract-ocr-eng python3-venv
           python3 -m venv "$RUNNER_TEMP/semantic-python"
           "$RUNNER_TEMP/semantic-python/bin/pip" install -r scripts/semantic-requirements.txt
           echo "KYO_PDF_SEMANTIC_PYTHON=$RUNNER_TEMP/semantic-python/bin/python" >> "$GITHUB_ENV"
