@@ -47,10 +47,10 @@ object ExecutionPlanner:
     private var live = true
     protected def openSource: InputStream
     private[pipeline] def close(): Unit = { live = false }
-    final def withInput[A, S](use: InputStream => A < S): A < (S & Abort[Error] & Sync) = Sync.defer {
+    final def withInput[A, E: ConcreteTag, S](use: InputStream => A < (Abort[E] & S)): A < (S & Abort[E] & Abort[Error] & Sync) = Sync.defer {
       if !live then Abort.fail(Error(ErrorCode.InvalidInput, "Staged source has left its scope"))
       else io(openSource).map { stream =>
-        SyncResource.ensure(Abort.catching[java.io.IOException](Sync.defer(stream.close())))(use(stream))
+        SyncResource.ensure[E](Abort.catching[java.io.IOException](Sync.defer(stream.close())))(use(stream))
       }
     }
   private final class Memory(private var bytes: Array[Byte], length: Int) extends Staged(length.toLong, Strategy.BoundedMemory):
@@ -73,11 +73,11 @@ object ExecutionPlanner:
       case _ => Abort.fail(Error(ErrorCode.Backend, "Staging I/O failed"))
     }
 
-  def withStaged[A, S](chunks: Iterator[Array[Byte]], storage: Storage = Storage())(use: Staged => A < S): A < (S & Abort[Error] & Sync) =
+  def withStaged[A, E: ConcreteTag, S](chunks: Iterator[Array[Byte]], storage: Storage = Storage())(use: Staged => A < (Abort[E] & S)): A < (S & Abort[E] & Abort[Error] & Sync) =
     if storage.memoryBytes < 0 || storage.memoryBytes > MaxMemoryBytes || storage.spoolBytes < storage.memoryBytes || storage.spoolBytes > MaxSpoolBytes then
       Abort.fail(Error(ErrorCode.InvalidInput, "Invalid staging budget"))
     else io(new Workspace(Files.createTempFile("kyo-stage-", ".bin"))).map { workspace =>
-      SyncResource.ensure(Abort.catching[java.io.IOException](Sync.defer(workspace.close()))) {
+      SyncResource.ensure[Error | E](Abort.catching[java.io.IOException](Sync.defer(workspace.close()))) {
         var total = 0L
         var chunksSeen = 0
         // Fixed capacity: a growing buffer can overshoot the advertised cap.
@@ -112,7 +112,7 @@ object ExecutionPlanner:
                   memorySize += chunk.length
               total += chunk.length
             }.map(_ => consume())
-        consume().map(stage => SyncResource.ensure(Sync.defer(stage.close()))(use(stage)))
+        consume().map(stage => SyncResource.ensure[E](Sync.defer(stage.close()))(use(stage)))
       }
     }
 

@@ -179,6 +179,12 @@ lazy val kyoPdfNative = (project in file("kyo-pdf-native"))
     Test / unmanagedSources +=
       (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
         "io" / "github" / "adrielc" / "kyopdf" / "PdfSharedParserSpec.scala",
+    Test / unmanagedSources +=
+      (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
+        "io" / "github" / "adrielc" / "kyopdf" / "PdfPacketSpec.scala",
+    Test / unmanagedSources +=
+      (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
+        "io" / "github" / "adrielc" / "kyopdf" / "PdfPacketLargeSpec.scala",
     libraryDependencies ++= List(
       "io.getkyo" % "kyo-core_native0.5_3"    % kyoVersion,
       "io.getkyo" % "kyo-parse_native0.5_3"   % kyoVersion,
@@ -241,7 +247,7 @@ lazy val kyoPdfFs2Native = (project in file("kyo-pdf-fs2-native"))
 
 /** Data-defined PDF graphs; interpreters supply artwork and validation services. */
 lazy val kyoPdfPipeline = (project in file("kyo-pdf-pipeline"))
-  .dependsOn(kyoPdf)
+  .dependsOn(kyoPdf, blocksToon)
   .settings(kyoPdfArtifactSettings)
   .settings(
     name := "kyo-pdf-pipeline",
@@ -305,10 +311,28 @@ lazy val blocksSchemaNative = (project in file("modules/zio-blocks-native/schema
     "io.github.cquiroz" % "scala-java-time-tzdb_native0.5_3" % scalaJavaTimeVersion
   ))
 
+/** Same public TOON sources and compatibility fixes on both runtimes. */
+lazy val blocksToon = (project in file("modules/zio-blocks-toon-jvm"))
+  .settings(kyoPdfArtifactSettings)
+  .settings(
+    name := "kyo-pdf-blocks-schema-toon",
+    description := "Public-source ZIO Blocks 0.0.56 TOON codec with compatibility fixes for Kyo PDF",
+    Compile / unmanagedSourceDirectories := Seq((LocalRootProject / baseDirectory).value / "modules" / "zio-blocks-native" / "schema-toon" / "shared" / "src" / "main" / "scala"),
+    Compile / packageBin / mappings ++= blocksNativeLegalMappings.value,
+    Compile / packageSrc / mappings ++= blocksNativeLegalMappings.value,
+    Compile / packageDoc / mappings ++= blocksNativeLegalMappings.value,
+    scalacOptions := Seq("-deprecation", "-feature", "-unchecked"),
+    libraryDependencies += "dev.zio" %% "zio-blocks-schema" % pipelineSchemaVersion
+  )
+
+lazy val blocksToonNative = (project in file("modules/zio-blocks-native/schema-toon"))
+  .enablePlugins(ScalaNativePlugin).dependsOn(blocksSchemaNative)
+  .settings(kyoPdfArtifactSettings).settings(blocksNativeSettings("schema-toon"))
+
 /** Native pipelines use only public-source, published dependencies. */
 lazy val kyoPdfPipelineNative = (project in file("kyo-pdf-pipeline-native"))
   .enablePlugins(ScalaNativePlugin)
-  .dependsOn(kyoPdfNative, blocksSchemaNative)
+  .dependsOn(kyoPdfNative, blocksSchemaNative, blocksToonNative)
   .settings(kyoPdfArtifactSettings)
   .settings(
     name := "kyo-pdf-pipeline",

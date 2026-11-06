@@ -48,7 +48,8 @@ object RegisteredStepsSpec extends ZIOSpecDefault:
       }
       assertTrue(plan.recipe.version == 4, decoded.recipe == plan.recipe, canonical.recipe == plan.recipe,
         toolSchema.check(args).map(_.toString.take(500)).isEmpty,
-        executed.sourcePasses == 1, counts == Vector(file.size, file.bytes.count(_ < 0).toLong), model.contains("\"settings\":{}"),
+        executed.sourcePasses == 1, counts == Vector(file.size, file.bytes.count(_ < 0).toLong),
+        model.contains("\"op\":\"bytes.count\""), !model.contains("\"call\""),
         StepRegistry.standard.exported.print.contains("pdf.redact"),
         ExecutionPlanner.explain(plan, file.size).fusedScans.size == 1)
     },
@@ -94,7 +95,7 @@ object RegisteredStepsSpec extends ZIOSpecDefault:
         val condition = policyPassed.on(keepRight[File, PdfSteps.PolicyResult])
         val branch = choose(condition)(keepLeft[File, PdfSteps.PolicyResult], stop[(File, PdfSteps.PolicyResult), File]("policy rejected"),
           stop[(File, PdfSteps.PolicyResult), File]("policy needs review"))
-        checked(input("body") >>> write >>> (id[File] &&& evidence) >>> branch)
+        PdfPipelineModel.decode(PdfPipelineModel.encode(checked(input("body") >>> write >>> (id[File] &&& evidence) >>> branch))).toOption.get
       val success = run(route(pass)).toOption.get
       val filtered = run(checked(input("body") >>> write >>> registered(PdfSteps.inspect, PdfSteps.Empty()) >>>
         registered(PdfSteps.pageCollection, PdfSteps.Empty()) >>> registered(PdfSteps.filterPages, PdfSteps.PageFilter(2, 3))))
@@ -137,10 +138,16 @@ object RegisteredStepsSpec extends ZIOSpecDefault:
         failure[Unit](ErrorCode.Rejected)
       })
       val closedAfterAbort = result(abortedStage.get.withInput(_ => ())).isLeft
+      val customAbort = result(ExecutionPlanner.withStaged(Iterator(Array[Byte](1)), ExecutionPlanner.Storage(1, 4)) { stage =>
+        abortedStage = Some(stage)
+        stage.withInput(_ => Abort.fail("custom failure"))
+      })
+      val closedAfterCustomAbort = result(abortedStage.get.withInput(_ => ())).isLeft
       val tooLargeChunk = result(ExecutionPlanner.withStaged(Iterator.single(new Array[Byte](ExecutionPlanner.MaxChunkBytes + 1)))(_ => ()))
       assertTrue(spooled.contains((ExecutionPlanner.Strategy.DiskSpool, 4L, Vector[Byte](1, 2, 3, 4))), gone,
         over.left.toOption.exists(_.code == ErrorCode.Limit), pulled == 2, tooLargeChunk.isLeft, aborted.isLeft, closedAfterAbort,
-        memory.contains((ExecutionPlanner.Strategy.BoundedMemory, 2L, Vector[Byte](5, 6))))
+        memory.contains((ExecutionPlanner.Strategy.BoundedMemory, 2L, Vector[Byte](5, 6))),
+        customAbort == Left("custom failure"), closedAfterCustomAbort)
     },
     test("bounded collections stop pulling on hard errors and retain explicitly recoverable flags") {
       var pulls = 0
@@ -189,14 +196,19 @@ object RegisteredStepsSpec extends ZIOSpecDefault:
       val source = result(PdfDocument.decode(bytes, limit)).toOption.get
       val arrow = input("body") >>> write >>> PdfSteps.redactArrow(PdfSteps.Select(Vector(PdfSteps.Region(1, 18, 18, 220, 47)))) >>>
         registered(PdfSteps.ocr, PdfSteps.Ocr())
-      val plan = PdfPipelineModel.decode(PdfPipelineModel.encode(checked(arrow))).toOption.get
-      val output = result(PdfPipeline.run(plan, Map("body" -> source), services)).fold(e => throw AssertionError(e.message), identity).outputs.collectFirst {
-        case (_, PdfPipeline.Value.File(file)) => file
-      }.get
+      val original = checked(arrow)
+      val plans = Vector(PdfPipelineModel.decode(PdfPipelineModel.encode(original)).toOption.get,
+        PdfPipelineToon.decode(PdfPipelineToon.encode(original).toOption.get).toOption.get)
+      val outputs = plans.map { plan =>
+        result(PdfPipeline.run(plan, Map("body" -> source), services)).fold(e => throw AssertionError(e.message), identity).outputs.collectFirst {
+          case (_, PdfPipeline.Value.File(file)) => file
+        }.get
+      }
+      val output = outputs.last
       val keep = result(backend.locate(output, PdfSteps.Select(terms = Vector("KEEP VISIBLE"))))
       val secret = result(backend.locate(output, PdfSteps.Select(terms = Vector("SECRET42"))))
       val wrong = result(backend.redact(output, PdfSteps.RedactionPlan("wrong", Vector(PdfSteps.Region(1, 1, 1, 5, 5)), "test"), PdfSteps.Edit()))
       Files.write(root.resolve("graph-output.pdf"), output.bytes.toArray)
-      assertTrue(keep.isRight, secret.isLeft, wrong.isLeft, output != file)
+      assertTrue(keep.isRight, secret.isLeft, wrong.isLeft, outputs.forall(_ != file))
     } @@ TestAspect.ifEnvSet("KYO_PDF_SEMANTIC_PYTHON")
   ) @@ TestAspect.sequential

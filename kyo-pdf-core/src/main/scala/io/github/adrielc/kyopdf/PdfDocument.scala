@@ -81,7 +81,7 @@ final case class PdfInput private (limit: ByteLimit, chunks: Vector[Vector[Byte]
             val middle = (low + high) >>> 1
             if starts(middle) <= index then low = middle else high = middle
           cached = low
-        chunks(cached)(index - starts(cached))
+        chunks(cached)((index - starts(cached)).toInt)
       }
       Abort.get(PdfDocumentParser.decodeBytes(source, limits))
 
@@ -131,7 +131,7 @@ object PdfPages:
   def pageRefs(document: PdfDocument): Vector[ObjectRef] < Abort[PdfError] =
     pageEntries(document).map(_.map(_._1))
 
-  private def pageEntries(document: PdfDocument): Vector[(ObjectRef, Dict)] < Abort[PdfError] =
+  private[kyopdf] def pageEntries(document: PdfDocument): Vector[(ObjectRef, Dict)] < Abort[PdfError] =
     val objects = document.byRef
     def value(ref: ObjectRef): Option[PdfValue] = objects.get(ref).map(_.value)
     def kind(dict: Dict): Option[String] = dict.get("Type").collect { case Name(name) => name }

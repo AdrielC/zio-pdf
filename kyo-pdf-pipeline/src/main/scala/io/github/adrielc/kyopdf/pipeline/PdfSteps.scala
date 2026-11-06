@@ -63,9 +63,11 @@ object PdfSteps:
       region.x >= 0 && region.y >= 0 && region.width > 0 && region.height > 0 && region.x + region.width <= 14400 && region.y + region.height <= 14400
 
   val byteCount = new Step("bytes.count", 1, Port.file, Port.data(count), empty, Vector(Empty()), StepRegistry.Access.Stream,
-    Set(Capability.Inspect), scan = Some((_: Empty) => Scan.count[Byte].map(Count.apply)))((file, _, _) => Count(file.size))
+    Set(Capability.Inspect), scan = Some((_: Empty) => Scan.count[Byte].map(Count.apply)),
+    description = "Count the exact File bytes; compatible byte scans share one source pass.")((file, _, _) => Count(file.size))
   val highByteCount = new Step("bytes.high-count", 1, Port.file, Port.data(count), empty, Vector(Empty()), StepRegistry.Access.Stream,
-    Set(Capability.Inspect), scan = Some((_: Empty) => Scan.foldLong[Byte](0L)((n, b) => n + (if b < 0 then 1 else 0)).map(Count.apply)))(
+    Set(Capability.Inspect), scan = Some((_: Empty) => Scan.foldLong[Byte](0L)((n, b) => n + (if b < 0 then 1 else 0)).map(Count.apply)),
+    description = "Count bytes above 127 in the exact File; compatible byte scans share one source pass.")(
     (file, _, _) => Count(file.bytes.count(_ < 0).toLong))
 
   val inspect = new Step("pdf.inspect", 1, Port.file, Port.data(facts), empty, Vector(Empty()), StepRegistry.Access.RandomAccess,
@@ -102,17 +104,20 @@ object PdfSteps:
     Vector(Select(Vector(Region(1, 10, 10, 100, 20)))), StepRegistry.Access.RandomAccess, Set(Capability.Inspect), p =>
       issue("settings.regions", p.regions.size <= 256 && p.regions.forall(valid), "Use at most 256 valid regions") ++
       issue("settings.terms", p.terms.size <= 32 && p.terms.forall(t => t.nonEmpty && t.length <= 256), "Use up to 32 nonempty terms") ++
-      issue("settings", p.regions.nonEmpty || p.terms.nonEmpty, "Select regions or search terms"))((file, p, context) =>
+      issue("settings", p.regions.nonEmpty || p.terms.nonEmpty, "Select regions or search terms"),
+    description = "Select regions or locate text. Regions use page, x, y, width and height in top-left PDF points; the result is bound to these exact File bytes.")((file, p, context) =>
       if p.terms.isEmpty then Selection(sha256(file), p.regions)
       else context.services.semantic.locate(file, p).map { found =>
         if found.sha256 != sha256(file) || found.regions.size > 256 || !found.regions.forall(valid) then Abort.fail(Error(ErrorCode.Verification, "Selection is not bound to the input"))
         else found
       })
   val planRedaction = new Step("pdf.plan-redaction", 1, Port.data(selection), Port.data(redactionPlan), planSettings,
-    Vector(Plan()), StepRegistry.Access.Document, Set(Capability.Inspect), p => issue("settings.reason", p.reason.nonEmpty && p.reason.length <= 160, "Use a short reason"))(
+    Vector(Plan()), StepRegistry.Access.Document, Set(Capability.Inspect), p => issue("settings.reason", p.reason.nonEmpty && p.reason.length <= 160, "Use a short reason"),
+    description = "Turn a Selection into a RedactionPlan, preserving its source hash and regions.")(
     (selected, p, _) => RedactionPlan(selected.sha256, selected.regions, p.reason))
   val redact = new Step("pdf.redact", 1, Port.pair(Port.file, Port.data(redactionPlan)), Port.file, editSettings,
-    Vector(Edit()), StepRegistry.Access.RandomAccess, Set(Capability.Rewrite, Capability.Render, Capability.ExternalProcess, Capability.Verify), p => dpi(p.dpi))((input, p, context) =>
+    Vector(Edit()), StepRegistry.Access.RandomAccess, Set(Capability.Rewrite, Capability.Render, Capability.ExternalProcess, Capability.Verify), p => dpi(p.dpi),
+    description = "Inputs are File then RedactionPlan. Remove selected content, raster-rebuild and verify the final artifact; output is a File.")((input, p, context) =>
       val (file, plan) = input
       if plan.sha256 != sha256(file) || plan.regions.isEmpty || plan.regions.size > 256 || !plan.regions.forall(valid) then
         Abort.fail(Error(ErrorCode.InvalidInput, "Redaction requires a nonempty plan bound to these exact bytes"))
@@ -121,11 +126,13 @@ object PdfSteps:
     Vector(Replace("old", "new")), StepRegistry.Access.RandomAccess, Set(Capability.Rewrite, Capability.Render, Capability.ExternalProcess, Capability.Verify), p =>
       dpi(p.dpi) ++ issue("settings", p.find.nonEmpty && p.find.length <= 256 && p.replacement.length <= 256 &&
         Set("helv", "cour", "tiro")(p.font) && p.fontSize.isFinite && p.fontSize >= 4 && p.fontSize <= 72,
-        "Choose a base-14 font, a bounded string, and a 4 to 72 point size"))((file, p, context) =>
+        "Choose a base-14 font, a bounded string, and a 4 to 72 point size"),
+    description = "Replace visible find text with replacement using a supported font, then raster-rebuild and verify.")((file, p, context) =>
       context.services.semantic.replace(file, p).map(output => verified(file, output, "replace")))
   val ocr = new Step("pdf.ocr", 1, Port.file, Port.file, ocrSettings, Vector(Ocr()), StepRegistry.Access.RandomAccess,
     Set(Capability.Rewrite, Capability.Render, Capability.Ocr, Capability.ExternalProcess, Capability.Verify), p =>
-      dpi(p.dpi) ++ issue("settings.language", p.language.matches("[a-z]{3}(\\+[a-z]{3}){0,3}"), "Choose installed OCR languages"))((file, p, context) =>
+      dpi(p.dpi) ++ issue("settings.language", p.language.matches("[a-z]{3}(\\+[a-z]{3}){0,3}"), "Choose installed OCR languages"),
+    description = "OCR a File using an installed language code (eng for English) and 72 to 300 DPI. Return a fresh searchable File only after verification.")((file, p, context) =>
       context.services.semantic.ocr(file, p).map(output => verified(file, output, "ocr")))
   val cleanup = new Step("pdf.cleanup", 1, Port.file, Port.file, editSettings, Vector(Edit()), StepRegistry.Access.RandomAccess,
     Set(Capability.Rewrite, Capability.Render, Capability.ExternalProcess, Capability.Verify), p => dpi(p.dpi))((file, p, context) =>
@@ -137,7 +144,8 @@ object PdfSteps:
     else output.file
 
   lazy val registry: Registry = Vector[Entry](byteCount, highByteCount, inspect, pageCollection, filterPages,
-    evaluatePolicy, select, planRedaction, redact, replaceText, ocr, cleanup).foldLeft(emptyRegistry)((r, e) => r.add(e).toOption.get)
+    evaluatePolicy, select, planRedaction, redact, replaceText, ocr, cleanup,
+    PdfPacketSteps.two, PdfPacketSteps.three, PdfPacketSteps.four).foldLeft(emptyRegistry)((r, e) => r.add(e).toOption.get)
   private def emptyRegistry = StepRegistry.empty
 
   /** A complete redaction subarrow is reusable inside a larger PDF graph. */

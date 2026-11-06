@@ -140,20 +140,22 @@ class PipelineTest(unittest.TestCase):
         status, data = request('/api/documents', raw=source.read_bytes())
         self.assertEqual(status, 200, data)
         uploaded = json.loads(data)
-        def step(node_id, operation, inputs, input_kinds, output_kind, settings):
-            return {'id': node_id, 'op': 'registered', 'inputs': inputs, 'call': {
-                'operation': operation, 'version': 1, 'inputs': input_kinds,
-                'output': output_kind, 'settings': settings}}
-        selection = {'Data': {'schema': 'pdf.selection', 'version': 1}}
-        plan = {'Data': {'schema': 'pdf.redaction-plan', 'version': 1}}
+        def step(node_id, operation, inputs, settings=None):
+            return {'id': node_id, 'op': operation, 'inputs': inputs, **(
+                {'settings': settings} if settings else {})}
         recipe = {'version': 4, 'name': 'Synthetic semantic packet', 'nodes': [
             {'id': 'body', 'op': 'input', 'slot': 'body', 'inputs': []},
             {'id': 'pdf', 'op': 'write', 'inputs': ['body']},
-            step('select', 'pdf.select-content', ['pdf'], ['File'], selection,
+            step('select', 'pdf.select-content', ['pdf'],
                  {'regions': [{'page': 1, 'x': 18, 'y': 18, 'width': 220, 'height': 47}]}),
-            step('plan', 'pdf.plan-redaction', ['select'], [selection], plan, {}),
-            step('redact', 'pdf.redact', ['pdf', 'plan'], ['File', plan], 'File', {}),
-            step('ocr', 'pdf.ocr', ['redact'], ['File'], 'File', {})], 'outputs': ['ocr']}
+            step('plan', 'pdf.plan-redaction', ['select']),
+            step('redact', 'pdf.redact', ['pdf', 'plan']),
+            step('ocr', 'pdf.ocr', ['redact'])], 'outputs': ['ocr']}
+        tools = {tool['name']: tool for tool in self.rpc('tools/list')['tools']}
+        variants = tools['run_pdf_pipeline']['inputSchema']['properties']['recipe']['properties']['nodes']['items']['oneOf']
+        redact = next(v for v in variants if v['properties']['op']['const'] == 'pdf.redact')
+        self.assertEqual(set(redact['required']), {'id', 'op', 'inputs'})
+        self.assertTrue({'call', 'output'}.isdisjoint(redact['properties']))
         checked = self.rpc('tools/call', {'name': 'check_pdf_pipeline', 'arguments': {'recipe': recipe}})
         self.assertFalse(checked['isError'], checked)
         result = self.rpc('tools/call', {'name': 'run_pdf_pipeline', 'arguments': {
@@ -168,6 +170,65 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(payload['executed'][-2:], ['redact', 'ocr'])
         link, = [item for item in result['content'] if item['type'] == 'resource_link']
         self.assertEqual(link['uri'], BASE + '/api/documents/' + output['id'] + '/file')
+
+    def test_toon_context_accepts_json_recipe_and_runs_named_branches(self):
+        query = '?operations=input,write,stamp,choose,stop'
+        status, raw = request('/api/pipelines/authoring' + query)
+        self.assertEqual(status, 200, raw)
+        definition = json.loads(raw)
+        self.assertEqual(definition['responseFormat'], 'json')
+        variants = definition['schema']['properties']['nodes']['items']['oneOf']
+        self.assertEqual({v['properties']['op']['const'] for v in variants},
+                         {'input', 'write', 'stamp', 'choose', 'stop'})
+        status, raw = request('/api/pipelines/authoring' + query + '&format=toon')
+        self.assertEqual(status, 200, raw)
+        self.assertIn(b'instructions:', raw)
+        self.assertIn(b'responseFormat: json', raw)
+        recipe = {'version': 4, 'name': 'Synthetic JSON response', 'nodes': [
+            {'id': 'body', 'op': 'input', 'inputs': [], 'slot': 'body'},
+            {'id': 'stamped', 'op': 'stamp', 'inputs': ['body'], 'text': 'JSON REVIEW'},
+            {'id': 'review', 'op': 'stop', 'inputs': [], 'message': 'Needs review'},
+            {'id': 'route', 'op': 'choose', 'test': {'kind': 'page-count', 'min': 2, 'max': 64},
+             'source': 'body', 'yes': 'stamped', 'no': 'body', 'unknown': 'review'},
+            {'id': 'pdf', 'op': 'write', 'inputs': ['route']}], 'outputs': ['pdf']}
+        status, raw = request('/api/pipelines/authoring/check' + query + '&format=json', recipe)
+        self.assertEqual(status, 200, raw)
+        normalized = json.loads(raw)['recipe']
+        result = self.rpc('tools/call', {'name': 'run_pdf_pipeline', 'arguments': {
+            'recipe': normalized, 'files': {'body': self.doc['id']}}})
+        self.assertFalse(result['isError'], result)
+        payload = result['structuredContent']
+        self.assertEqual(payload['decisions'][0]['outcome'].lower(), 'yes')
+        self.assertIn('JSON REVIEW', self.output_text(payload['outputs'][0]['document']))
+        recipe['nodes'][3]['yes'] = 'missing'
+        status, raw = request('/api/pipelines/authoring/check' + query + '&format=json', recipe)
+        self.assertEqual(status, 400, raw)
+        self.assertIn('nodes[3].yes', [i['path'] for i in json.loads(raw)['issues']])
+
+    def test_registered_packet_cover_and_contents_through_tool(self):
+        inputs = []
+        for page in (1, 2, 3):
+            status, raw = request('/api/documents/' + self.doc['id'] + '/remix', raw=str(page).encode())
+            self.assertEqual(status, 200, raw)
+            inputs.append(json.loads(raw)['id'])
+        nodes = []
+        for slot in ('first', 'second', 'third'):
+            nodes.extend([{'id': slot, 'op': 'input', 'slot': slot, 'inputs': []},
+                          {'id': slot + '-file', 'op': 'write', 'inputs': [slot]}])
+        nodes.append({'id': 'packet', 'op': 'pdf.packet-3', 'inputs': ['first-file', 'second-file', 'third-file'],
+                      'settings': {'title': 'Synthetic filing packet', 'titles': ['Petition', 'Declaration', 'Exhibits']}})
+        recipe = {'version': 4, 'name': 'Synthetic indexed packet', 'nodes': nodes, 'outputs': ['packet']}
+        result = self.rpc('tools/call', {'name': 'run_pdf_pipeline', 'arguments': {
+            'recipe': recipe, 'files': dict(zip(('first', 'second', 'third'), inputs))}})
+        self.assertFalse(result['isError'], result)
+        output = result['structuredContent']['outputs'][0]['document']
+        self.assertEqual(len(output['pages']), 4)
+        text = self.output_text(output)
+        self.assertIn('TABLE OF CONTENTS', text)
+        self.assertIn('Petition', text)
+        self.assertIn('Declaration', text)
+        self.assertIn('Exhibits', text)
+        self.assertTrue(any('/Outlines' in obj['syntax'] for obj in output['objects'] if obj['kind'] == 'Catalog'))
 
     def test_packet_routes_numbered_unnumbered_and_ambiguous_bodies(self):
         def invoke(name, recipe, files):

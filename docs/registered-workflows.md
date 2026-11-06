@@ -6,6 +6,62 @@ recipe versions keep their interpretation. Construction remains effect-free:
 with registered operations. Scala clients must recompile after the port aliases
 and new enum cases in this change.
 
+## Schema-driven model authoring
+
+`PdfPipelineModel.authoring(Set("input", "write", "pdf.select-content",
+"pdf.plan-redaction", "pdf.redact", "pdf.ocr"))` returns a scoped definition:
+the JSON Schema, instructions generated from operation signatures and descriptions,
+and strict `decode` / `decodeToon` functions. The model response contract is
+always JSON (`responseFormat: "json"`), including when its context is TOON. Unavailable operations are excluded
+from the exported schema and rejected by the decoder. Registered operations use
+their exact input arity. Parameters are decoded and checked against the registry's
+`DynamicSchema` constraints before graph checks; a failed decode never falls back
+to an unvalidated settings string.
+
+Recipe records have one ZIO Blocks `Schema`. JSON and TOON codecs are derived
+automatically from it with strict field checking; TOON has no separate recipe
+model or operation-specific serializer. `PdfPipelineToon.encode(checked)` and
+`decode(text, registry)` round-trip the same checked graph, including named branches
+and policy parameters. Both transports run on JVM and Native. The public-source
+TOON support module includes the compatibility fixes described in
+[`modules/zio-blocks-native/README.md`](../modules/zio-blocks-native/README.md).
+
+TOON admission checks bound text to 32 KiB, 2048 lines, 64 indentation levels,
+2048 elements per declared array and 8192 declared elements in total before
+parsing. Numbers requiring more precision than the pinned TOON reader preserves
+are rejected; use JSON for those values. Final graph, parameter and operation
+scope checks apply after either decoder. `DynamicSchema` is an in-memory contract,
+not an executable schema reconstructed from a text round trip.
+
+Paper Machine exposes the definition at
+`GET /api/pipelines/authoring?operations=input,write,pdf.ocr&format=json`.
+Use `format=toon` for its TOON context representation. POST the model's JSON
+candidate as the raw body to `/api/pipelines/authoring/check` with the same
+operations and `format=json`, regardless of the context encoding. A successful check
+returns normalized compact JSON and execution order; errors retain repairable
+paths such as `nodes[3].yes` or `nodes[2].settings.dpi`. Pass the returned recipe to
+`run_pdf_pipeline` with uploaded document bindings.
+
+The optional local-model evaluation obtains each scoped definition from this
+API in JSON or TOON as context, invokes OpenCode with a local Ollama model,
+requires a JSON response, checks it, and permits
+at most two repairs using checker feedback. It executes valid responses through
+the actual MCP tool and independently checks synthetic PDF outputs:
+
+```sh
+# Start Paper Machine with the semantic worker, as described below, then:
+python scripts/test-local-model-pipelines.py http://127.0.0.1:8087 \
+  --model gemma4:26b --context-formats json toon --output /tmp/pdf-authoring-evidence
+```
+
+Use the semantic-worker Python environment for this command. It requires
+OpenCode, Ollama, qpdf, Poppler and an installed local model. Cases cover redaction
+and OCR, replacement, fused byte counts, both conditional branches, body-only
+numbering with bookends, and an OCR failure that must expose no output. It supplies
+no completed target recipe and records candidates, repairs, timings, tool calls,
+hashes and returned PDFs. This evaluation is optional and does not download models
+or run inference in CI.
+
 ## One operation definition
 
 `StepRegistry.Step[A, B, P]` specifies a stable ID and version, typed input/output
@@ -17,7 +73,48 @@ schema. `recipeSchemaFor(customRegistry)` and `decode(json, customRegistry)`
 support host-provided operations. Registry entries are host code: a saved recipe
 cannot load classes, executables, URLs, or resolvers. Duplicate registrations and
 unknown versions fail checking. Parameter errors retain paths such as
-`nodes[2].call.settings.dpi`.
+`nodes[2].settings.dpi` in the model-facing format.
+
+Model-facing nodes need only an operation, settings, and wiring. Port schemas
+come from the host registry, not from model-authored type claims:
+
+```json
+{
+  "version": 4,
+  "name": "Redact and OCR",
+  "nodes": [
+    {"id": "body", "op": "input", "slot": "body", "inputs": []},
+    {"id": "pdf", "op": "write", "inputs": ["body"]},
+    {"id": "select", "op": "pdf.select-content", "inputs": ["pdf"], "settings": {
+      "regions": [{"page": 1, "x": 18, "y": 18, "width": 220, "height": 47}]
+    }},
+    {"id": "plan", "op": "pdf.plan-redaction", "inputs": ["select"]},
+    {"id": "redact", "op": "pdf.redact", "inputs": ["pdf", "plan"]},
+    {"id": "ocr", "op": "pdf.ocr", "inputs": ["redact"]}
+  ],
+  "outputs": ["ocr"]
+}
+```
+
+Settings may be omitted when defaults pass the registered parameter checks.
+The exported tool schema uses the same operation definitions and marks required
+settings accordingly. Wiring is checked against the inferred ports before a PDF
+is accessed. Wrong connections retain paths such as `nodes[4].inputs[1]`.
+
+An operation version can be omitted only when its ID has one registered version.
+If several versions are available, specify `"version": 1` on that node; the
+decoder never silently chooses the newest version. `PdfPipelineModel.encode`
+uses the checked plan's registry and preserves explicit versions when ambiguous.
+`PdfPipelineJson.encode(checked)` is the canonical persistence format: it stores
+resolved operation versions and full typed calls, so adding a registry version
+does not change the meaning of that saved graph. Loading rechecks the registry
+and all connections. Older model recipes using `"op": "registered"` and a
+verbose `call` remain readable; their declared ports must match the registry.
+
+For `run_pdf_pipeline`, put this recipe under `arguments.recipe` and bind
+`arguments.files.body` to an uploaded document ID. `check_pdf_pipeline` accepts
+the same compact recipe without files. Named `yes`, `no`, and `unknown` branches
+and ordinary arrow composition retain their existing behavior.
 
 `PdfArrow.registered(step, settings)` creates an ordinary typed arrow. Both
 `PdfArrow.recipe(name, arrow, registry)` and `PdfPipeline.check(recipe, registry)`

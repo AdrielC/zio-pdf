@@ -901,6 +901,68 @@
       "upstream": "schema/shared/src/main/scala-3.5-/zio/blocks/schema/binding/StructuralBindingMacros.scala",
       "sha256": "5bf0bfcea85f9e2add83665bc5785199fc98873faa8df295ad966abacdf0c949",
       "adaptedSha256": "eeebf3d57ddf5b3558a16c7984ff1686f56f6ef8256304885dcc8d2bb37ddd6a"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/ArrayFormat.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/ArrayFormat.scala",
+      "sha256": "4e030c2d027f2b3a0985682977f937c0977603e317818d881614c82e25548b11"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/Delimiter.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/Delimiter.scala",
+      "sha256": "a94e9b7e28276b70b15953c4e3793eddef7f350fc27a7ad62b2a8fb5272a1d55"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/DiscriminatorKind.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/DiscriminatorKind.scala",
+      "sha256": "c9ade8fd00a514dffa736e8d1829b1df876b9551a219deb9507fa42ce1f62a6f"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/KeyFolding.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/KeyFolding.scala",
+      "sha256": "de4009c3d5aa7d3abf4a1ff5cc8fd1dc9b77494d9279b9cddd4741c33d77a43c"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/PathExpansion.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/PathExpansion.scala",
+      "sha256": "1452e5589272dd86bc8e59cb5e96124f9e90df4bfddfc2912b53492c8a01219a"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/ReaderConfig.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/ReaderConfig.scala",
+      "sha256": "f92aa88a9315cd02d93f7bca5d770e1804fad535181706b783eebc2da6dc9bda"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/ToonCodec.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/ToonCodec.scala",
+      "sha256": "24c43551ee0d57b58c3b0d1fed3eebbb7197336140c4b102c8c416f319205c2b",
+      "adaptedSha256": "b60b0f3537208b7b56cbcfd26b525e11b3ca296348aa8b60c195b7a05f0a0af3"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/ToonCodecDeriver.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/ToonCodecDeriver.scala",
+      "sha256": "0993e7fddb1102704f0ee0e7d85a8ade6f78bd51c9fb8863468582a0de8070fa",
+      "adaptedSha256": "9bc20a6fda56cd2b7aab208ff96da89762729c427c9c8f8a253333b20001f02b"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/ToonFormat.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/ToonFormat.scala",
+      "sha256": "cba5c3fccbfc29beeaa14462f13c39483033ca8191994ce133310821d1dc0ebe"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/ToonReader.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/ToonReader.scala",
+      "sha256": "499bde186a1ee1ef537a4e89b6c9f49735418fabf37cefcc48d9038668a9d33a"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/ToonWriter.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/ToonWriter.scala",
+      "sha256": "daf4b8fe2ee3181d81fd7a89ccac067bd9bafe55624815ab3c21a55731b54aad"
+    },
+    {
+      "path": "schema-toon/shared/src/main/scala/zio/blocks/schema/toon/WriterConfig.scala",
+      "upstream": "schema-toon/src/main/scala/zio/blocks/schema/toon/WriterConfig.scala",
+      "sha256": "509d9ef25ed12cbc906927ea74cfa9c70849e097cf2de0aea34fc460306f179d"
     }
   ]
 }

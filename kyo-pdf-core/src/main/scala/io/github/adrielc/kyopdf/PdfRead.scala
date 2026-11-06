@@ -48,6 +48,24 @@ object PdfRead:
       else Step.Await(HeaderState(marker, marker), window.end, marker.toLong)
   }
 
+  /** Header admission without retaining the body; shared by file spooling. */
+  private[kyopdf] final class HeaderReader extends AutoCloseable:
+    private val probe = Session.open(header, headerLimits).toOption.get
+    private var accepted = 0
+    private def error(value: Failure[PdfError]): PdfError = value match
+      case Failure.Stage(_, value) => value
+      case _ => invalid(s"PDF header scan: $value")
+    def offer(length: Int)(read: ByteReader): Either[PdfError, Unit] =
+      if length == 0 || probe.result.nonEmpty then Right(())
+      else
+        val count = math.min(length, 1094 - accepted)
+        accepted += count
+        Block.copyOf(count)(read).left.map(_ => invalid("Invalid PDF header block")).flatMap { block =>
+          probe.offer(block).left.map(error).map(_ => ())
+        }
+    def finish(): Either[PdfError, Unit] = probe.finish().left.map(error).map(_ => ())
+    def close(): Unit = probe.close()
+
   final class Reader private[PdfRead] (limit: ByteLimit) extends AutoCloseable:
     private val probe = Session.open(header, headerLimits).toOption.get
     private val parts = ArrayBuffer.empty[Block]
@@ -105,7 +123,7 @@ object PdfRead:
               val middle = (low + high) >>> 1
               if starts(middle) <= index then low = middle else high = middle
             cached = low
-          blocks(cached).parserByte(index - starts(cached))
+          blocks(cached).parserByte((index - starts(cached)).toInt)
         }
       }
 

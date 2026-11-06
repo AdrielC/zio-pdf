@@ -23,7 +23,7 @@ with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as upstream:
         assert hashlib.sha256(original).hexdigest() == entry["sha256"], entry["upstream"]
         local = (root / entry["path"]).read_bytes()
         assert hashlib.sha256(local).hexdigest() == entry.get("adaptedSha256", entry["sha256"]), entry["path"]
-actual = {str(path.relative_to(root)) for module in ("chunk", "typeid", "maybe", "markdown", "schema")
+actual = {str(path.relative_to(root)) for module in ("chunk", "typeid", "maybe", "markdown", "schema", "schema-toon")
           for platform in ("shared", "native")
           for path in (root / module / platform / "src").rglob("*.scala")}
 assert actual == {entry["path"] for entry in manifest["files"]}, "Unrecorded or missing upstream sources"
