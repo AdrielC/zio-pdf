@@ -46,6 +46,14 @@ object ScanFs2Spec extends ZIOSpecDefault:
         values(ours.lens[String, String](_.length, (s, n) => s + n), List("ab", "c")) ==
           reference(theirs.lens[String, String](_.length, (s, n) => s + n), List("ab", "c")))
     },
+    test("multiple upstream outputs keep their order through branches of unequal depth") {
+      val expand = Scan.stateless[Int, Either[Int, Int]]((n, emit) => { emit(Left(n)); emit(Right(n)) })
+      val fsExpand = fs2.Scan.stateless[Int, Either[Int, Int]](n => Chunk(Left(n), Right(n)))
+      val left = Scan.lift[Int, Int](_ + 1).map(_ * 2).map(_ - 3)
+      val fsLeft = fs2.Scan.lift[Int, Int](_ + 1).map(_ * 2).map(_ - 3)
+      assertTrue(values(expand.andThen(left.choose(Scan.identity[Int])), List(2, 3)) ==
+        reference(fsExpand.andThen(fsLeft.choose(fs2.Scan.lift[Int, Int](identity))), List(2, 3)))
+    },
     test("semilens and semipass bypass without changing state and agree with FS2") {
       val input = List(2, -4, 3)
       val extract: Int => Either[Int, Int] = n => if n < 0 then Left(n) else Right(n)
@@ -126,6 +134,24 @@ object ScanFs2Spec extends ZIOSpecDefault:
       val fromSource = source.through(Scan.identity[Int].toPipe[IO]).compile.drain.attempt.unsafeRunSync()
       val defect = valuesAttempt(Scan.lift[Int, Int](_ => throw error), Stream.emit(1).covary[IO])
       assertTrue(fromSource.left.toOption.contains(error), defect.left.toOption.contains(error), released == 1)
+    },
+    test("batching has bounded read-ahead and elementwise mode stops within an existing input chunk") {
+      var steps = 0
+      val scan = Scan.lift[Int, Int](n => { steps += 1; n })
+      val source = Stream.chunk(Chunk.from(0 until 2000)).covary[IO]
+      val first = source.through(scan.toPipeWith[IO](Scan.Limits.checked(pending = 4).toOption.get))
+        .take(1).compile.toVector.unsafeRunSync()
+      val batched = steps
+      steps = 0
+      val exact = source.through(scan.toPipeElementwise[IO]).take(1).compile.toVector.unsafeRunSync()
+      assertTrue(first == Vector(0), batched == 4, exact == Vector(0), steps == 1)
+    },
+    test("a final per-input burst may cross the batch target without overflowing or dropping output") {
+      val scan = Scan.stateless[Int, Int]((n, emit) => { emit(n); emit(-n) })
+      val limits = Scan.Limits.checked(pending = 3).toOption.get
+      val result = Stream.chunk(Chunk.from(1 to 10)).covary[IO].through(scan.toPipeWith[IO](limits))
+        .compile.toVector.unsafeRunSync()
+      assertTrue(result == (1 to 10).flatMap(n => Vector(n, -n)).toVector)
     },
     test("cancellation releases a blocked source and does not synthesize completion") {
       val result = (for

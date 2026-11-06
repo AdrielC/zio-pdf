@@ -14,12 +14,22 @@ object ScanFs2:
   extension [I, O](scan: Scan[I, O])
     /** One run-local interpreter per stream evaluation. Sync suspends mutable
       * state allocation and brackets cleanup on EOF, failure and cancellation.
-      * Both the interpreter queue and the output batch obey limits.pending.
-      * Only one input element is transformed before yielding to the consumer.
+      * Batches process at most limits.pending inputs and retain fewer than
+      * 2 * limits.pending output references. Each input/EOF may emit at most
+      * limits.pending outputs. Elementwise mode yields after every input.
       */
     def toPipe[F[_]](using F: Sync[F]): Pipe[F, I, O] = toPipeWith[F](Scan.Limits.default)
 
     def toPipeWith[F[_]](limits: Scan.Limits)(using F: Sync[F]): Pipe[F, I, O] =
+      pipe(scan, limits, elementwise = false)
+
+    def toPipeElementwise[F[_]](using F: Sync[F]): Pipe[F, I, O] =
+      toPipeElementwiseWith[F](Scan.Limits.default)
+
+    def toPipeElementwiseWith[F[_]](limits: Scan.Limits)(using F: Sync[F]): Pipe[F, I, O] =
+      pipe(scan, limits, elementwise = true)
+
+  private def pipe[F[_], I, O](scan: Scan[I, O], limits: Scan.Limits, elementwise: Boolean)(using F: Sync[F]): Pipe[F, I, O] =
       val plan = scan.compile(limits)
       input => plan match
         case Left(issue) => Stream.raiseError[F](new ScanException(issue))
@@ -27,8 +37,9 @@ object ScanFs2:
           final class Session:
             private val buffer = ArrayBuffer.empty[O]
             private var overflow = false
+            private var emitted = 0
             private val run: Scan.Runner[I, scan.State] = compiled.open { output =>
-              if buffer.length < limits.pending then { buffer += output; () }
+              if emitted < limits.pending then { emitted += 1; buffer += output; () }
               else { overflow = true; run.close() }
             }
             private def collect(result: Either[Scan.RunIssue, Unit]): F[Chunk[O]] =
@@ -41,13 +52,26 @@ object ScanFs2:
                   val batch = Chunk.from(buffer.toVector)
                   buffer.clear()
                   F.pure(batch)
-            def push(value: I): F[Chunk[O]] = F.defer(collect(run.push(value)))
-            def finish: F[Chunk[O]] = F.defer(collect(run.finish().map(_ => ())))
+            def push(input: Chunk[I], from: Int): F[(Int, Chunk[O])] = F.defer {
+              var at = from
+              val count = if elementwise then 1 else limits.pending
+              val result = run.feed { emit =>
+                while at < input.size && at - from < count && buffer.length < limits.pending && !run.isClosed do
+                  emitted = 0
+                  emit(input(at))
+                  at += 1
+              }
+              F.map(collect(result))(batch => (at, batch))
+            }
+            def finish: F[Chunk[O]] = F.defer { emitted = 0; collect(run.finish().map(_ => ())) }
             def close: F[Unit] = F.delay { run.close(); buffer.clear() }
+          def remaining(input: Chunk[I], from: Int, rest: Stream[F, I], session: Session): Pull[F, O, Unit] =
+            Pull.eval(session.push(input, from)).flatMap { (next, batch) =>
+              Pull.output(batch) >> (if next < input.size then remaining(input, next, rest, session) else loop(rest, session))
+            }
           def loop(source: Stream[F, I], session: Session): Pull[F, O, Unit] =
-            source.pull.uncons1.flatMap {
-              case Some((value, rest)) =>
-                Pull.eval(session.push(value)).flatMap(batch => Pull.output(batch)) >> loop(rest, session)
+            source.pull.uncons.flatMap {
+              case Some((input, rest)) => remaining(input, 0, rest, session)
               case None => Pull.eval(session.finish).flatMap(batch => Pull.output(batch))
             }
           Stream.bracket(F.delay(new Session))(_.close).flatMap(session => loop(input, session).stream)

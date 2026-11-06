@@ -126,5 +126,22 @@ object PdfSharedParserSpec extends ZIOSpecDefault:
       val content = bytes("BT /F1 12 Tf (A\u00ff\u0000B) Tj [3 <f>] TJ ET")
       val parsed = result(PdfContentParser.parse(content))
       assertTrue(parsed.exists(_.contains(ContentToken.Literal(Vector[Byte](65, -1, 0, 66)))))
+    },
+    test("content numeric grammar preserves signs and decimal edge cases without regex compilation") {
+      val alphabet = Vector('+', '-', '.', '0', '1', 'e')
+      val candidates = (0 to 4).flatMap(length =>
+        (0 until length).foldLeft(Vector(""))((words, _) => words.flatMap(word => alphabet.map(word + _))))
+      val equivalent = candidates.forall { value =>
+        val expected = value.matches("[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)")
+        result(PdfContentParser.parse(bytes(value))).contains(Vector(ContentToken.Number(value))) == expected
+      }
+      assertTrue(equivalent)
+    },
+    test("content operators preserve ASCII grammar, unsupported image markers and the token bound") {
+      val operators = Vector("q", "Q", "BT", "ET", "T*", "W*", "'", "\"", "a" * 64)
+      val parsed = result(PdfContentParser.parse(bytes(operators.mkString(" "))))
+      val invalid = Vector("BI", "ID", "EI", "q2", "1e3", "\u00e9", "+", "-.", "a" * 65)
+      assertTrue(parsed == Right(operators.map(ContentToken.Operator(_))),
+        invalid.forall(value => result(PdfContentParser.parse(bytes(value))).isLeft))
     }
   )

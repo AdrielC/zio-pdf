@@ -452,11 +452,9 @@ object Scan:
   final class Runner[-I, S] private[Scan] (
       code: Vector[Instruction], entry: Int, layout: Layout, shape: Shape, overrides: Vector[Memory => Unit], pending: Int, output: Any => Unit) extends AutoCloseable:
     private[Scan] val memory = new Memory(layout)
-    // A fixed ring avoids allocating an event wrapper for every stage/input.
+    // A bounded work stack preserves depth-first composition without recursion.
     private val targets = new Array[Int](pending)
     private val values = new Array[Any](pending)
-    private var head = 0
-    private var tail = 0
     private var queued = 0
     private var failure: Option[RunIssue] = None
     private var closed = false
@@ -478,8 +476,6 @@ object Scan:
     def close(): Unit =
       closed = true
       java.util.Arrays.fill(values.asInstanceOf[Array[AnyRef]], null)
-      head = 0
-      tail = 0
       queued = 0
       // A callback can close the run reentrantly. Clear again after it returns.
       if !driving && !released then
@@ -494,42 +490,66 @@ object Scan:
       if !closed then
         if queued >= pending then fail(RunIssue.PendingLimit(pending))
         else
-          targets(tail) = target
-          values(tail) = value
-          tail = (tail + 1) % pending
+          targets(queued) = target
+          values(queued) = value
           queued += 1
 
     private def callback[A](next: Int)(f: Emit[Any] => A): A =
       var active = true
+      val base = queued
       val emit = new Emit[Any]:
         def apply(value: Any): Unit =
           if !active then fail(RunIssue.EscapedEmitter)
           else enqueue(next, value)
       try f(emit)
-      finally active = false
+      finally
+        active = false
+        // Reverse this callback's burst so its first output is processed first,
+        // completely through downstream, before the next output is stepped.
+        var left = base
+        var right = queued - 1
+        while left < right do
+          val target = targets(left)
+          val value = values(left)
+          targets(left) = targets(right)
+          values(left) = values(right)
+          targets(right) = target
+          values(right) = value
+          left += 1
+          right -= 1
 
     private def drain(): Unit =
       while queued != 0 && !closed do
-        val target = targets(head)
-        val value = values(head)
-        values(head) = null
-        head = (head + 1) % pending
         queued -= 1
-        if target == -1 then output(value)
-        else
-          val instruction = code(target)
-          instruction.action match
-            case Action.Fork(left, right, true) => value.asInstanceOf[Either[Any, Any]] match
-              case Left(value) => enqueue(left, value)
-              case Right(value) => enqueue(right, value)
-            case Action.Fork(left, right, false) => enqueue(left, value); enqueue(right, value)
-            case Action.Map(f) => enqueue(instruction.next, f(value))
-            case Action.Filter(predicate) => if predicate(value) then enqueue(instruction.next, value)
-            case Action.Consume(step) => step(memory, value)
-            case Action.Callback(step) => callback(instruction.next)(emit => step(memory, value, emit))
-            case Action.Nested(step) => callback(instruction.next)(emit => step(memory, value, emit)) match
-              case Left(issue) => fail(issue)
-              case Right(_) => ()
+        var target = targets(queued)
+        var value = values(queued)
+        values(queued) = null
+        var advancing = true
+        while advancing && !closed do
+          if target == -1 then
+            output(value)
+            advancing = false
+          else
+            val instruction = code(target)
+            instruction.action match
+              case Action.Map(f) => value = f(value); target = instruction.next
+              case Action.Filter(predicate) =>
+                if predicate(value) then target = instruction.next else advancing = false
+              case Action.Fork(left, right, true) => value.asInstanceOf[Either[Any, Any]] match
+                case Left(selected) => value = selected; target = left
+                case Right(selected) => value = selected; target = right
+              case Action.Fork(left, right, false) => enqueue(right, value); target = left
+              case Action.Consume(step) => step(memory, value); advancing = false
+              case Action.Callback(step) =>
+                val input = value
+                callback(instruction.next)(emit => step(memory, input, emit))
+                advancing = false
+              case Action.Nested(step) =>
+                val input = value
+                callback(instruction.next)(emit => step(memory, input, emit)) match
+                  case Left(issue) => fail(issue)
+                  case Right(_) => ()
+                advancing = false
 
     private def drive(finish: Boolean)(body: => Unit): Either[RunIssue, Unit] =
       if driving then Left(RunIssue.ReentrantDriver)

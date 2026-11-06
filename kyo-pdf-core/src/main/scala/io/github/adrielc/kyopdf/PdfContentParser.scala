@@ -103,11 +103,12 @@ object PdfContentParser:
             else Right((end, ContentToken.Name(input.substring(at + 1, end))))
           case _ =>
             val end = tokenEnd(input, at)
-            val value = input.substring(at, end)
-            if value.length > 64 then Left((at, "PDF content token exceeds 64 bytes"))
-            else if number(value) then Right((end, ContentToken.Number(value)))
-            else if value.matches("[A-Za-z*'\"]+") && !Set("BI", "ID", "EI")(value) then Right((end, ContentToken.Operator(value)))
-            else Left((at, s"Unsupported PDF content token: $value"))
+            if end - at > 64 then Left((at, "PDF content token exceeds 64 bytes"))
+            else
+              val value = input.substring(at, end)
+              if number(value) then Right((end, ContentToken.Number(value)))
+              else if operator(value) then Right((end, ContentToken.Operator(value)))
+              else Left((at, s"Unsupported PDF content token: $value"))
 
     var cursor = skip(0)
     while cursor < input.length do
@@ -122,7 +123,26 @@ object PdfContentParser:
     var at = start
     while at < input.length && !delimiter(input.charAt(at)) do at += 1
     at
-  private def number(value: String): Boolean = value.matches("[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)")
+  // These tiny ASCII grammars avoid compiling two regular expressions per token.
+  private def number(value: String): Boolean =
+    var at = if value.nonEmpty && (value.charAt(0) == '+' || value.charAt(0) == '-') then 1 else 0
+    var digits = 0
+    while at < value.length && value.charAt(at) >= '0' && value.charAt(at) <= '9' do
+      digits += 1
+      at += 1
+    if at < value.length && value.charAt(at) == '.' then
+      at += 1
+      while at < value.length && value.charAt(at) >= '0' && value.charAt(at) <= '9' do
+        digits += 1
+        at += 1
+    digits > 0 && at == value.length
+  private def operator(value: String): Boolean =
+    var at = 0
+    while at < value.length do
+      val char = value.charAt(at)
+      if !((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') || char == '*' || char == '\'' || char == '"') then return false
+      at += 1
+    value.nonEmpty && value != "BI" && value != "ID" && value != "EI"
   private def nibble(char: Char): Int =
     if char >= '0' && char <= '9' then char - '0'
     else if char >= 'a' && char <= 'f' then char - 'a' + 10

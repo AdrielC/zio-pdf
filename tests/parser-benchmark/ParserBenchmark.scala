@@ -87,6 +87,14 @@ object ParserBenchmark extends ZIOSpecDefault:
           })
       }
       val content = ("BT /F1 12 Tf (Synthetic) Tj ET\n" * 2000).getBytes(ISO_8859_1)
+      def normalize(token: baseline.ContentToken): ContentToken = token match
+        case baseline.ContentToken.Number(value) => ContentToken.Number(value)
+        case baseline.ContentToken.Name(value) => ContentToken.Name(value)
+        case baseline.ContentToken.Literal(bytes) => ContentToken.Literal(bytes)
+        case baseline.ContentToken.Hex(bytes) => ContentToken.Hex(bytes)
+        case baseline.ContentToken.Array(items) => ContentToken.Array(items.map(normalize))
+        case baseline.ContentToken.Operator(value) => ContentToken.Operator(value)
+      scala.Predef.assert(checked(baseline.PdfContentParser.parse(content)).map(normalize) == checked(PdfContentParser.parse(content)))
       compare("content", content.length)(
         () => checked(baseline.PdfContentParser.parse(content)).length.toLong,
         () => checked(PdfContentParser.parse(content)).length.toLong)

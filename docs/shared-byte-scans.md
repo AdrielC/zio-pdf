@@ -66,9 +66,12 @@ Our state type is a member, seeds are by-name per run, and queues are bounded.
 Nested context/state adapters have a checked depth limit of 64 and count their
 children against the shared node budget. The optional pipe requires Cats Effect
 `Sync` to suspend and bracket mutable run-local storage; FS2's immutable scan
-also supports pure pipes without that constraint. The pipe processes one input
-element before yielding, buffers at most `limits.pending` output references,
-and closes on EOF, error, cancellation or downstream termination. This reference
+also supports pure pipes without that constraint. The default pipe processes at
+most `limits.pending` inputs from the current transport chunk before yielding,
+retaining fewer than `2 * limits.pending` output references. One input or EOF may
+emit at most `limits.pending` outputs. `toPipeElementwise` yields after each input
+for precise downstream early termination, trading throughput for less read-ahead.
+Both modes close on EOF, error, cancellation or downstream termination. This reference
 count is not a bound on arbitrary user payload/state bytes. `toPipeWith` accepts
 explicit limits. Queue/batch overflow becomes `ScanException` carrying the typed
 issue; source failures and callback defects keep their original exceptions.
@@ -139,8 +142,9 @@ Ordinary generic `stateful[S, ...]` may box primitive S; it is the flexible path
 Mutable state observations refer to the same state object; they are not deep copies.
 
 The inline `Scan.map` constructor embeds the supplied function in a unary stage.
-Unary maps, filters and Long folds avoid per-step emitter wrappers. A fixed ring
-holds pending values and integer targets without per-event envelope allocations.
+Unary maps, filters and selected routes run in a direct interpreter loop. A bounded
+work stack holds pending values and integer targets without per-event envelope
+allocations, preserving emitted-value order through branches of unequal depths.
 General stateful callbacks still create scoped emitter handles, and arbitrary
 outputs can allocate. This is not a claim of a zero-allocation pipeline. Definitions
 are checked at Scala compilation; instruction-graph compilation happens explicitly
