@@ -47,7 +47,7 @@ New streaming integrations should use `PdfRead` or `PdfZIO.decodeStream`.
 ## Local comparison with public v0.6.0
 
 The benchmark script reconstructs its baseline only from the pinned public commit
-`88d0ebb131e91a2978da790e0aea7404388b0420`. It checks decoded document equality
+`88d0ebb131e91a2978da790e0aea7404388b0420`. It checks decoded document and content-token equality
 outside timing and compares the same synchronous public APIs. Chunked ingestion
 compares the public baseline PdfInput against PdfRead using 64 KiB chunks.
 
@@ -58,24 +58,33 @@ pairs followed by fifteen alternating measurement pairs; values below are median
 These qualify this local workload, not general production throughput or a tuned
 release-mode Native build. Native allocation measurements are unavailable.
 
+Measured implementation: `9355a296e9e9c168aee10ef3a6e175676636bece`. The host is shared; measurements
+vary across runs. Each baseline/candidate pair is measured in the same run.
+
 | Workload | Input bytes | JVM old → new (ms) | JVM speedup | Native old → new (ms) | Native speedup |
 |---|---:|---:|---:|---:|---:|
-| small-scan | 447 | 0.228 → 0.143 | 1.60× | 0.341 → 0.195 | 1.74× |
-| small-decode | 447 | 0.459 → 0.353 | 1.30× | 0.602 → 0.271 | 2.22× |
-| small-chunked-decode | 447 | 0.471 → 0.399 | 1.18× | 0.646 → 0.297 | 2.18× |
-| stream-heavy-scan | 1,049,564 | 10.829 → 0.211 | 51.33× | 140.146 → 0.432 | 324.41× |
-| stream-heavy-decode | 1,049,564 | 15.199 → 2.778 | 5.47× | 168.789 → 48.929 | 3.45× |
-| stream-heavy-chunked-decode | 1,049,564 | 23.329 → 7.156 | 3.26× | 249.061 → 71.129 | 3.50× |
-| object-heavy-scan | 28,576 | 1.489 → 0.738 | 2.02× | 18.020 → 9.756 | 1.85× |
-| object-heavy-decode | 28,576 | 3.374 → 2.646 | 1.28× | 36.885 → 15.175 | 2.43× |
-| object-heavy-chunked-decode | 28,576 | 3.187 → 2.831 | 1.13× | 34.366 → 14.218 | 2.42× |
-| content | 62,000 | 5.118 → 5.139 | 1.00× | 300.636 → 314.987 | 0.95× |
+| small-scan | 447 | 0.294 → 0.146 | 2.01× | 0.408 → 0.213 | 1.91× |
+| small-decode | 447 | 0.591 → 0.604 | 0.98× | 0.738 → 0.311 | 2.37× |
+| small-chunked-decode | 447 | 0.864 → 0.556 | 1.55× | 0.643 → 0.296 | 2.17× |
+| stream-heavy-scan | 1,049,564 | 9.883 → 0.141 | 69.93× | 135.158 → 0.422 | 320.44× |
+| stream-heavy-decode | 1,049,564 | 22.205 → 3.571 | 6.22× | 247.651 → 144.569 | 1.71× |
+| stream-heavy-chunked-decode | 1,049,564 | 30.858 → 5.700 | 5.41× | 237.976 → 71.964 | 3.31× |
+| object-heavy-scan | 28,576 | 1.494 → 0.658 | 2.27× | 17.463 → 9.564 | 1.83× |
+| object-heavy-decode | 28,576 | 3.666 → 2.797 | 1.31× | 32.096 → 14.114 | 2.27× |
+| object-heavy-chunked-decode | 28,576 | 4.256 → 4.122 | 1.03× | 35.060 → 14.620 | 2.40× |
+| content | 62,000 | 7.811 → 1.015 | 7.70× | 960.067 → 34.632 | 27.72× |
 
 For the 1,049,564-byte stream-heavy document, JVM full-decode allocations fell
-from 67,197,824 to 4,964,312 bytes per operation; chunked-decode allocations fell
-from 73,140,984 to 6,042,416 bytes. These are total thread allocations, not peak
-live memory. Token-only content parsing was effectively flat on the JVM and about
-4.8% slower in this Native debug run. The migration is not faster on every workload.
+from 67,197,824 to 4,970,520 bytes per operation; chunked-decode allocations fell
+from 73,140,984 to 6,047,808 bytes. Token-only content allocations fell from
+36,784,016 to 2,193,488 bytes. These are total current-thread allocations, not
+peak live memory or RSS; Native allocation measurements are unavailable.
+
+Content parsing uses ASCII grammar loops instead of compiling regular expressions
+per token. Sign/decimal/operator boundaries, unsupported markers, token limits and
+full benchmark token equality are checked separately. Small JVM full decode is
+about 2.2% slower in this run; object-heavy chunked JVM decoding is nearly flat.
+This is not a claim that every PDF or scan becomes faster.
 
 [Raw measurements](benchmarks/pdf-parser-migration-2026-11-05.json) include allocation
 figures for every JVM case.
@@ -94,3 +103,6 @@ and removes them on exit. Run correctness suites separately with:
 sbt ';kyoPdf/testFull;kyoPdfZio/testFull;kyoPdfPipeline/testFull;paperMachine/testFull'
 sbt ';kyoPdfNative/testFull;kyoPdfPipelineNative/testFull'
 ```
+
+[Generic Scan / FS2 comparison](scan-performance.md) reports both wins and losses
+for kernels, bounded batched pipes and elementwise yielding.

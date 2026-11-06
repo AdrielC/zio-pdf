@@ -12,165 +12,334 @@
       {
         "case": "small-scan",
         "bytes": 447,
-        "oldNs": 227542,
-        "newNs": 142583,
+        "oldNs": 293792,
+        "newNs": 145959,
         "oldAllocated": 59352,
-        "newAllocated": 27944
+        "newAllocated": 27976
       },
       {
         "case": "small-decode",
         "bytes": 447,
-        "oldNs": 459084,
-        "newNs": 352791,
+        "oldNs": 590916,
+        "newNs": 603750,
         "oldAllocated": 102944,
-        "newAllocated": 51624
+        "newAllocated": 51912
       },
       {
         "case": "small-chunked-decode",
         "bytes": 447,
-        "oldNs": 470833,
-        "newNs": 399292,
+        "oldNs": 864125,
+        "newNs": 556292,
         "oldAllocated": 106160,
-        "newAllocated": 66320
+        "newAllocated": 66680
       },
       {
         "case": "stream-heavy-scan",
         "bytes": 1049564,
-        "oldNs": 10829375,
-        "newNs": 210958,
-        "oldAllocated": 57012928,
-        "newAllocated": 60056
+        "oldNs": 9883458,
+        "newNs": 141333,
+        "oldAllocated": 56997328,
+        "newAllocated": 51208
       },
       {
         "case": "stream-heavy-decode",
         "bytes": 1049564,
-        "oldNs": 15199042,
-        "newNs": 2778417,
+        "oldNs": 22205333,
+        "newNs": 3570625,
         "oldAllocated": 67197824,
-        "newAllocated": 4964312
+        "newAllocated": 4970520
       },
       {
         "case": "stream-heavy-chunked-decode",
         "bytes": 1049564,
-        "oldNs": 23329500,
-        "newNs": 7155708,
+        "oldNs": 30857625,
+        "newNs": 5700000,
         "oldAllocated": 73140984,
-        "newAllocated": 6042416
+        "newAllocated": 6047808
       },
       {
         "case": "object-heavy-scan",
         "bytes": 28576,
-        "oldNs": 1489417,
-        "newNs": 737625,
+        "oldNs": 1494208,
+        "newNs": 657708,
         "oldAllocated": 2916584,
-        "newAllocated": 991688
+        "newAllocated": 1124584
       },
       {
         "case": "object-heavy-decode",
         "bytes": 28576,
-        "oldNs": 3374375,
-        "newNs": 2646417,
+        "oldNs": 3666125,
+        "newNs": 2796667,
         "oldAllocated": 5017192,
-        "newAllocated": 1947968
+        "newAllocated": 2081120
       },
       {
         "case": "object-heavy-chunked-decode",
         "bytes": 28576,
-        "oldNs": 3186583,
-        "newNs": 2831417,
-        "oldAllocated": 5145568,
-        "newAllocated": 2260640
+        "oldNs": 4256042,
+        "newNs": 4122333,
+        "oldAllocated": 5025152,
+        "newAllocated": 2393816
       },
       {
         "case": "content",
         "bytes": 62000,
-        "oldNs": 5117708,
-        "newNs": 5138666,
-        "oldAllocated": 36832016,
-        "newAllocated": 36945488
+        "oldNs": 7811292,
+        "newNs": 1014792,
+        "oldAllocated": 36784016,
+        "newAllocated": 2193488
       }
     ],
     "native": [
       {
         "case": "small-scan",
         "bytes": 447,
-        "oldNs": 341000,
-        "newNs": 195458,
+        "oldNs": 408333,
+        "newNs": 213375,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "small-decode",
         "bytes": 447,
-        "oldNs": 602250,
-        "newNs": 271208,
+        "oldNs": 737875,
+        "newNs": 310709,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "small-chunked-decode",
         "bytes": 447,
-        "oldNs": 646375,
-        "newNs": 297125,
+        "oldNs": 642958,
+        "newNs": 296208,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "stream-heavy-scan",
         "bytes": 1049564,
-        "oldNs": 140146292,
-        "newNs": 432000,
+        "oldNs": 135158084,
+        "newNs": 421792,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "stream-heavy-decode",
         "bytes": 1049564,
-        "oldNs": 168788667,
-        "newNs": 48929125,
+        "oldNs": 247650917,
+        "newNs": 144568917,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "stream-heavy-chunked-decode",
         "bytes": 1049564,
-        "oldNs": 249061000,
-        "newNs": 71129042,
+        "oldNs": 237975625,
+        "newNs": 71963750,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "object-heavy-scan",
         "bytes": 28576,
-        "oldNs": 18020209,
-        "newNs": 9755542,
+        "oldNs": 17463375,
+        "newNs": 9564375,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "object-heavy-decode",
         "bytes": 28576,
-        "oldNs": 36884500,
-        "newNs": 15174791,
+        "oldNs": 32096416,
+        "newNs": 14113541,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "object-heavy-chunked-decode",
         "bytes": 28576,
-        "oldNs": 34365834,
-        "newNs": 14217791,
+        "oldNs": 35060416,
+        "newNs": 14620084,
         "oldAllocated": -1,
         "newAllocated": -1
       },
       {
         "case": "content",
         "bytes": 62000,
-        "oldNs": 300636209,
-        "newNs": 314987042,
+        "oldNs": 960066625,
+        "newNs": 34632459,
         "oldAllocated": -1,
         "newAllocated": -1
       }
     ]
-  }
+  },
+  "sourceCommit": "9355a296e9e9c168aee10ef3a6e175676636bece",
+  "beforeOptimizationSourceCommit": "75b78c3089edcf026f3f4c469cc3a4b2a511df9d",
+  "beforeOptimization": {
+    "jvm": [
+      {
+        "case": "small-scan",
+        "bytes": 447,
+        "oldNs": 216958,
+        "newNs": 120167,
+        "oldAllocated": 59352,
+        "newAllocated": 27976
+      },
+      {
+        "case": "small-decode",
+        "bytes": 447,
+        "oldNs": 415750,
+        "newNs": 341375,
+        "oldAllocated": 102944,
+        "newAllocated": 51920
+      },
+      {
+        "case": "small-chunked-decode",
+        "bytes": 447,
+        "oldNs": 450625,
+        "newNs": 522083,
+        "oldAllocated": 106160,
+        "newAllocated": 66688
+      },
+      {
+        "case": "stream-heavy-scan",
+        "bytes": 1049564,
+        "oldNs": 9321583,
+        "newNs": 104042,
+        "oldAllocated": 56997328,
+        "newAllocated": 45288
+      },
+      {
+        "case": "stream-heavy-decode",
+        "bytes": 1049564,
+        "oldNs": 27665125,
+        "newNs": 3134959,
+        "oldAllocated": 67197824,
+        "newAllocated": 4964608
+      },
+      {
+        "case": "stream-heavy-chunked-decode",
+        "bytes": 1049564,
+        "oldNs": 28017917,
+        "newNs": 5258166,
+        "oldAllocated": 73140504,
+        "newAllocated": 6041896
+      },
+      {
+        "case": "object-heavy-scan",
+        "bytes": 28576,
+        "oldNs": 1071500,
+        "newNs": 567042,
+        "oldAllocated": 2904200,
+        "newAllocated": 991720
+      },
+      {
+        "case": "object-heavy-decode",
+        "bytes": 28576,
+        "oldNs": 2919375,
+        "newNs": 2144750,
+        "oldAllocated": 4863048,
+        "newAllocated": 1948264
+      },
+      {
+        "case": "object-heavy-chunked-decode",
+        "bytes": 28576,
+        "oldNs": 3271792,
+        "newNs": 3118042,
+        "oldAllocated": 5012768,
+        "newAllocated": 2260792
+      },
+      {
+        "case": "content",
+        "bytes": 62000,
+        "oldNs": 5537833,
+        "newNs": 6119750,
+        "oldAllocated": 36832016,
+        "newAllocated": 36993488
+      }
+    ],
+    "native": [
+      {
+        "case": "small-scan",
+        "bytes": 447,
+        "oldNs": 323750,
+        "newNs": 189083,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "small-decode",
+        "bytes": 447,
+        "oldNs": 576042,
+        "newNs": 257792,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "small-chunked-decode",
+        "bytes": 447,
+        "oldNs": 597292,
+        "newNs": 253792,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "stream-heavy-scan",
+        "bytes": 1049564,
+        "oldNs": 135088375,
+        "newNs": 417542,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "stream-heavy-decode",
+        "bytes": 1049564,
+        "oldNs": 159694250,
+        "newNs": 94241000,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "stream-heavy-chunked-decode",
+        "bytes": 1049564,
+        "oldNs": 267146583,
+        "newNs": 66047500,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "object-heavy-scan",
+        "bytes": 28576,
+        "oldNs": 16718000,
+        "newNs": 9158625,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "object-heavy-decode",
+        "bytes": 28576,
+        "oldNs": 30569708,
+        "newNs": 13490375,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "object-heavy-chunked-decode",
+        "bytes": 28576,
+        "oldNs": 32485750,
+        "newNs": 13491792,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "content",
+        "bytes": 62000,
+        "oldNs": 254422209,
+        "newNs": 262084583,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      }
+    ]
+  },
+  "qualification": "Shared host, not an isolated lab. Timing can vary substantially across runs, especially Native allocation-heavy workloads. Paired results and all slower cases are retained."
 }

@@ -357,3 +357,6 @@ Regressions exercise non-PDF length-prefixed frames, every fragmentation of a
 small example, delimiter carry, shared derived checks, distinct reader demands,
 backing-byte accounting, independent leases, detach, backpressure/retry, EOF,
 interruption, early termination and logical offsets near `Long.MaxValue`.
+
+[Measured Scan/FS2 performance](scan-performance.md) includes slower kernels
+and distinguishes batched throughput from elementwise read-ahead.

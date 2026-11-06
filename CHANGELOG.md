@@ -18,6 +18,9 @@ All notable changes to this project are documented here.
   instances with bounded batches and scoped cleanup. Preserve input bytes and
   observations together using union or Either syntax built from composition.
 
+- Optimize direct unary scan execution and bounded FS2 batches, preserve output
+  order through branches of unequal depth, and retain an elementwise pipe mode.
+  Replace content-token regex compilation with checked ASCII grammar loops.
 - Migrate Kyo structural, content and document parsers to shared byte views.
   Feed admitted object boundaries into the generic scan decoder, share lazy xref
   Length resolution, and remove whole-document character copies and input
