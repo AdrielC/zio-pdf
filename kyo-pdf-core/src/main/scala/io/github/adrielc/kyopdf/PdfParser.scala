@@ -6,7 +6,7 @@ import java.util.zip.InflaterInputStream
 import kyo.*
 import scala.util.Try
 
-/** PDF lexical boundary implemented on kyo-parse.
+/** PDF lexical boundaries over shared byte input.
   *
   * Streams are skipped using a direct `/Length` or a classic-xref-resolved
   * indirect `/Length`; their payload is never searched for object markers.
@@ -14,8 +14,7 @@ import scala.util.Try
   * guessing from `endstream` bytes.
   */
 object PdfParser:
-  private final case class Ref(number: Long, generation: Int)
-  private final case class ObjectHeader(ref: Ref, bodyStart: Int)
+  private final case class ObjectHeader(ref: ObjectRef, bodyStart: Int)
   private final case class Embedded(objects: Long, pages: Long, nodes: Long, depth: Int, payload: Long)
   private final case class ObjectScan(
       end: Int,
@@ -30,31 +29,45 @@ object PdfParser:
 
   def scan(bytes: Array[Byte], limit: ByteLimit): ScanReport < Abort[PdfError] =
     if bytes.length.toLong > limit.toLong then Abort.fail(PdfError.TooLarge(limit.toLong, bytes.length.toLong))
-    else
-      val input = new String(bytes, ISO_8859_1)
-      Parse.runResult(input)(document).eval match
-        case result if result.errors.nonEmpty =>
-          val message = result.errors.map(failure => s"${failure.position}: ${failure.message}").mkString("; ")
-          Abort.fail(PdfError.InvalidPdf(message))
-        case result => result.out.fold(Abort.fail(PdfError.InvalidPdf("PDF parser produced no document")))(identity)
+    else Abort.get(scanBytes(PdfBytes.borrow(bytes)))
+
+  /** Partial structural observation. A successful early result does not certify
+    * the unread suffix; use scan/decode for whole-document validation.
+    */
+  def scanUntil(bytes: Array[Byte], limit: ByteLimit)(stop: ScanReport => Boolean): ScanReport < Abort[PdfError] =
+    if bytes.length.toLong > limit.toLong then Abort.fail(PdfError.TooLarge(limit.toLong, bytes.length.toLong))
+    else Abort.get(scanBytes(PdfBytes.borrow(bytes), stop = stop))
+
+  private[kyopdf] enum Event:
+    case Object(number: Long, generation: Int, bodyStart: Int, end: Int, lengths: () => Map[ObjectRef, Long])
+    case Trailer(start: Int)
+
+  private[kyopdf] def scanBytes(text: PdfBytes,
+      visit: Event => Either[PdfError, Unit] = _ => Right(()),
+      limits: Option[RetentionLimits] = None,
+      stop: ScanReport => Boolean = _ => false): Either[PdfError, ScanReport] =
+    scanDocument(text, visit, limits, stop)
 
   def validate(report: ScanReport, limits: RetentionLimits): Unit < Abort[PdfError] =
+    Abort.get(checkLimits(report, limits))
+
+  private[kyopdf] def checkLimits(report: ScanReport, limits: RetentionLimits): Either[PdfError, Unit] =
     if limits.maxObjects <= 0 || limits.maxNodes <= 0 || limits.maxDepth < 0 || limits.maxPayloadBytes <= 0 then
-      Abort.fail(PdfError.RetentionExceeded("Invalid PDF retention limits"))
+      Left(PdfError.RetentionExceeded("Invalid PDF retention limits"))
     else if report.facts.objects > limits.maxObjects then
-      Abort.fail(PdfError.RetentionExceeded(s"PDF retains ${report.facts.objects} objects"))
+      Left(PdfError.RetentionExceeded(s"PDF retains ${report.facts.objects} objects"))
     else if report.retention.nodes > limits.maxNodes then
-      Abort.fail(PdfError.RetentionExceeded(s"PDF retains ${report.retention.nodes} syntax nodes"))
+      Left(PdfError.RetentionExceeded(s"PDF retains ${report.retention.nodes} syntax nodes"))
     else if report.retention.depth > limits.maxDepth then
-      Abort.fail(PdfError.RetentionExceeded(s"PDF syntax depth is ${report.retention.depth}"))
+      Left(PdfError.RetentionExceeded(s"PDF syntax depth is ${report.retention.depth}"))
     else if report.retention.payloadBytes > limits.maxPayloadBytes then
-      Abort.fail(PdfError.RetentionExceeded(s"PDF retains ${report.retention.payloadBytes} payload bytes"))
-    else if report.encrypted then Abort.fail(PdfError.InvalidPdf("Encrypted PDFs are not supported"))
-    else ()
+      Left(PdfError.RetentionExceeded(s"PDF retains ${report.retention.payloadBytes} payload bytes"))
+    else if report.encrypted then Left(PdfError.InvalidPdf("Encrypted PDFs are not supported"))
+    else Right(())
 
   /** Reads `/E` from the first linearization dictionary. */
   def firstPageByteLength(bytes: Array[Byte]): Long < Abort[PdfError] =
-    val sample = new String(bytes.take(math.min(bytes.length, 8192)), ISO_8859_1)
+    val sample = new String(bytes, 0, math.min(bytes.length, 8192), ISO_8859_1)
     val parser = for
       _ <- Parse.skipUntil(Parse.literal("/Linearized"))
       _ <- Parse.skipUntil(Parse.literal("/E"))
@@ -69,28 +82,21 @@ object PdfParser:
         val detail = result.errors.map(_.message).mkString("; ")
         Abort.fail(PdfError.InvalidPdf(if detail.nonEmpty then detail else "Invalid linearized first-page byte boundary"))
 
-  // Parse effects carry handler state and must not be cached across runs or
-  // lifted onto a different runtime thread.
-  private def document: ScanReport < Parse[Char] =
-    Parse.read { input =>
-      val text = input.remaining.mkString
-      scanDocument(text) match
-        case Left((at, message)) => Result.fail(Chunk(ParseFailure(message, input.position + at)))
-        case Right(report) => Result.succeed((input.advance(input.remaining.length), report))
-    }
-
-  private def scanDocument(text: String): Either[(Int, String), ScanReport] =
-    val header = text.indexOf("%PDF-")
-    if header < 0 || header > 1024 then Left((0, "Missing PDF header"))
+  private def scanDocument(text: PdfBytes, visit: Event => Either[PdfError, Unit],
+      limits: Option[RetentionLimits], stop: ScanReport => Boolean): Either[PdfError, ScanReport] =
+    def invalid(at: Int, message: String): PdfError = PdfError.InvalidPdf(s"$at: $message")
+    val header = text.slice(0, math.min(text.length, 1029)).indexOf("%PDF-")
+    if header < 0 || header > 1024 then Left(invalid(0, "Missing PDF header"))
     else
       val versionStart = header + 5
-      val versionEnd = text.indexWhere(ch => ch == '%' || ch == '\r' || ch == '\n' || ch.isWhitespace, versionStart) match
-        case -1 => text.length
-        case at => at
-      val version = text.substring(versionStart, versionEnd)
-      if !version.matches("[0-9]+\\.[0-9]+") then Left((versionStart, "Invalid PDF version"))
+      val versionWindow = text.slice(versionStart, math.min(text.length, versionStart + 65))
+      val versionEnd = versionWindow.indexWhere(ch => ch == '%' || ch == '\r' || ch == '\n' || ch.isWhitespace, 0) match
+        case -1 => versionStart + versionWindow.length
+        case at => versionStart + at
+      val version = if versionEnd - versionStart <= 64 then text.substring(versionStart, versionEnd) else ""
+      if !version.matches("[0-9]+\\.[0-9]+") then Left(invalid(versionStart, "Invalid PDF version"))
       else
-        val indirectLengths = classicNumericObjects(text)
+        lazy val indirectLengths = classicNumericObjects(text)
         var cursor = versionEnd
         var objects = 0L
         var streams = 0L
@@ -99,17 +105,20 @@ object PdfParser:
         var maxDepth = 0
         var payload = 0L
         var encrypted = false
-        var failure: Option[(Int, String)] = None
-        while cursor < text.length && failure.isEmpty do
+        var failure: Option[PdfError] = limits.flatMap(value => checkLimits(
+          ScanReport(version, Facts(0, 0, 0), Retention(0, 0, 0, 0), false), value).left.toOption)
+        var stopped = false
+        def report: ScanReport = ScanReport(version, Facts(objects, streams, pages), Retention(objects.toInt, nodes, maxDepth, payload), encrypted)
+        while cursor < text.length && failure.isEmpty && !stopped do
           skipTrivia(text, cursor) match
-            case Left(error) => failure = Some(error)
+            case Left((at, message)) => failure = Some(invalid(at, message))
             case Right(next) =>
               cursor = next
               if cursor < text.length then
                 indirectHeader(text, cursor) match
                   case Some(header) =>
                     scanObject(text, header.bodyStart, indirectLengths) match
-                      case Left(error) => failure = Some(error)
+                      case Left((at, message)) => failure = Some(invalid(at, message))
                       case Right(found) =>
                         objects += found.objects
                         streams += found.streams
@@ -119,22 +128,25 @@ object PdfParser:
                         payload += found.payload
                         encrypted ||= found.encrypted
                         cursor = found.end
+                        limits.foreach(value => failure = checkLimits(report, value).left.toOption)
+                        if failure.isEmpty then
+                          failure = visit(Event.Object(header.ref.number, header.ref.generation, header.bodyStart, found.end, () => indirectLengths)).left.toOption
+                          if failure.isEmpty then stopped = stop(report)
                   case None =>
                     if keywordAt(text, cursor, "trailer") then
                       val trailerEnd = findKeyword(text, cursor + 7, "startxref").getOrElse(text.length)
                       encrypted ||= containsName(text, cursor, trailerEnd, "Encrypt")
+                      limits.foreach(value => failure = checkLimits(report, value).left.toOption)
+                      if failure.isEmpty then failure = visit(Event.Trailer(cursor + 7)).left.toOption
                       cursor = trailerEnd
                     else cursor += 1
-        failure.toLeft {
-          val facts = Facts(objects, streams, pages)
-          ScanReport(version, facts, Retention(objects.toInt, nodes, maxDepth, payload), encrypted)
-        }.flatMap { report =>
-          if report.facts.objects == 0 then Left((header, "PDF contains no indirect objects"))
-          else if report.facts.pages == 0 then Left((header, "PDF contains no page objects"))
-          else Right(report)
+        failure.toLeft(report).flatMap { found =>
+          if found.facts.objects == 0 then Left(invalid(header, "PDF contains no indirect objects"))
+          else if found.facts.pages == 0 && !stopped then Left(invalid(header, "PDF contains no page objects"))
+          else Right(found)
         }
 
-  private def scanObject(text: String, start: Int, indirectLengths: Map[Ref, Long]): Either[(Int, String), ObjectScan] =
+  private def scanObject(text: PdfBytes, start: Int, indirectLengths: => Map[ObjectRef, Long]): Either[(Int, String), ObjectScan] =
     var cursor = start
     var streams = 0
     var nodes = 0L
@@ -228,8 +240,8 @@ object PdfParser:
             // belongs to the endstream token.
             if !keywordStartsAt(text, endstream, "endstream") then return Left((endstream, "PDF stream length does not land on endstream"))
             if objectStream then
-              val dictionary = text.substring(start, cursor)
-              val raw = text.substring(dataStart, dataEnd.toInt).getBytes(ISO_8859_1)
+              val dictionary = text.slice(start, cursor)
+              val raw = text.copyBytes(dataStart, dataEnd.toInt)
               decodeObjectStream(dictionary, raw, cursor) match
                 case Left(error) => return Left(error)
                 case Right(value) => embedded = value
@@ -248,7 +260,7 @@ object PdfParser:
       else cursor += 1
     Left((start, "Unterminated indirect object"))
 
-  private def indirectHeader(text: String, at: Int): Option[ObjectHeader] =
+  private def indirectHeader(text: PdfBytes, at: Int): Option[ObjectHeader] =
     val firstEnd = digitsEnd(text, at)
     if firstEnd == at then None
     else
@@ -259,9 +271,9 @@ object PdfParser:
         number <- text.substring(at, firstEnd).toLongOption
         generation <- text.substring(generationStart, generationEnd).toIntOption
         if generationEnd > generationStart && keywordAt(text, marker, "obj")
-      yield ObjectHeader(Ref(number, generation), marker + 3)
+      yield ObjectHeader(ObjectRef(number, generation), marker + 3)
 
-  private def streamLength(text: String, from: Int, until: Int, indirect: Map[Ref, Long]): Either[String, Long] =
+  private def streamLength(text: PdfBytes, from: Int, until: Int, indirect: => Map[ObjectRef, Long]): Either[String, Long] =
     var at = from
     var found: Option[Either[String, Long]] = None
     while at < until && found.isEmpty do
@@ -277,13 +289,13 @@ object PdfParser:
             val ref = for
               number <- first
               generation <- text.substring(after, generationEnd).toIntOption
-            yield Ref(number, generation)
+            yield ObjectRef(number, generation)
             found = Some(ref.flatMap(indirect.get).toRight("PDF stream /Length reference cannot be resolved from the classic xref"))
           else found = Some(first.toRight("Invalid direct PDF stream /Length"))
       at += 1
     found.getOrElse(Left("PDF stream does not have a /Length"))
 
-  private def classicNumericObjects(text: String): Map[Ref, Long] =
+  private def classicNumericObjects(text: PdfBytes): Map[ObjectRef, Long] =
     classicXrefOffsets(text).flatMap { (ref, offset) =>
       indirectHeader(text, offset).filter(_.ref == ref).flatMap { header =>
         findKeyword(text, header.bodyStart, "endobj").flatMap { end =>
@@ -296,7 +308,7 @@ object PdfParser:
   /** Resolve the latest classic xref table. Malformed and xref-stream inputs
     * simply yield no offsets; callers then reject unresolved indirect lengths.
     */
-  private def classicXrefOffsets(text: String): Map[Ref, Int] =
+  private def classicXrefOffsets(text: PdfBytes): Map[ObjectRef, Int] =
     val marker = text.lastIndexOf("startxref")
     if marker < 0 then Map.empty
     else
@@ -306,7 +318,7 @@ object PdfParser:
         case None => Map.empty
         case Some(xref) if xref < 0 || xref >= text.length || !keywordAt(text, xref, "xref") => Map.empty
         case Some(xref) =>
-          val output = Map.newBuilder[Ref, Int]
+          val output = Map.newBuilder[ObjectRef, Int]
           var cursor = skipWhitespace(text, xref + 4)
           var done = false
           while cursor < text.length && !done do
@@ -333,13 +345,13 @@ object PdfParser:
                       for
                         offset <- columns(0).toIntOption
                         generation <- columns(1).toIntOption
-                      do output += Ref(first + index, generation) -> offset
+                      do output += ObjectRef(first + index, generation) -> offset
                     cursor = nextLine(text, lineEnd)
                     index += 1
                   cursor = skipWhitespace(text, cursor)
           output.result()
 
-  private def decodeObjectStream(dictionary: String, raw: Array[Byte], at: Int): Either[(Int, String), Embedded] =
+  private def decodeObjectStream(dictionary: PdfBytes, raw: Array[Byte], at: Int): Either[(Int, String), Embedded] =
     val parameters = for
       count <- integerEntry(dictionary, "N").toRight((at, "PDF object stream is missing /N"))
       first <- integerEntry(dictionary, "First").toRight((at, "PDF object stream is missing /First"))
@@ -357,7 +369,7 @@ object PdfParser:
         expanded.left.map(message => (at, message)).flatMap { bytes =>
           if first > bytes.length then Left((at, "PDF object-stream /First exceeds expanded bytes"))
           else
-            val text = new String(bytes, ISO_8859_1)
+            val text = PdfBytes.borrow(bytes)
             val header = text.substring(0, first).trim.split("\\s+").toVector.filter(_.nonEmpty)
             if header.length < count * 2 then Left((at, "PDF object-stream header has fewer than /N entries"))
             else
@@ -375,7 +387,7 @@ object PdfParser:
                   values.zipWithIndex.foreach { (offset, index) =>
                     val start = first + offset
                     val end = if index + 1 < values.length then first + values(index + 1) else bytes.length
-                    val body = text.substring(start, end)
+                    val body = text.slice(start, end)
                     if typeName(body).contains("Page") then pages += 1
                     val measured = measureValue(body)
                     nodes += measured._1
@@ -386,7 +398,7 @@ object PdfParser:
         }
     }
 
-  private def integerEntry(dictionary: String, name: String): Option[Long] =
+  private def integerEntry(dictionary: PdfBytes, name: String): Option[Long] =
     val marker = dictionary.indexOf("/" + name)
     if marker < 0 || !tokenBoundary(dictionary, marker + name.length + 1) then None
     else
@@ -394,7 +406,7 @@ object PdfParser:
       val end = digitsEnd(dictionary, start)
       dictionary.substring(start, end).toLongOption
 
-  private def nameEntries(dictionary: String, name: String): List[String] =
+  private def nameEntries(dictionary: PdfBytes, name: String): List[String] =
     val marker = dictionary.indexOf("/" + name)
     if marker < 0 || !tokenBoundary(dictionary, marker + name.length + 1) then Nil
     else
@@ -434,7 +446,7 @@ object PdfParser:
       finally input.close()
     }.toEither.left.map(error => Option(error.getMessage).getOrElse(error.getClass.getSimpleName)).flatten
 
-  private def typeName(body: String): Option[String] =
+  private def typeName(body: PdfBytes): Option[String] =
     val marker = body.indexOf("/Type")
     if marker < 0 || !tokenBoundary(body, marker + 5) then None
     else
@@ -444,7 +456,7 @@ object PdfParser:
         body.substring(start + 1, end)
       }
 
-  private def measureValue(body: String): (Long, Int, Long) =
+  private def measureValue(body: PdfBytes): (Long, Int, Long) =
     var cursor = 0
     var nodes = 0L
     var depth = 0
@@ -465,14 +477,14 @@ object PdfParser:
         case _ => nodes += 1; cursor = tokenEnd(body, cursor)
     (nodes, maxDepth, payload)
 
-  private def nextLine(text: String, from: Int): Int =
+  private def nextLine(text: PdfBytes, from: Int): Int =
     var at = from
     while at < text.length && text.charAt(at) != '\r' && text.charAt(at) != '\n' do at += 1
     if at < text.length && text.charAt(at) == '\r' then at += 1
     if at < text.length && text.charAt(at) == '\n' then at += 1
     at
 
-  private def skipTrivia(text: String, start: Int): Either[(Int, String), Int] =
+  private def skipTrivia(text: PdfBytes, start: Int): Either[(Int, String), Int] =
     var at = start
     var continue = true
     while at < text.length && continue do
@@ -483,7 +495,7 @@ object PdfParser:
       else continue = false
     Right(at)
 
-  private def containsName(text: String, from: Int, until: Int, name: String): Boolean =
+  private def containsName(text: PdfBytes, from: Int, until: Int, name: String): Boolean =
     val needle = "/" + name
     var at = text.indexOf(needle, from)
     while at >= 0 && at < until do
@@ -491,31 +503,31 @@ object PdfParser:
       at = text.indexOf(needle, at + 1)
     false
 
-  private def findKeyword(text: String, from: Int, keyword: String): Option[Int] =
+  private def findKeyword(text: PdfBytes, from: Int, keyword: String): Option[Int] =
     var at = text.indexOf(keyword, from)
     while at >= 0 do
       if keywordAt(text, at, keyword) then return Some(at)
       at = text.indexOf(keyword, at + 1)
     None
 
-  private def keywordAt(text: String, at: Int, keyword: String): Boolean =
+  private def keywordAt(text: PdfBytes, at: Int, keyword: String): Boolean =
     at >= 0 && text.startsWith(keyword, at) &&
       (at == 0 || delimiter(text.charAt(at - 1))) && tokenBoundary(text, at + keyword.length)
 
-  private def keywordStartsAt(text: String, at: Int, keyword: String): Boolean =
+  private def keywordStartsAt(text: PdfBytes, at: Int, keyword: String): Boolean =
     at >= 0 && text.startsWith(keyword, at) && tokenBoundary(text, at + keyword.length)
 
-  private def tokenBoundary(text: String, at: Int): Boolean = at >= text.length || delimiter(text.charAt(at))
+  private def tokenBoundary(text: PdfBytes, at: Int): Boolean = at >= text.length || delimiter(text.charAt(at))
   private def delimiter(ch: Char): Boolean = ch.isWhitespace || "()<>[]{}/%".contains(ch) || ch == 0
-  private def skipWhitespace(text: String, start: Int): Int =
+  private def skipWhitespace(text: PdfBytes, start: Int): Int =
     var at = start
     while at < text.length && (text.charAt(at).isWhitespace || text.charAt(at) == 0) do at += 1
     at
-  private def digitsEnd(text: String, start: Int): Int =
+  private def digitsEnd(text: PdfBytes, start: Int): Int =
     var at = start
     while at < text.length && text.charAt(at).isDigit do at += 1
     at
-  private def tokenEnd(text: String, start: Int): Int =
+  private def tokenEnd(text: PdfBytes, start: Int): Int =
     var at = start
     while at < text.length && !delimiter(text.charAt(at)) do at += 1
     if at == start then start + 1 else at

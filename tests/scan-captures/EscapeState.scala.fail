@@ -1,0 +1,12 @@
+import scala.language.experimental.captureChecking
+import io.github.adrielc.bytescan.SharedScan.View
+import io.github.adrielc.bytescan.capture.ScopedView
+import io.github.adrielc.scan.Scan
+
+object EscapeState:
+  def escape(view: View) = ScopedView.use(view) { borrow =>
+    Scan.stateful[ScopedView.Borrowed^, Int, Byte](borrow)((state, _, emit) => {
+      state.read(state.from).foreach(emit(_))
+      state
+    })
+  }

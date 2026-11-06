@@ -539,7 +539,7 @@ Plain `git clone` is enough — no submodules.
 
 Tags matching `v*` require curated notes in `release-notes/<tag>.md`. The
 workflow tests the build, exercises Gotenberg tool calls, and runs external
-Policy and Native consumers before `sbt-ci-release` signs and uploads all twelve
+Policy and Native consumers before `sbt-ci-release` signs and uploads all fourteen
 artifacts. It verifies every coordinate and runs JVM and Native Policy consumers from
 Maven Central before creating the GitHub release.
 

@@ -15,9 +15,9 @@ else
     sed -nE 's/^\[info\] ([0-9]+\.[0-9]+\.[0-9]+[^ ]*)$/\1/p' | tail -1)"
   [[ -n "$version" ]]
   repository="$PROOF_ROOT/repo"
-  "${PROOF_SBT[@]}" -batch ";set ThisBuild / version := \"$version\";set kyoPdf / publishTo := Some(Resolver.file(\"policy-proof\", file(\"$repository\"))(using Resolver.mavenStylePatterns));set kyoPdfZio / publishTo := Some(Resolver.file(\"policy-proof\", file(\"$repository\"))(using Resolver.mavenStylePatterns));set kyoPdfPipeline / publishTo := Some(Resolver.file(\"policy-proof\", file(\"$repository\"))(using Resolver.mavenStylePatterns));kyoPdf/publish;kyoPdfZio/publish;kyoPdfPipeline/publish"
+  "${PROOF_SBT[@]}" -batch ";set ThisBuild / version := \"$version\";set kyoPdf / publishTo := Some(Resolver.file(\"policy-proof\", file(\"$repository\"))(using Resolver.mavenStylePatterns));set kyoPdfZio / publishTo := Some(Resolver.file(\"policy-proof\", file(\"$repository\"))(using Resolver.mavenStylePatterns));set kyoPdfPipeline / publishTo := Some(Resolver.file(\"policy-proof\", file(\"$repository\"))(using Resolver.mavenStylePatterns));set kyoPdfFs2 / publishTo := Some(Resolver.file(\"policy-proof\", file(\"$repository\"))(using Resolver.mavenStylePatterns));kyoPdf/publish;kyoPdfZio/publish;kyoPdfPipeline/publish;kyoPdfFs2/publish"
 
-  for artifact in kyo-pdf_3 kyo-pdf-zio_3 kyo-pdf-pipeline_3; do
+  for artifact in kyo-pdf_3 kyo-pdf-zio_3 kyo-pdf-pipeline_3 kyo-pdf-fs2_3; do
     base="$repository/io/github/adrielc/$artifact/$version/$artifact-$version"
     for suffix in .pom .jar -sources.jar -javadoc.jar; do test -s "$base$suffix"; done
     if grep -Eq '<repositories>|<pluginRepositories>' "$base.pom"; then

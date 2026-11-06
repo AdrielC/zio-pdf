@@ -1,0 +1,201 @@
+{
+  "date": "2026-11-05",
+  "sourceCommit": "9355a296e9e9c168aee10ef3a6e175676636bece",
+  "fs2": "3.14.0",
+  "hardware": "Apple M3 Pro, arm64 macOS",
+  "scala": "3.8.4",
+  "jvm": "Temurin 24.0.2, 3 GiB heap, 4 active processors",
+  "native": "Scala Native 0.5.12, debug, immix, no LTO",
+  "method": "32768 prebuilt inputs; output checksums equal before timing; reusable definitions/plans; fresh state per run; 15 warmup pairs, 21 alternating measured pairs; median",
+  "allocation": "JVM current-thread allocated bytes for synchronous kernels only; -1 unavailable; IO can use another thread; not retained heap or RSS",
+  "results": {
+    "jvm": [
+      {
+        "case": "running-sum-kernel",
+        "inputs": 32768,
+        "fs2Ns": 507750,
+        "oursNs": 716625,
+        "fs2Allocated": 3669432,
+        "oursAllocated": 795032
+      },
+      {
+        "case": "mapped-sum-kernel",
+        "inputs": 32768,
+        "fs2Ns": 1408708,
+        "oursNs": 2360417,
+        "fs2Allocated": 9959976,
+        "oursAllocated": 3154112
+      },
+      {
+        "case": "contextual-first-kernel",
+        "inputs": 32768,
+        "fs2Ns": 731208,
+        "oursNs": 2259708,
+        "fs2Allocated": 7339064,
+        "oursAllocated": 5784016
+      },
+      {
+        "case": "choose-kernel",
+        "inputs": 32768,
+        "fs2Ns": 876542,
+        "oursNs": 2018208,
+        "fs2Allocated": 7862920,
+        "oursAllocated": 2105560
+      },
+      {
+        "case": "chunked-source-pipe",
+        "inputs": 32768,
+        "fs2Ns": 5995375,
+        "oursNs": 4043083,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "elementwise-source-pipe",
+        "inputs": 32768,
+        "fs2Ns": 5854458,
+        "oursNs": 13357083,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      }
+    ],
+    "native": [
+      {
+        "case": "running-sum-kernel",
+        "inputs": 32768,
+        "fs2Ns": 11646208,
+        "oursNs": 12819625,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "mapped-sum-kernel",
+        "inputs": 32768,
+        "fs2Ns": 21129666,
+        "oursNs": 12797625,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "contextual-first-kernel",
+        "inputs": 32768,
+        "fs2Ns": 21731167,
+        "oursNs": 27862000,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "choose-kernel",
+        "inputs": 32768,
+        "fs2Ns": 28001917,
+        "oursNs": 22797542,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "chunked-source-pipe",
+        "inputs": 32768,
+        "fs2Ns": 33617792,
+        "oursNs": 18519667,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "elementwise-source-pipe",
+        "inputs": 32768,
+        "fs2Ns": 32264917,
+        "oursNs": 212140584,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      }
+    ]
+  },
+  "beforeOptimization": {
+    "jvm": [
+      {
+        "case": "running-sum-kernel",
+        "inputs": 32768,
+        "fs2Ns": 918250,
+        "oursNs": 703709,
+        "fs2Allocated": 3669432,
+        "oursAllocated": 795040
+      },
+      {
+        "case": "mapped-sum-kernel",
+        "inputs": 32768,
+        "fs2Ns": 1295125,
+        "oursNs": 3409500,
+        "fs2Allocated": 9959976,
+        "oursAllocated": 3154120
+      },
+      {
+        "case": "contextual-first-kernel",
+        "inputs": 32768,
+        "fs2Ns": 664250,
+        "oursNs": 2276709,
+        "fs2Allocated": 7339064,
+        "oursAllocated": 5784032
+      },
+      {
+        "case": "choose-kernel",
+        "inputs": 32768,
+        "fs2Ns": 792708,
+        "oursNs": 2307708,
+        "fs2Allocated": 7862920,
+        "oursAllocated": 2105568
+      },
+      {
+        "case": "chunked-source-pipe",
+        "inputs": 32768,
+        "fs2Ns": 6744834,
+        "oursNs": 27244375,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      }
+    ],
+    "native": [
+      {
+        "case": "running-sum-kernel",
+        "inputs": 32768,
+        "fs2Ns": 11582417,
+        "oursNs": 12686959,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "mapped-sum-kernel",
+        "inputs": 32768,
+        "fs2Ns": 19910333,
+        "oursNs": 15291041,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "contextual-first-kernel",
+        "inputs": 32768,
+        "fs2Ns": 19881709,
+        "oursNs": 25831750,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "choose-kernel",
+        "inputs": 32768,
+        "fs2Ns": 25973875,
+        "oursNs": 23547333,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      },
+      {
+        "case": "chunked-source-pipe",
+        "inputs": 32768,
+        "fs2Ns": 31889041,
+        "oursNs": 368904583,
+        "fs2Allocated": -1,
+        "oursAllocated": -1
+      }
+    ]
+  },
+  "beforeOptimizationSourceCommit": "75b78c3089edcf026f3f4c469cc3a4b2a511df9d",
+  "comparisonCaveat": "Earlier default pipe was elementwise; optimized default batches bounded input. Elementwise results are reported separately."
+}

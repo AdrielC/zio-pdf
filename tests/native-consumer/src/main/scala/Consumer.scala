@@ -1,9 +1,24 @@
 import io.github.adrielc.kyopdf.*
+import io.github.adrielc.scan.Scan
 import java.nio.charset.StandardCharsets.UTF_8
 import kyo.*
 
 object Consumer:
   def main(args: Array[String]): Unit =
+    val scans: Scan.Aux[(Long, Long), Int, Either[Long, Long]] =
+      Scan.count[Int].broadcast(Scan.foldLong[Int](0L)((sum, value) => sum + value))
+    val compiled = scans.compile().toOption.get
+    var observed = (0L, 0L)
+    val run = compiled.open {
+      case Left(count) => observed = (count, observed._2)
+      case Right(sum) => observed = (observed._1, sum)
+    }
+    assert(run.feed(emit => List(1, 2, 3).foreach(emit(_))) == Right(()))
+    val state: Either[Scan.RunIssue, scans.State] = run.finish()
+    assert(state == Right((3L, 6L)) && observed == (3L, 6L))
+    assert(compiled.layout.longSlots == 2 && compiled.layout.referenceSlots == 0)
+    println("Native consumer composed generic scans with typed register state.")
+
     import kyo.AllowUnsafe.embrace.danger
     import PdfValue.*
     val xmp = """<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#">

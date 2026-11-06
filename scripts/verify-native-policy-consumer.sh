@@ -16,14 +16,14 @@ else
   [[ -n "$version" ]]
   repository="$PROOF_ROOT/repo"
   commands=";set ThisBuild / version := \"$version\""
-  projects=(kyoPdfNative blocksChunkNative blocksTypeIdNative blocksMaybeNative blocksMarkdownNative blocksSchemaNative kyoPdfPipelineNative)
+  projects=(kyoPdfNative blocksChunkNative blocksTypeIdNative blocksMaybeNative blocksMarkdownNative blocksSchemaNative kyoPdfPipelineNative kyoPdfFs2Native)
   for project in "${projects[@]}"; do
     commands+=";set $project / publishTo := Some(Resolver.file(\"native-policy-proof\", file(\"$repository\"))(using Resolver.mavenStylePatterns))"
   done
   for project in "${projects[@]}"; do commands+=";$project/publish"; done
   "${PROOF_SBT[@]}" -batch "$commands"
 
-  for module in kyo-pdf kyo-pdf-blocks-chunk kyo-pdf-blocks-typeid kyo-pdf-blocks-maybe kyo-pdf-blocks-markdown kyo-pdf-blocks-schema kyo-pdf-pipeline; do
+  for module in kyo-pdf kyo-pdf-blocks-chunk kyo-pdf-blocks-typeid kyo-pdf-blocks-maybe kyo-pdf-blocks-markdown kyo-pdf-blocks-schema kyo-pdf-pipeline kyo-pdf-fs2; do
     artifact="${module}_native0.5_3"
     base="$repository/io/github/adrielc/$artifact/$version/$artifact-$version"
     for suffix in .pom .jar -sources.jar -javadoc.jar; do test -s "$base$suffix"; done

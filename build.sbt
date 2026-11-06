@@ -15,6 +15,7 @@ val scodecBitsVersion          = "1.2.5"
 val scalaJsDomVersion          = "2.8.1"
 val scalaJavaTimeVersion       = "2.7.0"
 val kyoVersion                 = "1.0.0-RC4"
+val scanFs2Version             = "3.14.0"
 
 ThisBuild / organization      := "io.github.adrielc"
 ThisBuild / scalaVersion      := "3.8.4"
@@ -60,6 +61,8 @@ ThisBuild / scalacOptions ++= List(
   "-Werror"
 )
 
+lazy val checkScanCaptures = taskKey[Unit]("Compile scoped scan examples and reject borrowed capability escapes")
+
 lazy val purgeStaleJmhGenerated = taskKey[Unit]("Remove cached JMH classes from deleted benchmarks")
 
 /**
@@ -90,7 +93,7 @@ private def kyoPdfArtifactSettings = Seq(
   Test / packageDoc / publishArtifact := false
 )
 
-/** Kyo-native PDF core. Main sources intentionally have no ZIO dependency. */
+/** Kyo-native PDF core. Main sources have no ZIO effect dependency. */
 lazy val kyoPdf = (project in file("kyo-pdf-core"))
   .settings(kyoPdfArtifactSettings)
   .settings(
@@ -99,10 +102,38 @@ lazy val kyoPdf = (project in file("kyo-pdf-core"))
       "io.getkyo" %% "kyo-core"    % kyoVersion,
       "io.getkyo" %% "kyo-parse"   % kyoVersion,
       "io.getkyo" %% "kyo-schema"  % kyoVersion,
+      "dev.zio"   %% "zio-blocks-schema" % pipelineSchemaVersion,
       "dev.zio"   %% "zio-test"     % zioVersion % Test,
       "dev.zio"   %% "zio-test-sbt" % zioVersion % Test
     ),
     Test / unmanagedResourceDirectories += (LocalRootProject / Test / resourceDirectory).value,
+    checkScanCaptures := Def.uncached {
+      val compiler = scalaInstance.value.allJars.mkString(java.io.File.pathSeparator)
+      val converter = fileConverter.value
+      val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString).mkString(java.io.File.pathSeparator)
+      val fixtureRoot = (LocalRootProject / baseDirectory).value / "tests" / "scan-captures"
+      val log = streams.value.log
+      val javaBin = javaHome.value.getOrElse(file(sys.props("java.home"))) / "bin" / "java"
+      IO.withTemporaryDirectory { tmp =>
+        val fixtures = (fixtureRoot * "*").get().filter(_.isFile).sortBy(_.getName)
+        require(fixtures.exists(_.getName.endsWith(".scala")) && fixtures.exists(_.getName.endsWith(".scala.fail")),
+          "Capture fixtures must include positive and negative examples")
+        fixtures.foreach { fixture =>
+          val source = tmp / fixture.getName.stripSuffix(".fail")
+          IO.copyFile(fixture, source)
+          val output = tmp / fixture.getName.stripSuffix(".scala.fail").stripSuffix(".scala")
+          IO.createDirectory(output)
+          val messages = new StringBuilder
+          val status = scala.sys.process.Process(Seq(javaBin.getAbsolutePath, "-Xmx512m", "-cp", compiler,
+            "dotty.tools.dotc.Main", "-experimental", "-language:experimental.captureChecking", "-color:never", "-classpath", classpath, "-d", output.getAbsolutePath, source.getAbsolutePath))
+            .!(scala.sys.process.ProcessLogger(line => { messages.append(line).append('\n'); () }))
+          val negative = fixture.getName.endsWith(".fail")
+          if (!negative && status != 0) || (negative && (status == 0 || !(messages.toString.contains("outlives its scope") || messages.toString.contains("cannot flow into capture set")))) then
+            sys.error(s"Unexpected capture check for ${fixture.getName}:\n$messages")
+          log.info(s"Capture check passed: ${fixture.getName}")
+        }
+      }
+    },
     Test / mainClass := Some("io.github.adrielc.kyopdf.PdfParserSpec"),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
@@ -110,6 +141,7 @@ lazy val kyoPdf = (project in file("kyo-pdf-core"))
 /** Scala Native artifact: same core with an Expat-backed XMP reader. */
 lazy val kyoPdfNative = (project in file("kyo-pdf-native"))
   .enablePlugins(ScalaNativePlugin)
+  .dependsOn(blocksSchemaNative)
   .settings(
     name := "kyo-pdf",
     Compile / packageDoc / publishArtifact := true,
@@ -131,6 +163,21 @@ lazy val kyoPdfNative = (project in file("kyo-pdf-native"))
     Test / unmanagedSources +=
       (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
         "io" / "github" / "adrielc" / "kyopdf" / "PdfAIdentificationSpec.scala",
+    Test / unmanagedSources +=
+      (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
+        "io" / "github" / "adrielc" / "bytescan" / "SharedScanSpec.scala",
+    Test / unmanagedSources +=
+      (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
+        "io" / "github" / "adrielc" / "scan" / "ScanSpec.scala",
+    Test / unmanagedSources +=
+      (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
+        "io" / "github" / "adrielc" / "scan" / "ScanCompatibilitySpec.scala",
+    Test / unmanagedSources +=
+      (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
+        "io" / "github" / "adrielc" / "bytescan" / "ScopedViewSpec.scala",
+    Test / unmanagedSources +=
+      (LocalRootProject / baseDirectory).value / "kyo-pdf-core" / "src" / "test" / "scala" /
+        "io" / "github" / "adrielc" / "kyopdf" / "PdfSharedParserSpec.scala",
     libraryDependencies ++= List(
       "io.getkyo" % "kyo-core_native0.5_3"    % kyoVersion,
       "io.getkyo" % "kyo-parse_native0.5_3"   % kyoVersion,
@@ -157,6 +204,37 @@ lazy val kyoPdfZio = (project in file("kyo-pdf-zio"))
       "dev.zio"   %% "zio-test-sbt" % zioVersion % Test
     ),
     Test / mainClass := Some("io.github.adrielc.kyopdf.zio.PdfZIOSpec"),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+/** Optional FS2 transport and Cats instances; the scan kernel stays effect-free. */
+lazy val kyoPdfFs2 = (project in file("kyo-pdf-fs2"))
+  .dependsOn(kyoPdf)
+  .settings(kyoPdfArtifactSettings)
+  .settings(
+    name := "kyo-pdf-fs2",
+    libraryDependencies ++= List(
+      "co.fs2" %% "fs2-core" % scanFs2Version,
+      "dev.zio" %% "zio-test" % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt" % zioVersion % Test
+    ),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+lazy val kyoPdfFs2Native = (project in file("kyo-pdf-fs2-native"))
+  .enablePlugins(ScalaNativePlugin)
+  .dependsOn(kyoPdfNative)
+  .settings(kyoPdfArtifactSettings)
+  .settings(
+    name := "kyo-pdf-fs2",
+    Compile / scalaSource := (kyoPdfFs2 / Compile / scalaSource).value,
+    Test / scalaSource := (kyoPdfFs2 / Test / scalaSource).value,
+    libraryDependencies ++= List(
+      "co.fs2" % "fs2-core_native0.5_3" % scanFs2Version,
+      "dev.zio" % "zio-test_native0.5_3" % zioVersion % Test,
+      "dev.zio" % "zio-test-sbt_native0.5_3" % zioVersion % Test
+    ),
+    libraryDependencySchemes += "org.scala-native" % "test-interface_native0.5_3" % VersionScheme.EarlySemVer,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
   )
 

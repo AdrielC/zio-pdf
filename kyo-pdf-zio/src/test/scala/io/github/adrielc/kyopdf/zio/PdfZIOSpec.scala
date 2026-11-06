@@ -3,6 +3,7 @@ package io.github.adrielc.kyopdf.zio
 import java.nio.charset.StandardCharsets.ISO_8859_1
 import io.github.adrielc.kyopdf.{ByteLimit, Facts, PdfError, RetentionLimits}
 import _root_.zio.stream.ZStream
+import _root_.zio.{Chunk, Ref}
 import _root_.zio.test.*
 
 object PdfZIOSpec extends ZIOSpecDefault:
@@ -26,6 +27,28 @@ object PdfZIOSpec extends ZIOSpecDefault:
       .getBytes(ISO_8859_1)
 
   def spec = suite("kyo-pdf ZIO compatibility")(
+    test("invalid headers fail before pulling the next chunk and close the source") {
+      for
+        limit <- PdfZIO.run(kyo.Async.defer(ByteLimit.mebibytes(1)))
+        pulls <- Ref.make(0)
+        closed <- Ref.make(false)
+        source = (ZStream.fromChunk(Chunk.fromArray("%PDF-X\n".getBytes(ISO_8859_1))) ++
+          ZStream.fromZIO(pulls.updateAndGet(_ + 1)).as(1.toByte)).ensuring(closed.set(true))
+        failed <- PdfZIO.decodeStream(source, limit).either
+        observed <- pulls.get
+        released <- closed.get
+      yield assertTrue(failed.left.exists(_.isInstanceOf[PdfError.InvalidPdf]), observed == 0, released)
+    },
+    test("scan byte limits stop upstream without collecting or copying the rejected chunk") {
+      for
+        limit <- PdfZIO.run(kyo.Async.defer(ByteLimit.fromBytes(4)))
+        pulls <- Ref.make(0)
+        source = ZStream.fromChunk(Chunk[Byte](1, 2, 3, 4, 5)) ++
+          ZStream.fromZIO(pulls.updateAndGet(_ + 1)).as(1.toByte)
+        failed <- PdfZIO.scanStream(source, limit).either
+        observed <- pulls.get
+      yield assertTrue(failed == Left(PdfError.TooLarge(4, 5)), observed == 0)
+    },
     test("ZIOs.run preserves Kyo typed failures and successful reports") {
       for
         limit <- PdfZIO.run(kyo.Async.defer(ByteLimit.mebibytes(1)))
@@ -33,7 +56,7 @@ object PdfZIOSpec extends ZIOSpecDefault:
         invalid <- PdfZIO.scan("not a PDF".getBytes(ISO_8859_1), limit).either
       yield assertTrue(report.facts == Facts(3, 0, 1), invalid.left.exists(_.isInstanceOf[PdfError.InvalidPdf]))
     },
-    test("ZStream input is collected only through the configured bound") {
+    test("ZStream input is admitted only through the configured bound") {
       for
         limit <- PdfZIO.run(kyo.Async.defer(ByteLimit.fromBytes(bytes.length.toLong - 1L)))
         result <- PdfZIO.scanStream(ZStream.fromIterable(bytes), limit).either

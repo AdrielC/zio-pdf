@@ -40,7 +40,7 @@ jobs:
       - name: Test the complete build
         run: |
           npm ci
-          sbt -batch ';clean;kyoPdf/testFull;kyoPdfZio/testFull;kyoPdfPipeline/testFull;paperMachine/testFull;root/testFull;scalaJs/testFull;bench/testFull;examples/run'
+          sbt -batch ';clean;kyoPdf/checkScanCaptures;kyoPdf/testFull;kyoPdfZio/testFull;kyoPdfFs2/testFull;kyoPdfPipeline/testFull;paperMachine/testFull;root/testFull;scalaJs/testFull;bench/testFull;examples/run'
           npm --prefix examples-js/frontend ci
           npm --prefix examples-js/frontend run build
       - name: Audit the public package
@@ -76,7 +76,7 @@ jobs:
       - name: Test and consume the Scala Native package
         run: |
           python3 scripts/verify-native-provenance.py
-          sbt --server -J-Xms128m -J-Xmx3g -J-XX:ActiveProcessorCount=4 -Dsbt.server.autostart=false -batch ";kyoPdfNative/testFull;blocksSchemaNative/testFull;kyoPdfPipelineNative/testFull"
+          sbt --server -J-Xms128m -J-Xmx3g -J-XX:ActiveProcessorCount=4 -Dsbt.server.autostart=false -batch ";kyoPdfNative/testFull;kyoPdfFs2Native/testFull;blocksSchemaNative/testFull;kyoPdfPipelineNative/testFull"
           bash scripts/verify-native-consumer.sh
           bash scripts/verify-native-policy-consumer.sh
 
@@ -123,7 +123,7 @@ jobs:
       PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-      CI_RELEASE: ';root/publishSigned;scalaJs/publishSigned;kyoPdf/publishSigned;kyoPdfZio/publishSigned;kyoPdfPipeline/publishSigned;kyoPdfNative/publishSigned;blocksChunkNative/publishSigned;blocksTypeIdNative/publishSigned;blocksMaybeNative/publishSigned;blocksMarkdownNative/publishSigned;blocksSchemaNative/publishSigned;kyoPdfPipelineNative/publishSigned'
+      CI_RELEASE: ';root/publishSigned;scalaJs/publishSigned;kyoPdf/publishSigned;kyoPdfZio/publishSigned;kyoPdfFs2/publishSigned;kyoPdfFs2Native/publishSigned;kyoPdfPipeline/publishSigned;kyoPdfNative/publishSigned;blocksChunkNative/publishSigned;blocksTypeIdNative/publishSigned;blocksMaybeNative/publishSigned;blocksMarkdownNative/publishSigned;blocksSchemaNative/publishSigned;kyoPdfPipelineNative/publishSigned'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -160,14 +160,14 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           for attempt in $(seq 1 30); do
             ready=true
-            for artifact in zio-pdf_3 zio-pdf_sjs1_3 kyo-pdf_3 kyo-pdf-zio_3 kyo-pdf-pipeline_3 kyo-pdf_native0.5_3 kyo-pdf-blocks-chunk_native0.5_3 kyo-pdf-blocks-typeid_native0.5_3 kyo-pdf-blocks-maybe_native0.5_3 kyo-pdf-blocks-markdown_native0.5_3 kyo-pdf-blocks-schema_native0.5_3 kyo-pdf-pipeline_native0.5_3; do
+            for artifact in zio-pdf_3 zio-pdf_sjs1_3 kyo-pdf_3 kyo-pdf-zio_3 kyo-pdf-fs2_3 kyo-pdf-fs2_native0.5_3 kyo-pdf-pipeline_3 kyo-pdf_native0.5_3 kyo-pdf-blocks-chunk_native0.5_3 kyo-pdf-blocks-typeid_native0.5_3 kyo-pdf-blocks-maybe_native0.5_3 kyo-pdf-blocks-markdown_native0.5_3 kyo-pdf-blocks-schema_native0.5_3 kyo-pdf-pipeline_native0.5_3; do
               base="https://repo.maven.apache.org/maven2/io/github/adrielc/${artifact}/${version}/${artifact}-${version}"
               for suffix in .pom .jar -sources.jar -javadoc.jar; do
                 if ! curl -fsS --retry 2 "${base}${suffix}" >/dev/null; then ready=false; fi
               done
             done
             if [[ "$ready" == true ]]; then
-              echo "Verified all twelve ${version} artifacts on Maven Central."
+              echo "Verified all fourteen ${version} artifacts on Maven Central."
               exit 0
             fi
             sleep 20
