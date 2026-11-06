@@ -1,6 +1,5 @@
 package io.github.adrielc.kyopdf
 
-import java.nio.charset.StandardCharsets.ISO_8859_1
 import kyo.*
 
 enum ContentToken derives Schema:
@@ -11,7 +10,7 @@ enum ContentToken derives Schema:
   case Array(items: Vector[ContentToken])
   case Operator(value: String)
 
-/** Bounded PDF content-stream grammar on kyo-parse.
+/** Bounded PDF content-stream grammar over shared byte input.
   *
   * Unsupported escapes, dictionaries, inline images, and excessive nesting
   * fail through `Abort[PdfError]`; the parser never guesses past them.
@@ -27,19 +26,9 @@ object PdfContentParser:
       Abort.fail(PdfError.TooLarge(limits.maxBytes.toLong, bytes.length.toLong))
     else if limits.maxTokens <= 0 || limits.maxDepth < 0 then
       Abort.fail(PdfError.InvalidPdf("Invalid PDF content parser limits"))
-    else
-      val input = new String(bytes, ISO_8859_1)
-      val program = Parse.read[Char, Vector[ContentToken]] { state =>
-        scan(input, limits) match
-          case Left((position, message)) => Result.fail(Chunk(ParseFailure(message, position)))
-          case Right(tokens) => Result.succeed((state.advance(state.remaining.length), tokens))
-      }
-      val result = Parse.runResult(input)(program).eval
-      result.out.toOption match
-        case Some(tokens) => tokens
-        case None => Abort.fail(PdfError.InvalidPdf(result.errors.map(_.message).mkString("; ")))
+    else Abort.get(scan(PdfBytes.borrow(bytes), limits).left.map((at, message) => PdfError.InvalidPdf(s"$at: $message")))
 
-  private def scan(input: String, limits: Limits): Either[(Int, String), Vector[ContentToken]] =
+  private def scan(input: PdfBytes, limits: Limits): Either[(Int, String), Vector[ContentToken]] =
     val output = Vector.newBuilder[ContentToken]
     var count = 0
 
@@ -75,7 +64,7 @@ object PdfContentParser:
                 case _ => ()
               cursor += 1
             if nesting != 0 then Left((at, "Unterminated PDF content string"))
-            else Right((cursor, ContentToken.Literal(input.substring(at + 1, cursor - 1).getBytes(ISO_8859_1).toVector)))
+            else Right((cursor, ContentToken.Literal(input.payload(at + 1, cursor - 1))))
           case '<' =>
             if at + 1 < input.length && input.charAt(at + 1) == '<' then Left((at, "PDF content dictionaries are unsupported"))
             else
@@ -129,7 +118,7 @@ object PdfContentParser:
 
   private def whitespace(char: Char): Boolean = char.isWhitespace || char == 0
   private def delimiter(char: Char): Boolean = whitespace(char) || "/<>[](){}%".contains(char)
-  private def tokenEnd(input: String, start: Int): Int =
+  private def tokenEnd(input: PdfBytes, start: Int): Int =
     var at = start
     while at < input.length && !delimiter(input.charAt(at)) do at += 1
     at

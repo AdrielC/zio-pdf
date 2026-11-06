@@ -53,6 +53,7 @@ The Kyo modules inherit the same public organization and source build version.
 Build local dependencies with `sbt -batch ';kyoPdf/publishLocal;kyoPdfZio/publishLocal'`.
 The release workflow publishes the JVM `kyo-pdf`, `kyo-pdf-zio`, and
 `kyo-pdf-pipeline` modules, the Native Kyo core, and JVM/Scala.js `zio-pdf`.
+Optional `kyo-pdf-fs2` adapters are published for JVM and Native as well.
 The Native Policy/pipeline module and its five public-source Schema support
 modules are also published. Verify upstream source provenance with
 `python3 scripts/verify-native-provenance.py` and link an independent Native
@@ -64,4 +65,4 @@ dependency organization and recompile. The package move changes source and
 binary compatibility for those artifacts; keep this migration explicit in
 release notes.
 
-Tags matching `v*` run the full tests, examples, Gotenberg tool tests, package audits, external-consumer proofs, and signed Maven Central publication before GitHub creates a release. All twelve artifacts must resolve from Maven Central, and both JVM and Native Policy consumers must run from those published dependencies. Publication requires repository secrets named `PGP_SECRET`, `PGP_PASSPHRASE`, `SONATYPE_USERNAME`, and `SONATYPE_PASSWORD`. The workflow fails if any are missing.
+Tags matching `v*` run the full tests, examples, Gotenberg tool tests, package audits, external-consumer proofs, and signed Maven Central publication before GitHub creates a release. All fourteen artifacts must resolve from Maven Central, and both JVM and Native Policy consumers must run from those published dependencies. Publication requires repository secrets named `PGP_SECRET`, `PGP_PASSPHRASE`, `SONATYPE_USERNAME`, and `SONATYPE_PASSWORD`. The workflow fails if any are missing.

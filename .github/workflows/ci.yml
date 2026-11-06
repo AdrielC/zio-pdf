@@ -52,10 +52,10 @@ jobs:
       - name: Run verified test suites
         run: |
           npm ci
-          sbt -batch ';kyoPdf/testFull;kyoPdfZio/testFull;kyoPdfPipeline/testFull;paperMachine/testFull;root/testFull;scalaJs/testFull;bench/testFull'
+          sbt -batch ';kyoPdf/checkScanCaptures;kyoPdf/testFull;kyoPdfZio/testFull;kyoPdfFs2/testFull;kyoPdfPipeline/testFull;paperMachine/testFull;root/testFull;scalaJs/testFull;bench/testFull'
 
       - name: Package API and documentation
-        run: sbt -batch ';kyoPdf/package;kyoPdfZio/package;kyoPdfPipeline/package;root/package;root/packageDoc;scalaJs/package'
+        run: sbt -batch ';kyoPdf/package;kyoPdfZio/package;kyoPdfFs2/package;kyoPdfPipeline/package;root/package;root/packageDoc;scalaJs/package'
 
       - name: Build Scala.js browser demo
         run: |
@@ -103,7 +103,7 @@ jobs:
       - name: Test and consume the Scala Native package
         run: |
           python3 scripts/verify-native-provenance.py
-          sbt --server -J-Xms128m -J-Xmx3g -J-XX:ActiveProcessorCount=4 -Dsbt.server.autostart=false -batch ";kyoPdfNative/testFull;blocksSchemaNative/testFull;kyoPdfPipelineNative/testFull"
+          sbt --server -J-Xms128m -J-Xmx3g -J-XX:ActiveProcessorCount=4 -Dsbt.server.autostart=false -batch ";kyoPdfNative/testFull;kyoPdfFs2Native/testFull;blocksSchemaNative/testFull;kyoPdfPipelineNative/testFull"
           bash scripts/verify-native-consumer.sh
           bash scripts/verify-native-policy-consumer.sh
 

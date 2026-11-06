@@ -1,0 +1,96 @@
+# Shared PDF parser migration
+
+The Kyo structural scanner, content-token parser and primitive/object decoder now
+operate on shared byte views. `PdfDocument.decode`, the Paper Machine admission
+path that calls it, and the ZIO adapters use this implementation.
+
+## Data flow
+
+Array APIs borrow the caller's array for the parse. Do not mutate it during the
+operation. Chunked `PdfRead` and ZIO inputs make one ownership copy into bounded
+blocks. The header probe and random-access parser then share those same blocks.
+No whole-document String or contiguous flattened input is constructed.
+
+The structural producer emits admitted object boundaries to a generic `Scan`
+consumer which constructs typed values. A consumer error stops the producer.
+Forward `/Length` references share a lazy classic-xref numeric-object map.
+Output Strings, primitive values and stream vectors remain owned by the resulting
+document. Expanded object streams remain bounded at 8 MiB; structural measurement
+and typed object-stream decoding still perform separate bounded expansion work.
+
+## Early completion and errors
+
+- `PdfParser.scanUntil(bytes, limit)(predicate)` stops after an admitted object
+  satisfies the predicate. Its report is partial and does not validate the suffix.
+- Full scanning and decoding stop at the first structural, primitive, encryption
+  or retention-policy failure. Limits are checked before passing each object to
+  the typed decoder, rather than after decoding the whole document.
+- Streaming header syntax and input-limit failures stop upstream pulls immediately
+  after the failing transport chunk. Scope exit closes the reader and releases input.
+- Full stream scanning/decoding requires EOF: forward references and incremental
+  xrefs can refer to the end of the document. Body errors are therefore discovered
+  during the EOF parse; this does not claim arbitrary body errors fail during upload.
+- The partial `scanUntil` API currently accepts array input. The regular ZIO
+  `scanStream` and `decodeStream` APIs require EOF for successful completion.
+
+`PdfRead` admits at most the caller's ByteLimit and a supported maximum of 64 MiB,
+in blocks of at most 64 KiB, with at most 65,536 block descriptors. Empty transport
+chunks allocate no storage. This deliberately retains bounded input for random
+access. It is not a constant-memory parser or a disk spool. Account for admitted
+input, bounded metadata and the retained typed document together; configured
+payload-byte accounting does not measure all object/Vector heap overhead.
+
+The immutable `PdfInput` compatibility API also reads its existing chunk vectors
+without flattening them. Empty feeds are ignored, and block metadata is bounded.
+New streaming integrations should use `PdfRead` or `PdfZIO.decodeStream`.
+
+## Local comparison with public v0.6.0
+
+The benchmark script reconstructs its baseline only from the pinned public commit
+`88d0ebb131e91a2978da790e0aea7404388b0420`. It checks decoded document equality
+outside timing and compares the same synchronous public APIs. Chunked ingestion
+compares the public baseline PdfInput against PdfRead using 64 KiB chunks.
+
+Environment: Apple M3 Pro, arm64 macOS; Scala 3.8.4; Temurin JVM 24.0.2 with
+3 GiB maximum heap; Scala Native 0.5.12 debug build, immix GC, no LTO.
+Inputs are synthetic and built before measurement. Each case has ten warmup
+pairs followed by fifteen alternating measurement pairs; values below are medians.
+These qualify this local workload, not general production throughput or a tuned
+release-mode Native build. Native allocation measurements are unavailable.
+
+| Workload | Input bytes | JVM old → new (ms) | JVM speedup | Native old → new (ms) | Native speedup |
+|---|---:|---:|---:|---:|---:|
+| small-scan | 447 | 0.228 → 0.143 | 1.60× | 0.341 → 0.195 | 1.74× |
+| small-decode | 447 | 0.459 → 0.353 | 1.30× | 0.602 → 0.271 | 2.22× |
+| small-chunked-decode | 447 | 0.471 → 0.399 | 1.18× | 0.646 → 0.297 | 2.18× |
+| stream-heavy-scan | 1,049,564 | 10.829 → 0.211 | 51.33× | 140.146 → 0.432 | 324.41× |
+| stream-heavy-decode | 1,049,564 | 15.199 → 2.778 | 5.47× | 168.789 → 48.929 | 3.45× |
+| stream-heavy-chunked-decode | 1,049,564 | 23.329 → 7.156 | 3.26× | 249.061 → 71.129 | 3.50× |
+| object-heavy-scan | 28,576 | 1.489 → 0.738 | 2.02× | 18.020 → 9.756 | 1.85× |
+| object-heavy-decode | 28,576 | 3.374 → 2.646 | 1.28× | 36.885 → 15.175 | 2.43× |
+| object-heavy-chunked-decode | 28,576 | 3.187 → 2.831 | 1.13× | 34.366 → 14.218 | 2.42× |
+| content | 62,000 | 5.118 → 5.139 | 1.00× | 300.636 → 314.987 | 0.95× |
+
+For the 1,049,564-byte stream-heavy document, JVM full-decode allocations fell
+from 67,197,824 to 4,964,312 bytes per operation; chunked-decode allocations fell
+from 73,140,984 to 6,042,416 bytes. These are total thread allocations, not peak
+live memory. Token-only content parsing was effectively flat on the JVM and about
+4.8% slower in this Native debug run. The migration is not faster on every workload.
+
+[Raw measurements](benchmarks/pdf-parser-migration-2026-11-05.json) include allocation
+figures for every JVM case.
+
+Reproduce:
+
+```sh
+bash scripts/benchmark-pdf-parsers.sh jvm
+bash scripts/benchmark-pdf-parsers.sh native
+```
+
+The benchmark creates temporary baseline sources, never imports another checkout,
+and removes them on exit. Run correctness suites separately with:
+
+```sh
+sbt ';kyoPdf/testFull;kyoPdfZio/testFull;kyoPdfPipeline/testFull;paperMachine/testFull'
+sbt ';kyoPdfNative/testFull;kyoPdfPipelineNative/testFull'
+```

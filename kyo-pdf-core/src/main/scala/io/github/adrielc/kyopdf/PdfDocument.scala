@@ -57,24 +57,33 @@ private object PdfTrailer:
 
 /** Immutable bounded input accumulator for chunked Kyo ingestion.
   *
-  * Chunks remain separate while input arrives. `finish` performs the only
-  * contiguous allocation required by the random-access PDF decoder.
+  * Chunks remain separate while input arrives and during random-access parsing.
+  * New streaming adapters use PdfRead to avoid per-byte vector storage.
   */
 final case class PdfInput private (limit: ByteLimit, chunks: Vector[Vector[Byte]], size: Long) derives Schema:
   def feed(bytes: Array[Byte]): PdfInput < Abort[PdfError] =
-    if bytes.length.toLong > limit.toLong - size then Abort.fail(PdfError.TooLarge(limit.toLong, size + bytes.length))
+    if bytes.isEmpty then this
+    else if bytes.length.toLong > limit.toLong - size then Abort.fail(PdfError.TooLarge(limit.toLong, size + bytes.length))
+    else if chunks.length >= PdfRead.MaxInputBlocks then Abort.fail(PdfError.RetentionExceeded("PDF input block limit exceeded"))
     else copy(chunks = chunks :+ bytes.toVector, size = size + bytes.length)
 
   def finish(limits: RetentionLimits = RetentionLimits()): PdfDocument < Abort[PdfError] =
     if size > Int.MaxValue then Abort.fail(PdfError.TooLarge(Int.MaxValue.toLong, size))
     else
-      val output = new Array[Byte](size.toInt)
-      var offset = 0
-      chunks.foreach { chunk =>
-        chunk.copyToArray(output, offset)
-        offset += chunk.length
+      // Immutable compatibility accumulator: parse the existing chunks directly.
+      val starts = chunks.scanLeft(0)((offset, chunk) => offset + chunk.length).toArray
+      var cached = 0
+      val source = PdfBytes.indexed(size.toInt) { index =>
+        if index < starts(cached) || index >= starts(cached + 1) then
+          var low = 0
+          var high = chunks.length
+          while low + 1 < high do
+            val middle = (low + high) >>> 1
+            if starts(middle) <= index then low = middle else high = middle
+          cached = low
+        chunks(cached)(index - starts(cached))
       }
-      PdfDocumentParser.decode(output, limit, limits)
+      Abort.get(PdfDocumentParser.decodeBytes(source, limits))
 
 object PdfInput:
   def empty(limit: ByteLimit): PdfInput = PdfInput(limit, Vector.empty, 0L)

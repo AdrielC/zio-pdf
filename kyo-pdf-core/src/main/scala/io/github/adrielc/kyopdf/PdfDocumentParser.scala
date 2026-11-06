@@ -1,7 +1,6 @@
 package io.github.adrielc.kyopdf
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
-import java.nio.charset.StandardCharsets.ISO_8859_1
 import java.util.zip.InflaterInputStream
 import kyo.*
 import scala.collection.mutable
@@ -20,43 +19,43 @@ object PdfDocumentParser:
   private final case class Parsed(objects: Vector[PdfObject], trailer: Option[Dict], end: Int)
 
   def decode(bytes: scala.Array[Byte], limit: ByteLimit, limits: RetentionLimits = RetentionLimits()): PdfDocument < Abort[PdfError] =
-    PdfParser.scan(bytes, limit).map { report =>
-      PdfParser.validate(report, limits).map { _ =>
-        decodeChecked(bytes, report.version) match
-          case Left((at, message)) => Abort.fail(PdfError.InvalidPdf(s"$at: $message"))
-          case Right(document) if document.objects.length.toLong != report.facts.objects =>
-            Abort.fail(PdfError.InvalidPdf(s"Decoded ${document.objects.length} objects but structural scan admitted ${report.facts.objects}"))
-          case Right(document) => document
-      }
-    }
+    if bytes.length.toLong > limit.toLong then Abort.fail(PdfError.TooLarge(limit.toLong, bytes.length.toLong))
+    else Abort.get(decodeBytes(PdfBytes.borrow(bytes), limits))
 
-  private def decodeChecked(bytes: scala.Array[Byte], version: String): Either[(Int, String), PdfDocument] =
-    val text = new String(bytes, ISO_8859_1)
-    val indirect = classicNumericObjects(text)
+  private[kyopdf] def decodeBytes(text: PdfBytes, limits: RetentionLimits): Either[PdfError, PdfDocument] =
     val objects = Vector.newBuilder[PdfObject]
     var trailer: Option[Dict] = None
-    var cursor = 0
-    while cursor < text.length do
-      cursor = skip(text, cursor)
-      if cursor < text.length then
-        header(text, cursor) match
-          case Some(found) =>
-            parseObject(text, found, indirect) match
-              case Left(error) => return Left(error)
-              case Right(parsed) =>
-                objects ++= parsed.objects
-                trailer = parsed.trailer.map(mergeTrailer(trailer, _)).orElse(trailer)
-                cursor = parsed.end
-          case None if keywordAt(text, cursor, "trailer") =>
-            ValueReader(text, cursor + 7, text.length).read() match
-              case Right((value: Dict, next)) => trailer = Some(mergeTrailer(trailer, value)); cursor = next
-              case Right((_, _)) => return Left((cursor, "PDF trailer is not a dictionary"))
-              case Left(error) => return Left(error)
-          case None => cursor += 1
-    val retained = objects.result()
-    trailer match
-      case Some(value) => Right(PdfDocument(version, retained, value))
-      case None => Left((0, "PDF has no trailer or xref-stream dictionary"))
+    var failure: Option[PdfError] = None
+    // The structural scanner publishes each admitted boundary once. The typed
+    // decoder observes that same source, and a failed consumer stops the producer.
+    val decoder = io.github.adrielc.scan.Scan.stateless[PdfParser.Event, Unit] { (event, _) =>
+      val parsed = event match
+        case PdfParser.Event.Object(number, generation, bodyStart, end, indirect) =>
+          parseObject(text, Header(ObjectRef(number, generation), bodyStart), indirect()).flatMap { value =>
+            if value.end != end then Left((value.end, "PDF decoder disagrees with the admitted object boundary"))
+            else
+              objects ++= value.objects
+              trailer = value.trailer.map(mergeTrailer(trailer, _)).orElse(trailer)
+              Right(())
+          }
+        case PdfParser.Event.Trailer(start) =>
+          ValueReader(text, start, text.length).read().flatMap {
+            case (value: Dict, _) => trailer = Some(mergeTrailer(trailer, value)); Right(())
+            case _ => Left((start, "PDF trailer is not a dictionary"))
+          }
+      failure = parsed.left.toOption.map((at, message) => PdfError.InvalidPdf(s"$at: $message"))
+    }.compile().toOption.get.open(_ => ())
+    val scanned = PdfParser.scanBytes(text, event => {
+      decoder.push(event).left.map(error => PdfError.InvalidPdf(error.toString)).flatMap(_ => failure.toLeft(()))
+    }, Some(limits))
+    decoder.close()
+    scanned.flatMap { report =>
+      val retained = objects.result()
+      if retained.length.toLong != report.facts.objects then
+        Left(PdfError.InvalidPdf(s"Decoded ${retained.length} objects but structural scan admitted ${report.facts.objects}"))
+      else trailer.toRight(PdfError.InvalidPdf("PDF has no trailer or xref-stream dictionary"))
+        .map(value => PdfDocument(report.version, retained, value))
+    }
 
   /** Incremental and linearized PDFs may omit unchanged entries such as
     * `/Root` from the newest trailer. Preserve earlier fields while letting
@@ -65,7 +64,7 @@ object PdfDocumentParser:
   private def mergeTrailer(previous: Option[Dict], next: Dict): Dict =
     previous.fold(next)(value => Dict(value.fields ++ next.fields))
 
-  private def parseObject(text: String, header: Header, indirect: Map[ObjectRef, Long]): Either[(Int, String), Parsed] =
+  private def parseObject(text: PdfBytes, header: Header, indirect: => Map[ObjectRef, Long]): Either[(Int, String), Parsed] =
     ValueReader(text, header.bodyStart, text.length).read().flatMap { (value, afterValue) =>
       readStream(text, value, skip(text, afterValue), indirect).flatMap { (raw, afterStream) =>
         var cursor = skip(text, afterStream)
@@ -82,10 +81,10 @@ object PdfDocumentParser:
     }
 
   private def readStream(
-    text: String,
+    text: PdfBytes,
     value: PdfValue,
     cursor: Int,
-    indirect: Map[ObjectRef, Long]
+    indirect: => Map[ObjectRef, Long]
   ): Either[(Int, String), (Option[Vector[Byte]], Int)] =
     if !keywordAt(text, cursor, "stream") then Right((None, cursor))
     else value match
@@ -110,7 +109,7 @@ object PdfDocumentParser:
                 // `marker` is exact because it is derived from /Length. The
                 // preceding byte is stream payload and may be non-delimiting.
                 if !keywordStartsAt(text, marker, "endstream") then Left((marker, "PDF stream length does not land on endstream"))
-                else Right((Some(text.substring(valueStart, end.toInt).getBytes(ISO_8859_1).toVector), marker + 9))
+                else Right((Some(text.payload(valueStart, end.toInt)), marker + 9))
             }
         }
       case _ => Left((cursor, "PDF stream object does not contain a dictionary"))
@@ -128,7 +127,7 @@ object PdfDocumentParser:
         val first = firstLong.toInt
         if first > bytes.length then Left((at, "PDF object-stream /First exceeds expanded bytes"))
         else
-          val input = new String(bytes, ISO_8859_1)
+          val input = PdfBytes.borrow(bytes)
           val headerTokens = input.substring(0, first).trim.split("\\s+").toVector.filter(_.nonEmpty)
           if headerTokens.length < count * 2 then Left((at, "PDF object-stream header has fewer than /N entries"))
           else
@@ -188,7 +187,7 @@ object PdfDocumentParser:
   private def typeName(dict: Dict): Option[String] = dict.get("Type").collect { case Name(value) => value }
   private def integer(value: Option[PdfValue]): Option[Long] = value.collect { case Number(number) if number.isValidLong => number.toLong }
 
-  private final class ValueReader(input: String, initial: Int, end: Int):
+  private final class ValueReader(input: PdfBytes, initial: Int, end: Int):
     def read(): Either[(Int, String), (PdfValue, Int)] = value(skip(input, initial), 0)
 
     private def value(at: Int, depth: Int): Either[(Int, String), (PdfValue, Int)] =
@@ -311,60 +310,7 @@ object PdfDocumentParser:
                 Right((Ref(ObjectRef(number.toLong, input.substring(secondStart, secondEnd).toInt)), marker + 1))
               else Right((Number(number), firstEnd))
 
-  private def classicNumericObjects(text: String): Map[ObjectRef, Long] =
-    classicXrefOffsets(text).flatMap { (ref, offset) =>
-      header(text, offset).filter(_.index == ref).flatMap { found =>
-        val end = findKeyword(text, found.bodyStart, "endobj").getOrElse(found.bodyStart)
-        text.substring(found.bodyStart, end).trim.toLongOption.map(ref -> _)
-      }
-    }
-
-  private def classicXrefOffsets(text: String): Map[ObjectRef, Int] =
-    val marker = text.lastIndexOf("startxref")
-    if marker < 0 then Map.empty
-    else
-      val offsetStart = skip(text, marker + 9)
-      val offsetEnd = digitsEnd(text, offsetStart)
-      text.substring(offsetStart, offsetEnd).toIntOption match
-        case Some(xref) if xref >= 0 && xref < text.length && keywordAt(text, xref, "xref") =>
-          val output = Map.newBuilder[ObjectRef, Int]
-          var cursor = skip(text, xref + 4)
-          var done = false
-          while cursor < text.length && !done do
-            if keywordAt(text, cursor, "trailer") then done = true
-            else
-              val firstEnd = digitsEnd(text, cursor)
-              val countStart = skip(text, firstEnd)
-              val countEnd = digitsEnd(text, countStart)
-              (text.substring(cursor, firstEnd).toLongOption, text.substring(countStart, countEnd).toIntOption) match
-                case (Some(first), Some(count)) if count >= 0 =>
-                  cursor = nextLine(text, countEnd)
-                  var index = 0
-                  while index < count && cursor < text.length do
-                    val lineEnd0 = text.indexWhere(char => char == '\r' || char == '\n', cursor)
-                    val lineEnd = if lineEnd0 < 0 then text.length else lineEnd0
-                    val columns = text.substring(cursor, lineEnd).trim.split("\\s+")
-                    if columns.length >= 3 && columns(2) == "n" then
-                      for offset <- columns(0).toIntOption; generation <- columns(1).toIntOption
-                      do output += ObjectRef(first + index, generation) -> offset
-                    cursor = nextLine(text, lineEnd); index += 1
-                  cursor = skip(text, cursor)
-                case _ => done = true
-          output.result()
-        case _ => Map.empty
-
-  private def header(text: String, at: Int): Option[Header] =
-    val firstEnd = digitsEnd(text, at)
-    val generationStart = skip(text, firstEnd)
-    val generationEnd = digitsEnd(text, generationStart)
-    val marker = skip(text, generationEnd)
-    for
-      number <- text.substring(at, firstEnd).toLongOption
-      generation <- text.substring(generationStart, generationEnd).toIntOption
-      if firstEnd > at && generationEnd > generationStart && keywordAt(text, marker, "obj")
-    yield Header(ObjectRef(number, generation), marker + 3)
-
-  private def skip(text: String, start: Int): Int =
+  private def skip(text: PdfBytes, start: Int): Int =
     var at = start
     var again = true
     while at < text.length && again do
@@ -374,35 +320,17 @@ object PdfDocumentParser:
       else again = false
     at
 
-  private def nextLine(text: String, from: Int): Int =
-    var at = from
-    while at < text.length && text.charAt(at) != '\r' && text.charAt(at) != '\n' do at += 1
-    if at < text.length && text.charAt(at) == '\r' then at += 1
-    if at < text.length && text.charAt(at) == '\n' then at += 1
-    at
-
-  private def findKeyword(text: String, from: Int, keyword: String): Option[Int] =
-    var at = text.indexOf(keyword, from)
-    while at >= 0 do
-      if keywordAt(text, at, keyword) then return Some(at)
-      at = text.indexOf(keyword, at + 1)
-    None
-
-  private def keywordAt(text: String, at: Int, keyword: String): Boolean =
+  private def keywordAt(text: PdfBytes, at: Int, keyword: String): Boolean =
     at >= 0 && text.startsWith(keyword, at) && (at == 0 || delimiter(text.charAt(at - 1))) &&
       (at + keyword.length >= text.length || delimiter(text.charAt(at + keyword.length)))
 
-  private def keywordStartsAt(text: String, at: Int, keyword: String): Boolean =
+  private def keywordStartsAt(text: PdfBytes, at: Int, keyword: String): Boolean =
     at >= 0 && text.startsWith(keyword, at) &&
       (at + keyword.length >= text.length || delimiter(text.charAt(at + keyword.length)))
 
   private def white(char: Char): Boolean = char.isWhitespace || char == 0
   private def delimiter(char: Char): Boolean = white(char) || "()<>[]{}/%".contains(char)
-  private def digitsEnd(text: String, start: Int): Int =
-    var at = start
-    while at < text.length && text.charAt(at).isDigit do at += 1
-    at
-  private def tokenEnd(text: String, start: Int, end: Int): Int =
+  private def tokenEnd(text: PdfBytes, start: Int, end: Int): Int =
     var at = start
     while at < end && !delimiter(text.charAt(at)) do at += 1
     at

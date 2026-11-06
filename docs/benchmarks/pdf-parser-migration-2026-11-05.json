@@ -1,0 +1,176 @@
+{
+  "date": "2026-11-05",
+  "hardware": "Apple M3 Pro, arm64 macOS",
+  "scala": "3.8.4",
+  "jvm": "Eclipse Temurin 24.0.2, 3 GiB maximum heap, 4 active processors",
+  "native": "Scala Native 0.5.12, debug, immix GC, no LTO",
+  "baselinePublicCommit": "88d0ebb131e91a2978da790e0aea7404388b0420",
+  "method": "10 warmup pairs, 15 alternating measurement pairs, median; synthetic inputs constructed before timing; synchronous public API parse and full result construction included",
+  "allocation": "JVM current-thread allocated bytes; -1 means unavailable; not retained heap or RSS",
+  "results": {
+    "jvm": [
+      {
+        "case": "small-scan",
+        "bytes": 447,
+        "oldNs": 227542,
+        "newNs": 142583,
+        "oldAllocated": 59352,
+        "newAllocated": 27944
+      },
+      {
+        "case": "small-decode",
+        "bytes": 447,
+        "oldNs": 459084,
+        "newNs": 352791,
+        "oldAllocated": 102944,
+        "newAllocated": 51624
+      },
+      {
+        "case": "small-chunked-decode",
+        "bytes": 447,
+        "oldNs": 470833,
+        "newNs": 399292,
+        "oldAllocated": 106160,
+        "newAllocated": 66320
+      },
+      {
+        "case": "stream-heavy-scan",
+        "bytes": 1049564,
+        "oldNs": 10829375,
+        "newNs": 210958,
+        "oldAllocated": 57012928,
+        "newAllocated": 60056
+      },
+      {
+        "case": "stream-heavy-decode",
+        "bytes": 1049564,
+        "oldNs": 15199042,
+        "newNs": 2778417,
+        "oldAllocated": 67197824,
+        "newAllocated": 4964312
+      },
+      {
+        "case": "stream-heavy-chunked-decode",
+        "bytes": 1049564,
+        "oldNs": 23329500,
+        "newNs": 7155708,
+        "oldAllocated": 73140984,
+        "newAllocated": 6042416
+      },
+      {
+        "case": "object-heavy-scan",
+        "bytes": 28576,
+        "oldNs": 1489417,
+        "newNs": 737625,
+        "oldAllocated": 2916584,
+        "newAllocated": 991688
+      },
+      {
+        "case": "object-heavy-decode",
+        "bytes": 28576,
+        "oldNs": 3374375,
+        "newNs": 2646417,
+        "oldAllocated": 5017192,
+        "newAllocated": 1947968
+      },
+      {
+        "case": "object-heavy-chunked-decode",
+        "bytes": 28576,
+        "oldNs": 3186583,
+        "newNs": 2831417,
+        "oldAllocated": 5145568,
+        "newAllocated": 2260640
+      },
+      {
+        "case": "content",
+        "bytes": 62000,
+        "oldNs": 5117708,
+        "newNs": 5138666,
+        "oldAllocated": 36832016,
+        "newAllocated": 36945488
+      }
+    ],
+    "native": [
+      {
+        "case": "small-scan",
+        "bytes": 447,
+        "oldNs": 341000,
+        "newNs": 195458,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "small-decode",
+        "bytes": 447,
+        "oldNs": 602250,
+        "newNs": 271208,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "small-chunked-decode",
+        "bytes": 447,
+        "oldNs": 646375,
+        "newNs": 297125,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "stream-heavy-scan",
+        "bytes": 1049564,
+        "oldNs": 140146292,
+        "newNs": 432000,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "stream-heavy-decode",
+        "bytes": 1049564,
+        "oldNs": 168788667,
+        "newNs": 48929125,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "stream-heavy-chunked-decode",
+        "bytes": 1049564,
+        "oldNs": 249061000,
+        "newNs": 71129042,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "object-heavy-scan",
+        "bytes": 28576,
+        "oldNs": 18020209,
+        "newNs": 9755542,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "object-heavy-decode",
+        "bytes": 28576,
+        "oldNs": 36884500,
+        "newNs": 15174791,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "object-heavy-chunked-decode",
+        "bytes": 28576,
+        "oldNs": 34365834,
+        "newNs": 14217791,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      },
+      {
+        "case": "content",
+        "bytes": 62000,
+        "oldNs": 300636209,
+        "newNs": 314987042,
+        "oldAllocated": -1,
+        "newAllocated": -1
+      }
+    ]
+  }
+}

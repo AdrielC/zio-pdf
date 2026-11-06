@@ -1,0 +1,9 @@
+import scala.language.experimental.captureChecking
+import io.github.adrielc.bytescan.SharedScan.View
+import io.github.adrielc.bytescan.capture.ScopedView
+
+object EscapeVariable:
+  def escape(view: View): Unit =
+    var saved: Option[ScopedView.Borrowed^] = None
+    ScopedView.use(view)(borrow => saved = Some(borrow))
+    saved.foreach(_.read(0))

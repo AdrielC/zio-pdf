@@ -14,6 +14,7 @@ object PolicyConsumerChecks:
       case kyo.Result.Panic(error) => throw error
 
   def run(): (PdfDocument, Vector[Byte]) =
+    ScanConsumerChecks.run()
     val evidenceCodec = BlocksSchema.derived[Evidence].derive(JsonCodecDeriver)
     val evidence = Evidence("Synthetic report", 1)
     assert(evidenceCodec.decode(evidenceCodec.encode(evidence)) == Right(evidence))

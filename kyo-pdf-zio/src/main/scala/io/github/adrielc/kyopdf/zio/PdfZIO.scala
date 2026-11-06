@@ -1,7 +1,7 @@
 package io.github.adrielc.kyopdf.zio
 
 import kyo.{Abort, Async, ZIOs, <}
-import io.github.adrielc.kyopdf.{ByteLimit, ContentToken, ObjectRef, PdfContentParser, PdfDocument, PdfError, PdfInput, PdfObject, PdfPages, PdfParser, PdfWriter, RetentionLimits, ScanReport}
+import io.github.adrielc.kyopdf.{ByteLimit, ContentToken, ObjectRef, PdfContentParser, PdfDocument, PdfError, PdfRead, PdfObject, PdfPages, PdfParser, PdfWriter, RetentionLimits, ScanReport}
 import _root_.zio.{IO, ZIO}
 import _root_.zio.stream.ZStream
 
@@ -23,18 +23,20 @@ object PdfZIO:
   def decode(bytes: Array[Byte], limit: ByteLimit, limits: RetentionLimits = RetentionLimits()): IO[PdfError, PdfDocument] =
     run(Async.defer(PdfDocument.decode(bytes, limit, limits)))
 
-  /** Incrementally consumes ZStream chunks into the bounded Kyo input state.
-    * The adapter never invokes `runCollect`; only the final random-access PDF
-    * representation is materialized by `PdfInput.finish`.
+  /** Shared owned blocks serve header inspection and document decoding. Header
+    * and admission failures stop upstream pulls, and scope exit releases input.
     */
   def decodeStream[R, E](
     source: ZStream[R, E, Byte],
     limit: ByteLimit,
     limits: RetentionLimits = RetentionLimits()
   ): ZIO[R, E | PdfError, PdfDocument] =
-    source.chunks.runFoldZIO(PdfInput.empty(limit)) { (input, bytes) =>
-      run(Async.defer(input.feed(bytes.toArray)))
-    }.flatMap(input => run(Async.defer(input.finish(limits))))
+    ZIO.scoped {
+      ZIO.acquireRelease(ZIO.succeed(PdfRead.open(limit)))(reader => ZIO.succeed(reader.close())).flatMap { reader =>
+        source.chunks.runForeach(bytes => ZIO.fromEither(reader.offer(bytes.length)(bytes.apply)))
+          .flatMap(_ => ZIO.fromEither(reader.decode(limits)))
+      }
+    }
 
   def pageRefs(document: PdfDocument): IO[PdfError, Vector[ObjectRef]] =
     run(Async.defer(PdfPages.pageRefs(document)))
@@ -65,16 +67,13 @@ object PdfZIO:
   def parseContent(bytes: Array[Byte], limits: PdfContentParser.Limits = PdfContentParser.Limits()): IO[PdfError, Vector[ContentToken]] =
     run(Async.defer(PdfContentParser.parse(bytes, limits)))
 
-  /** Bounded compatibility adapter for an existing ZStream application.
-    *
-    * The Kyo core owns an `Array[Byte]`, so this adapter collects no more than
-    * the configured limit plus one byte. A future Kyo Stream parser can replace
-    * this adapter without changing the ZIO-facing result type.
+  /** Incremental bounded input with an early header probe. It retains admitted
+    * chunks for xrefs, then scans them without runCollect or a flattening copy.
     */
   def scanStream[R, E](source: ZStream[R, E, Byte], limit: ByteLimit): ZIO[R, E | PdfError, ScanReport] =
-    val maximum = limit.toLong
-    val take = if maximum == Long.MaxValue then Long.MaxValue else maximum + 1L
-    source.take(take).runCollect.flatMap { bytes =>
-      if bytes.length.toLong > maximum then ZIO.fail(PdfError.TooLarge(maximum, bytes.length.toLong))
-      else scan(bytes.toArray, limit)
+    ZIO.scoped {
+      ZIO.acquireRelease(ZIO.succeed(PdfRead.open(limit)))(reader => ZIO.succeed(reader.close())).flatMap { reader =>
+        source.chunks.runForeach(bytes => ZIO.fromEither(reader.offer(bytes.length)(bytes.apply)))
+          .flatMap(_ => ZIO.fromEither(reader.scan()))
+      }
     }
